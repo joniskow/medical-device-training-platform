@@ -11,6 +11,7 @@ coverage/
 *.tgz
 *.zip
 architecture-azure-solution.png
+architecture-azure-solution-detailed.png
 output/
 worker-deploy-staging-20261022/
 worker-upload-20261022/
