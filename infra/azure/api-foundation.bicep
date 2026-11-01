@@ -57,6 +57,21 @@ param maxReplicas int = 1
 @description('Reconstruction modes enabled for the deployed POC.')
 param reconstructionModes string = 'multi-view'
 
+@description('Enable the managed browser authentication flow.')
+param browserAuthEnabled bool = false
+
+@description('SPA client application ID used by the managed browser authentication flow.')
+param browserAuthClientId string = ''
+
+@description('Microsoft Entra authority URL used by the managed browser authentication flow.')
+param browserAuthAuthority string = ''
+
+@description('Explicit API scope requested by the browser client.')
+param browserAuthApiScope string = ''
+
+@description('Canonical HTTPS origin used for browser authentication redirects.')
+param applicationOrigin string = ''
+
 var keyVaultUri = 'https://${keyVaultName}${environment().suffixes.keyvaultDns}'
 
 resource managedEnvironment 'Microsoft.App/managedEnvironments@2024-03-01' existing = {
@@ -192,6 +207,11 @@ resource api 'Microsoft.App/containerApps@2024-03-01' = {
             { name: 'ENTRA_ORGANIZATION_CLAIM', value: entraOrganizationClaim }
             { name: 'ENTRA_ROLES_CLAIM', value: entraRolesClaim }
             { name: 'ALLOWED_ORIGINS', value: allowedOrigins }
+            { name: 'BROWSER_AUTH_ENABLED', value: string(browserAuthEnabled) }
+            { name: 'BROWSER_AUTH_CLIENT_ID', value: browserAuthClientId }
+            { name: 'BROWSER_AUTH_AUTHORITY', value: browserAuthAuthority }
+            { name: 'BROWSER_AUTH_API_SCOPE', value: browserAuthApiScope }
+            { name: 'APPLICATION_ORIGIN', value: applicationOrigin }
             { name: 'WEB_ROOT', value: '/app/web' }
             { name: 'STORAGE_ACCOUNT_URL', value: 'https://${storageAccountName}.blob.${environment().suffixes.storage}' }
             { name: 'STORAGE_CONTAINER_NAME', value: 'source-assets' }
