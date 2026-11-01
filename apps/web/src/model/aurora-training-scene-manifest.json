@@ -1,0 +1,34 @@
+{
+  "schemaVersion": "training-scene.v1",
+  "sceneId": "scene:aurora:priming-overlay:v1",
+  "video": {
+    "assetVersionId": "assetv:fixture:aic-priming-demo:v1",
+    "sourceHash": "e2bab1ac38ec047021110fedeec1928827f30a63cdbdb1bb1afbee86e7874b76",
+    "contentType": "video/mp4",
+    "width": 1920,
+    "height": 1080,
+    "frameRate": 30,
+    "durationSeconds": 6
+  },
+  "model": {
+    "modelVersionId": "modelv_aurora_training_photogrammetry_demo_v1",
+    "sourceHash": "e7ede3f020c890da59697873e37a334d2cb5165859a1ceef979011461e6198e2",
+    "translationMeters": [0, 0, 0],
+    "rotationRadians": [0, 0, 0],
+    "scale": 1
+  },
+  "camera": {
+    "projection": "perspective",
+    "focalLengthPixels": 1277.2201068211198,
+    "principalPointPixels": [960, 540],
+    "distortion": {
+      "radial": [0, 0, 0],
+      "tangential": [0, 0]
+    }
+  },
+  "render": {
+    "opacity": 1,
+    "receiveShadows": true,
+    "castShadows": true
+  }
+}

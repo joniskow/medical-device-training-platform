@@ -1,0 +1,105 @@
+{
+  "schemaVersion": "model-manifest.v1",
+  "format": "glb",
+  "modelVersionId": "modelv_aurora_training_photogrammetry_demo_v1",
+  "releaseBindingId": "releasebind_aurora_training_photogrammetry_demo_v1",
+  "sourceHash": "e7ede3f020c890da59697873e37a334d2cb5165859a1ceef979011461e6198e2",
+  "unitSystem": "meter",
+  "scaleMeters": 1,
+  "upAxis": "Y",
+  "handedness": "right",
+  "origin": "bounding-box-center",
+  "forwardAxis": "-Z",
+  "normalizationStatus": "CANONICAL",
+  "sceneNodeCount": 56,
+  "meshCount": 52,
+  "materialCount": 10,
+  "textureCount": 0,
+  "triangleCount": 1228,
+  "materials": [
+    {
+      "materialId": "material-0",
+      "name": "Material 1"
+    },
+    {
+      "materialId": "material-1",
+      "name": "Material 2"
+    },
+    {
+      "materialId": "material-2",
+      "name": "Material 3"
+    },
+    {
+      "materialId": "material-3",
+      "name": "Material 4"
+    },
+    {
+      "materialId": "material-4",
+      "name": "Material 5"
+    },
+    {
+      "materialId": "material-5",
+      "name": "Material 6"
+    },
+    {
+      "materialId": "material-6",
+      "name": "Material 7"
+    },
+    {
+      "materialId": "material-7",
+      "name": "Material 8"
+    },
+    {
+      "materialId": "material-8",
+      "name": "Material 9"
+    },
+    {
+      "materialId": "material-9",
+      "name": "Material 10"
+    }
+  ],
+  "textures": [],
+  "components": [
+    {
+      "componentId": "AIC-C01",
+      "nodePath": "Aurora Training Controller/Control Panel",
+      "displayName": "Control Panel",
+      "aliases": [],
+      "interactionCapabilities": [
+        "select"
+      ]
+    },
+    {
+      "componentId": "AIC-C03",
+      "nodePath": "Aurora Training Controller/Line Sensor",
+      "displayName": "Line Sensor",
+      "aliases": [],
+      "interactionCapabilities": [
+        "select"
+      ]
+    },
+    {
+      "componentId": "AIC-C02",
+      "nodePath": "Aurora Training Controller/Safety Cover",
+      "displayName": "Safety Cover",
+      "aliases": [],
+      "interactionCapabilities": [
+        "select",
+        "rotate"
+      ],
+      "permittedTransforms": {
+        "rotationY": {
+          "min": 0,
+          "max": 1.5707963267948966,
+          "step": 0.2617993877991494,
+          "snap": 0.2617993877991494
+        }
+      }
+    }
+  ],
+  "performanceBudget": {
+    "minimumFps": 30,
+    "interactiveWithinMs": 5000,
+    "maxMemoryMb": 128
+  }
+}

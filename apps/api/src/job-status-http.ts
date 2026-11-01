@@ -142,7 +142,7 @@ function writeHtml(response: ServerResponse, statusCode: number, body: string) {
   response.statusCode = statusCode;
   response.setHeader("Content-Type", "text/html; charset=utf-8");
   setSecurityHeaders(response);
-  response.setHeader("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'unsafe-inline'; img-src 'self' blob: https://*.blob.core.windows.net; media-src 'self' blob: https://*.blob.core.windows.net; connect-src 'self' https://login.microsoftonline.com https://*.blob.core.windows.net; frame-ancestors 'none'");
+  response.setHeader("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' blob: https://*.blob.core.windows.net; media-src 'self' blob: https://*.blob.core.windows.net; connect-src 'self' https://login.microsoftonline.com https://*.blob.core.windows.net; frame-ancestors 'none'");
   response.end(body);
 }
 
@@ -181,6 +181,14 @@ const staticFiles: Record<string, { file: string; contentType: string; binary?: 
   "/verify.js": {file:"verify.js",contentType:"text/javascript; charset=utf-8"},
   "/author/jobs": { file: "index.html", contentType: "text/html; charset=utf-8" },
   "/demo": { file: "demo.html", contentType: "text/html; charset=utf-8" },
+  "/demo.css": { file: "demo.css", contentType: "text/css; charset=utf-8" },
+  "/demo.js": { file: "demo.js", contentType: "text/javascript; charset=utf-8" },
+  "/model-manifest.json": { file: "model-manifest.json", contentType: "application/json; charset=utf-8" },
+  "/model/aurora-infusion-controller.glb": { file: "model/aurora-infusion-controller.glb", contentType: "model/gltf-binary", binary: true },
+  "/model/aurora-training-manifest.json": { file: "model/aurora-training-manifest.json", contentType: "application/json; charset=utf-8" },
+  "/model/aurora-training.glb": { file: "model/aurora-training.glb", contentType: "model/gltf-binary", binary: true },
+  "/demo-assets/nxstage-system-one-preview.png": { file: "demo-assets/nxstage-system-one-preview.png", contentType: "image/png", binary: true },
+  ...Object.fromEntries(Array.from({ length: 8 }, (_, index) => { const id = String(index).padStart(3, "0"); return [`/demo-assets/view-${id}.png`, { file: `demo-assets/view-${id}.png`, contentType: "image/png", binary: true }]; })),
   "/author/assignments": { file: "assignments.html", contentType: "text/html; charset=utf-8" },
   "/author/assignments.js": { file: "assignments.js", contentType: "text/javascript; charset=utf-8" },
   "/author/auth-session.js": { file: "auth-session.js", contentType: "text/javascript; charset=utf-8" },
@@ -497,11 +505,11 @@ export function createJobStatusHttpServer(options: JobStatusHttpOptions): Server
           response.statusCode = 200;
           response.setHeader("Content-Type", staticFile.contentType);
           setSecurityHeaders(response);
-          response.setHeader("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'unsafe-inline'; img-src 'self' blob: https://*.blob.core.windows.net; media-src 'self' blob: https://*.blob.core.windows.net; connect-src 'self' https://login.microsoftonline.com https://*.blob.core.windows.net; frame-ancestors 'none'");
+          response.setHeader("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' blob: https://*.blob.core.windows.net; media-src 'self' blob: https://*.blob.core.windows.net; connect-src 'self' https://login.microsoftonline.com https://*.blob.core.windows.net; frame-ancestors 'none'");
           if (options.browserAuthConfig) {
             const authorityOrigin = new URL(options.browserAuthConfig.authority).origin;
             const trustedOrigins=options.browserAuthConfig.knownAuthorities.map(host=>`https://${host}`).join(' ');
-            response.setHeader('Content-Security-Policy', `default-src 'self'; script-src 'self'; style-src 'unsafe-inline'; img-src 'self' blob: https://*.blob.core.windows.net; media-src 'self' blob: https://*.blob.core.windows.net; connect-src 'self' ${authorityOrigin} ${trustedOrigins} https://*.blob.core.windows.net; frame-src 'self' ${authorityOrigin} ${trustedOrigins}; frame-ancestors ${url.pathname==='/auth/redirect'?"'self'":"'none'"}`);
+            response.setHeader('Content-Security-Policy', `default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' blob: https://*.blob.core.windows.net; media-src 'self' blob: https://*.blob.core.windows.net; connect-src 'self' ${authorityOrigin} ${trustedOrigins} https://*.blob.core.windows.net; frame-src 'self' ${authorityOrigin} ${trustedOrigins}; frame-ancestors ${url.pathname==='/auth/redirect'?"'self'":"'none'"}`);
           }
           if(url.pathname==='/auth/redirect')response.setHeader('X-Frame-Options','SAMEORIGIN');
           response.end(staticFile.binary ? contents : contents.toString("utf8"));

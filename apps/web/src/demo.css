@@ -202,6 +202,12 @@ h3 { font-size: 14px; letter-spacing: -.02em; margin-bottom: 5px; }
 .video-art { position: relative; display: grid; place-items: center; min-height: 172px; margin: 10px 0; overflow: hidden; border-radius: 7px; background: #dceae3; }
 .video-art svg { width: 80%; height: 142px; }
 .video-caption { position: absolute; left: 11px; bottom: 9px; color: var(--navy); font-size: 10px; font-weight: 800; }
+.training-scene { position: relative; aspect-ratio: 16 / 9; min-height: 172px; margin: 10px 0; overflow: hidden; border-radius: 7px; background: #102a32; }
+.training-scene-video, .training-scene-model { position: absolute; inset: 0; width: 100%; height: 100%; display: block; object-fit: cover; }
+.training-scene-model { pointer-events: none; }
+.training-scene .video-caption { z-index: 2; color: #fff; text-shadow: 0 1px 3px rgba(0,0,0,.45); }
+.scene-status { position: absolute; z-index: 2; top: 9px; left: 9px; max-width: calc(100% - 18px); padding: 5px 8px; border-radius: 999px; background: rgba(8, 31, 34, .78); color: #d6f0e7; font-size: 9px; }
+.training-scene .video-play { z-index: 3; }
 .video-play { position: absolute; top: 50%; left: 50%; display: grid; place-items: center; width: 46px; height: 46px; transform: translate(-50%, -50%); border-radius: 50%; background: var(--teal); color: white; box-shadow: 0 7px 16px rgba(23,77,71,.22); }
 .video-play:hover { background: var(--teal-dark); transform: translate(-50%, -50%) scale(1.04); }
 .generated-video.playing .video-art::after { content: ''; position: absolute; inset: 0; background: linear-gradient(90deg, transparent 0%, rgba(255,255,255,.16) 50%, transparent 100%); animation: video-scan 1.6s linear infinite; pointer-events: none; }
@@ -333,6 +339,10 @@ h3 { font-size: 14px; letter-spacing: -.02em; margin-bottom: 5px; }
 .focus-rail-step.done > span { border-color: #9dca91; background: #edf7e9; color: #47774d; }
 .focus-body { min-height: 380px; display: grid; align-content: center; padding: 34px; }
 .focus-upload { max-width: 650px; width: 100%; margin: 0 auto; }
+.source-mode-picker { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 13px; }
+.source-mode { display: flex; align-items: center; gap: 8px; padding: 12px 13px; border: 1px solid var(--line); border-radius: 9px; background: #fbfcfa; color: var(--muted); font-size: 11px; font-weight: 800; text-align: left; }
+.source-mode small { display: block; margin-left: auto; color: var(--muted); font-size: 9px; font-weight: 500; }
+.source-mode.active { border-color: var(--teal); background: var(--teal-soft); color: var(--teal); }
 .focus-dropzone { min-height: 190px; display: flex; align-items: center; justify-content: center; gap: 14px; border: 1px dashed #aebdb5; border-radius: 13px; background: #f8fbf8; cursor: pointer; text-align: left; }
 .focus-dropzone:hover { border-color: var(--teal); background: var(--teal-soft); }
 .focus-dropzone input { display: none; }
@@ -340,6 +350,12 @@ h3 { font-size: 14px; letter-spacing: -.02em; margin-bottom: 5px; }
 .focus-dropzone strong { margin-bottom: 6px; font-size: 14px; }
 .focus-dropzone small { color: var(--muted); font-size: 11px; }
 .focus-upload-footer { display: flex; align-items: center; justify-content: space-between; gap: 14px; margin-top: 14px; }
+.source-demo-actions { display: flex; align-items: center; gap: 8px; }
+.source-file-list { margin-top: 13px; padding: 12px 13px; border: 1px solid var(--line); border-radius: 9px; background: #fbfcfa; }
+.source-file-list-head { display: flex; justify-content: space-between; gap: 10px; margin-bottom: 9px; font-size: 10px; }
+.source-file-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.source-file-chip { max-width: 220px; overflow: hidden; padding: 5px 8px; border: 1px solid #d7e2dc; border-radius: 999px; background: #fff; color: var(--muted); font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
+.source-file-chip.more { border-color: #cde6a1; background: #f2fadf; color: #5c7a25; }
 .focus-processing { max-width: 650px; width: 100%; margin: 0 auto; }
 .focus-processing .processing-header { align-items: end; }
 .focus-complete { display: flex; align-items: center; gap: 14px; max-width: 720px; width: 100%; margin: 0 auto; padding: 20px; border: 1px solid #cfe0c9; border-radius: 12px; background: #f1f9ee; }
@@ -349,6 +365,30 @@ h3 { font-size: 14px; letter-spacing: -.02em; margin-bottom: 5px; }
 .focus-model { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(220px, .8fr); gap: 24px; align-items: center; width: 100%; }
 .focus-model-copy h3, .focus-content-copy h3 { margin: 4px 0 9px; font-size: 19px; line-height: 1.25; }
 .focus-model-copy .component-chips { margin-top: 18px; }
+.demo-photo-strip { display: flex; align-items: center; gap: 6px; margin-top: 17px; }
+.demo-photo-strip img { width: 42px; height: 34px; object-fit: cover; border: 1px solid #c9d8d1; border-radius: 5px; background: #0d1c20; }
+.demo-photo-strip span { margin-left: 4px; color: var(--muted); font-size: 9px; }
+.nxstage-reference-card { display: grid; grid-template-columns: minmax(240px, .9fr) minmax(220px, 1.1fr); gap: 18px; align-items: center; margin-bottom: 22px; padding: 14px; border: 1px solid #d9e3dc; border-radius: 12px; background: #f8fbf8; }
+.nxstage-reference-image { position: relative; min-height: 210px; overflow: hidden; border-radius: 9px; background: #dfe8e4; }
+.nxstage-reference-image img { display: block; width: 100%; height: 210px; object-fit: cover; }
+.nxstage-reference-image .model-badge { right: 9px; bottom: 9px; }
+.nxstage-reference-copy h3 { margin: 4px 0 9px; font-size: 19px; line-height: 1.25; }
+.photo-reconstruction { display: grid; grid-template-columns: minmax(220px, .85fr) minmax(250px, 1.15fr); gap: 26px; align-items: center; width: 100%; }
+.photo-evidence { position: relative; min-height: 280px; display: grid; place-items: center; overflow: hidden; border-radius: 12px; background: #0d1c20; }
+.photo-evidence img { width: 100%; height: 280px; object-fit: contain; }
+.photo-evidence-label { position: absolute; left: 13px; top: 13px; z-index: 1; padding: 5px 8px; border-radius: 999px; background: rgba(255,255,255,.9); color: var(--teal); font-size: 9px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
+.photo-count { position: absolute; right: 13px; bottom: 13px; padding: 5px 8px; border-radius: 999px; background: rgba(15,42,45,.86); color: #fff; font-size: 9px; }
+.photo-placeholder { display: grid; place-items: center; gap: 10px; padding: 30px; color: #b7d3ca; font-size: 11px; text-align: center; }
+.photo-reconstruction-copy h3 { margin: 4px 0 9px; font-size: 19px; line-height: 1.25; }
+.photo-model-draft { display: grid; grid-template-columns: minmax(230px, .95fr) minmax(250px, 1.05fr); gap: 26px; align-items: center; width: 100%; }
+.photo-model-stage { position: relative; min-height: 300px; display: grid; place-items: center; overflow: hidden; border-radius: 12px; background: radial-gradient(circle at 50% 35%, #28474a, #09181c 72%); perspective: 900px; }
+.photo-model-shell { width: 58%; max-width: 280px; transform: rotateY(-13deg) rotateX(4deg); box-shadow: 22px 24px 0 rgba(0,0,0,.2), 0 24px 34px rgba(0,0,0,.32); border: 8px solid #d5ded9; border-radius: 12px; overflow: hidden; background: #eef3ef; }
+.photo-model-shell img { display: block; width: 100%; height: 235px; object-fit: cover; }
+.photo-model-shell .photo-placeholder { min-height: 235px; }
+.photo-model-copy h3 { margin: 4px 0 9px; font-size: 19px; line-height: 1.25; }
+.reconstruction-status { display: grid; grid-template-columns: 9px minmax(0,1fr); column-gap: 8px; align-items: center; margin: 18px 0; padding: 12px; border: 1px solid #e7d8a1; border-radius: 9px; background: #fff9e5; color: #75642d; font-size: 10px; }
+.reconstruction-status .status-dot { grid-row: span 2; width: 8px; height: 8px; margin-top: 2px; background: #d59a2e; }
+.reconstruction-status small { grid-column: 2; margin-top: 3px; color: #9a8649; }
 .focus-content { display: grid; grid-template-columns: minmax(0, 1.05fr) minmax(230px, .95fr); gap: 26px; align-items: center; width: 100%; }
 .focus-content-copy .generated-list { margin-top: 17px; }
 .focus-build { width: 100%; }
@@ -403,9 +443,11 @@ h3 { font-size: 14px; letter-spacing: -.02em; margin-bottom: 5px; }
   .focus-body { min-height: 340px; padding: 22px 18px; }
   .focus-footer { padding: 16px 18px; }
   .focus-model, .focus-content, .learner-next-card { grid-template-columns: 1fr; }
+  .photo-reconstruction, .photo-model-draft, .nxstage-reference-card { grid-template-columns: 1fr; }
   .learner-next-art { min-height: 175px; border-left: 0; border-top: 1px solid var(--line); }
   .learner-next-copy { padding: 24px 20px; }
   .focus-aside { grid-template-columns: 1fr; }
   .focus-upload-footer, .focus-complete, .focus-selection, .focus-build-head { align-items: flex-start; flex-direction: column; }
+  .source-demo-actions { width: 100%; flex-wrap: wrap; }
   .focus-complete .primary-btn { width: 100%; }
 }

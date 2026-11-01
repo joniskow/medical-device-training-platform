@@ -265,6 +265,49 @@ Uploads, PDF extraction, media inspection, model import, reconstruction, and AI 
 
 Never infer completion because a request returned `200`; inspect the returned job/session state.
 
+### Image/video reconstruction and video/model scenes
+
+The browser is a review and playback client. It is not the reconstruction engine and it must not upload directly to a worker, Blob container, or Service Bus queue.
+
+The server-side flow is:
+
+1. Create an upload session and send source bytes to the private `source-assets` container.
+2. Complete the upload with the source hash, rights/review evidence, and a stable idempotency key.
+3. Start an asynchronous reconstruction job. The worker consumes the appropriate Service Bus queue, re-checks the source hash and approval state, and writes a private candidate GLB, report, and selected source views.
+4. Keep the candidate in `REVIEW_REQUIRED` until an authorized author prepares it and an independent reviewer approves it. A completed job is not an approved model.
+5. Publish an immutable model version and release binding. The learner receives only the release-bound model manifest and a short-lived same-origin/private delivery response.
+
+For a model composited over a video plate, the API should return a server-issued `training-scene.v1` manifest containing:
+
+- the video asset version, SHA-256, MIME type, dimensions, frame rate, and duration;
+- the approved model version and SHA-256, plus placement and scale;
+- camera intrinsics (focal length, principal point, and distortion coefficients);
+- render policy such as opacity and shadow behavior.
+
+The shared validator is `packages/contracts/src/scene-manifest.ts`. The browser must treat the manifest as a binding, not as a hint: reject unknown schema versions, hash mismatches, browser-supplied URLs, out-of-range camera data, and model/video assets that are not returned by the API. The local demo uses `apps/web/src/babylon-model-runtime.ts` with a transparent canvas over a real MP4 plate; it demonstrates the rendering shape, but it is not evidence of physical-device accuracy. Production overlay accuracy additionally requires camera extrinsics/pose, time-synchronized tracking when the camera moves, verified metric scale, distortion-aware projection, occlusion/shadow handling, and reviewer acceptance against the reference device.
+
+Dispose the video element, Babylon runtime, event listeners, and any object URLs when the activity, account, organization, or release changes. Fence late model/video loads with both a request generation and `getSessionIdentity()`. Do not mark a reconstruction or scene accepted because it rendered successfully.
+
+### Azure asset pipeline contract
+
+The Azure deployment template is `infra/azure/asset-pipeline-foundation.bicep`, with its operator notes in `docs/azure-asset-pipeline.md`. It assumes the existing private Storage Account, Service Bus namespace, and API/worker managed identities, then declares:
+
+- private, versioned containers for `source-assets`, `reconstruction-artifacts`, `video-plates`, `renders`, `published-assets`, and `quarantine`;
+- retention and lifecycle rules that cool old data without silently deleting evidence;
+- durable processing queues with bounded delivery count, TTL, lock duration, and dead-letter-on-expiration behavior;
+- queue-scoped managed-identity roles: the worker receives messages and the API publishes messages; neither browser code nor a broad namespace role is appropriate;
+- deployment outputs that give the API/worker configuration the approved container and queue names.
+
+Run these checks when changing the asset or scene boundary:
+
+```powershell
+pnpm infra:validate
+pnpm scene-manifest:validate
+pnpm training-scene:validate
+```
+
+The browser continues to use `/api/v1/...` for job status and private delivery. Azure resource names, storage keys, queue names, SAS tokens, and managed-identity details remain server configuration and must not be embedded in frontend code.
+
 ## Response and error conventions
 
 Successful JSON is usually a projection specific to the route. Do not assume that a field returned by one endpoint is accepted as input to another. For errors, expect:
@@ -299,6 +342,7 @@ Common cases:
 - Use `credentials: 'omit'` for API calls; authentication is bearer-based.
 - Reject unsafe media/model addresses. Same-origin API paths and HTTPS URLs without embedded credentials are the accepted browser shapes.
 - Dispose media, object URLs, model runtimes, and event listeners when navigating between activities or signing out.
+- For video/model compositing, keep the video and transparent Babylon canvas in the same aspect-ratio box; never claim camera-accurate alignment unless the server manifest includes verified intrinsics, extrinsics/pose, frame timing, and review evidence.
 - Fence asynchronous callbacks with both a request generation and `getSessionIdentity()`. A late response from a previous account, organization, course, or model session must not update the current screen.
 - Keep the UI usable at compact widths and with keyboard/screen-reader navigation. For media, show alt text or transcript and keep acknowledgement explicit.
 
@@ -335,6 +379,9 @@ For each frontend feature:
 - `docs/local-demo.md` — local demo roles, fixtures, and smoke verification.
 - `docs/private-browser-uploads.md` — private upload behavior.
 - `docs/media-activities.md` — image/video activity contracts and acknowledgement rules.
+- `docs/azure-asset-pipeline.md` — private containers, queues, lifecycle, and managed-identity deployment contract.
+- `docs/reconstruction-workflow.md` — reconstruction lineage, quality reports, review gates, and private candidate delivery.
+- `packages/contracts/src/scene-manifest.ts` — source-bound video/model scene validation.
 - `apps/web/src/auth-session.ts` — browser session and authenticated request boundary.
 - `apps/web/src/learner.ts` — consumer learner orchestration and activity routing.
 - `apps/web/src/model-contract.ts` — authoritative semantic model action transport.

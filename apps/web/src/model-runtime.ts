@@ -1,7 +1,7 @@
 import type { AuthoritativeModelState, ModelRuntime, ModelRuntimeState, ModelSelectionSource, ModelSemanticAction } from "./model-contract.js";
 import { applyPermittedTransform, validateAuthoritativeModelState, type ModelManifest } from "@medical-device/model-runtime";
 
-type GlbNode = { name?: string; mesh?: number; extras?: { componentId?: string } };
+type GlbNode = { name?: string; mesh?: number; children?: number[]; extras?: { componentId?: string } };
 type GlbPrimitive = { attributes?: { POSITION?: number }; indices?: number };
 type GlbDocument = {
   nodes?: GlbNode[];
@@ -132,19 +132,39 @@ function accessorData(document: GlbDocument, binary: Uint8Array, accessorIndex: 
   return { bytes: binary.subarray(start), componentType: accessor.componentType, count: accessor.count, stride };
 }
 
-function geometryForNode(document: GlbDocument, binary: Uint8Array, node: GlbNode, componentId: string, color: Vec3): ComponentGeometry {
-  const primitive = document.meshes?.[node.mesh ?? -1]?.primitives?.[0];
-  if (primitive?.attributes?.POSITION === undefined) throw new BrowserModelRuntimeError("POSITION_REQUIRED", `Component ${componentId} has no position accessor.`);
-  const position = accessorData(document, binary, primitive.attributes.POSITION);
-  if (position.componentType !== 5126 || position.stride < 12) throw new BrowserModelRuntimeError("POSITION_UNSUPPORTED", `Component ${componentId} uses an unsupported position accessor.`);
-  const positions = new Float32Array(position.count * 3); const positionView = new DataView(position.bytes.buffer, position.bytes.byteOffset, position.bytes.byteLength);
-  for (let index = 0; index < position.count; index += 1) for (let axis = 0; axis < 3; axis += 1) positions[index * 3 + axis] = positionView.getFloat32(index * position.stride + axis * 4, true);
-  if (primitive.indices === undefined) return { componentId, positions, indices: Uint16Array.from({ length: position.count }, (_, index) => index), indexType: 5123, color };
-  const index = accessorData(document, binary, primitive.indices); const view = new DataView(index.bytes.buffer, index.bytes.byteOffset, index.bytes.byteLength);
-  if (![5121, 5123, 5125].includes(index.componentType)) throw new BrowserModelRuntimeError("INDEX_UNSUPPORTED", `Component ${componentId} uses an unsupported index accessor.`);
-  const indices = index.componentType === 5125 ? new Uint32Array(index.count) : new Uint16Array(index.count);
-  for (let item = 0; item < index.count; item += 1) indices[item] = index.componentType === 5125 ? view.getUint32(item * index.stride, true) : index.componentType === 5123 ? view.getUint16(item * index.stride, true) : view.getUint8(item * index.stride);
-  return { componentId, positions, indices, indexType: index.componentType === 5125 ? 5125 : index.componentType === 5123 ? 5123 : 5121, color };
+function geometryForNodes(document: GlbDocument, binary: Uint8Array, rootIndices: number[], componentId: string, color: Vec3): ComponentGeometry {
+  const meshNodes: GlbNode[] = [];
+  const visited = new Set<number>();
+  const visit = (index: number) => {
+    if (visited.has(index)) return;
+    visited.add(index);
+    const current = document.nodes?.[index];
+    if (!current) return;
+    if (current.mesh !== undefined) meshNodes.push(current);
+    current.children?.forEach(visit);
+  };
+  rootIndices.forEach(visit);
+  const positionValues: number[] = []; const indexValues: number[] = [];
+  for (const meshNode of meshNodes) for (const primitive of document.meshes?.[meshNode.mesh ?? -1]?.primitives ?? []) {
+    if (primitive.attributes?.POSITION === undefined) continue;
+    const position = accessorData(document, binary, primitive.attributes.POSITION);
+    if (position.componentType !== 5126 || position.stride < 12) throw new BrowserModelRuntimeError("POSITION_UNSUPPORTED", `Component ${componentId} uses an unsupported position accessor.`);
+    const positionView = new DataView(position.bytes.buffer, position.bytes.byteOffset, position.bytes.byteLength); const offset = positionValues.length / 3;
+    for (let index = 0; index < position.count; index += 1) for (let axis = 0; axis < 3; axis += 1) positionValues.push(positionView.getFloat32(index * position.stride + axis * 4, true));
+    if (primitive.indices === undefined) for (let index = 0; index < position.count; index += 1) indexValues.push(offset + index);
+    else {
+      const indices = accessorData(document, binary, primitive.indices); const view = new DataView(indices.bytes.buffer, indices.bytes.byteOffset, indices.bytes.byteLength);
+      if (![5121, 5123, 5125].includes(indices.componentType)) throw new BrowserModelRuntimeError("INDEX_UNSUPPORTED", `Component ${componentId} uses an unsupported index accessor.`);
+      for (let item = 0; item < indices.count; item += 1) indexValues.push(offset + (indices.componentType === 5125 ? view.getUint32(item * indices.stride, true) : indices.componentType === 5123 ? view.getUint16(item * indices.stride, true) : view.getUint8(item * indices.stride)));
+    }
+  }
+  if (!positionValues.length || !indexValues.length) throw new BrowserModelRuntimeError("POSITION_REQUIRED", `Component ${componentId} has no position accessor.`);
+  const use32Bit = positionValues.length / 3 > 65535;
+  return { componentId, positions: new Float32Array(positionValues), indices: use32Bit ? new Uint32Array(indexValues) : new Uint16Array(indexValues), indexType: use32Bit ? 5125 : 5123, color };
+}
+
+function geometryForNode(document: GlbDocument, binary: Uint8Array, nodeIndex: number, componentId: string, color: Vec3): ComponentGeometry {
+  return geometryForNodes(document, binary, [nodeIndex], componentId, color);
 }
 
 function hex(bytes: ArrayBuffer): string { return Array.from(new Uint8Array(bytes), (value) => value.toString(16).padStart(2, "0")).join(""); }
@@ -180,17 +200,25 @@ export async function createWebGlModelRuntime(options: WebGlModelRuntimeOptions)
     const manifest = validateManifest(await manifestResponse.json()); const bytes = new Uint8Array(await modelResponse.arrayBuffer());
     if (manifest.sourceHash && hex(await crypto.subtle.digest("SHA-256", bytes)) !== manifest.sourceHash.toLowerCase()) throw new BrowserModelRuntimeError("MODEL_HASH_MISMATCH", "The model bytes do not match the approved manifest hash.");
     const parsed = parseGlb(bytes); const colors = new Map(manifest.components.map((component, index) => [component.componentId, MODEL_COLORS[index % MODEL_COLORS.length]]));
-    const components = (parsed.document.nodes ?? []).flatMap((node) => node.extras?.componentId ? [geometryForNode(parsed.document, parsed.binary, node, node.extras.componentId, colors.get(node.extras.componentId) ?? MODEL_COLORS[0])] : []);
+    const nodes = parsed.document.nodes ?? [];
+    const componentRoots = nodes.flatMap((node, nodeIndex) => node.extras?.componentId ? [{ nodeIndex, componentId: node.extras.componentId }] : []);
+    const componentDescendants = new Set<number>();
+    const markDescendants = (index: number) => { if (componentDescendants.has(index)) return; componentDescendants.add(index); nodes[index]?.children?.forEach(markDescendants); };
+    componentRoots.forEach(({ nodeIndex }) => markDescendants(nodeIndex));
+    const baseNodeIndices = nodes.map((node, nodeIndex) => node.mesh !== undefined && !componentDescendants.has(nodeIndex) ? nodeIndex : -1).filter((nodeIndex) => nodeIndex >= 0);
+    const baseGeometry = baseNodeIndices.length ? geometryForNodes(parsed.document, parsed.binary, baseNodeIndices, "__base", [0.55, 0.62, 0.62]) : undefined;
+    const components = componentRoots.map(({ nodeIndex, componentId }) => geometryForNode(parsed.document, parsed.binary, nodeIndex, componentId, colors.get(componentId) ?? MODEL_COLORS[0]));
+    const drawables = baseGeometry ? [baseGeometry, ...components] : components;
     const expected = new Set(manifest.components.map((component) => component.componentId));
     if (components.length !== expected.size || components.some((component) => !expected.has(component.componentId))) throw new BrowserModelRuntimeError("MODEL_COMPONENT_MISMATCH", "The loaded model does not match the approved component manifest.");
     const canvas = options.canvas; const gl = canvas.getContext("webgl2", { antialias: true, alpha: false }); if (!gl) throw new BrowserModelRuntimeError("WEBGL2_UNAVAILABLE", "This browser does not provide the required WebGL2 baseline.");
-    const bounds = modelBounds(components); let yaw = 0.35; let pitch = -0.15; let distance = bounds.radius * 2.8; let selectedComponentId: string | undefined; let disposed = false; let raf = 0; let program = createProgram(gl);
+    const bounds = modelBounds(drawables); let yaw = 0.35; let pitch = -0.15; let distance = bounds.radius * 2.8; let selectedComponentId: string | undefined; let disposed = false; let raf = 0; let program = createProgram(gl);
     const transforms = Object.fromEntries(manifest.components.map((component) => [component.componentId, { rotationY: 0, translationX: 0 }]));
     const state: ModelRuntimeState = { phase: "READY", componentIds: manifest.components.map((component) => component.componentId), transforms, loadDurationMs: Math.round(performance.now() - started) };
     const resize = () => { const ratio = Math.min(window.devicePixelRatio || 1, 2); const width = Math.max(1, Math.floor(canvas.clientWidth * ratio)); const height = Math.max(1, Math.floor(canvas.clientHeight * ratio)); if (canvas.width !== width || canvas.height !== height) { canvas.width = width; canvas.height = height; } };
     const matrices = () => { resize(); const projection = perspective(Math.PI / 4, canvas.width / canvas.height, 0.01, Math.max(100, distance * 8)); const view = lookAt([0, 0, distance], [0, 0, 0], [0, 1, 0]); return { viewProjection: multiply(projection, view), model: multiply(rotationY(yaw), rotationX(pitch)) }; };
-    const buffers = () => { for (const component of components) { if (component.vao) gl.deleteVertexArray(component.vao); if (component.positionBuffer) gl.deleteBuffer(component.positionBuffer); if (component.indexBuffer) gl.deleteBuffer(component.indexBuffer); component.vao = gl.createVertexArray() ?? undefined; component.positionBuffer = gl.createBuffer() ?? undefined; component.indexBuffer = gl.createBuffer() ?? undefined; if (!component.vao || !component.positionBuffer || !component.indexBuffer) throw new BrowserModelRuntimeError("WEBGL_BUFFER", "The browser could not create a model buffer."); gl.bindVertexArray(component.vao); gl.bindBuffer(gl.ARRAY_BUFFER, component.positionBuffer); gl.bufferData(gl.ARRAY_BUFFER, component.positions, gl.STATIC_DRAW); gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 3, gl.FLOAT, false, 0, 0); gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, component.indexBuffer); gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, component.indices, gl.STATIC_DRAW); } gl.bindVertexArray(null); };
-    const render = () => { if (disposed) return; const { viewProjection, model } = matrices(); gl.viewport(0, 0, canvas.width, canvas.height); gl.clearColor(0.035, 0.09, 0.11, 1); gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT); gl.enable(gl.DEPTH_TEST); gl.useProgram(program); const mvp = multiply(viewProjection, model); gl.uniformMatrix4fv(gl.getUniformLocation(program, "u_mvp"), false, mvp); gl.uniform3fv(gl.getUniformLocation(program, "u_center"), bounds.center); for (const component of components) { const transform = state.transforms[component.componentId] ?? { rotationY: 0, translationX: 0 }; gl.bindVertexArray(component.vao ?? null); gl.uniform1f(gl.getUniformLocation(program, "u_rotation_y"), transform.rotationY); gl.uniform1f(gl.getUniformLocation(program, "u_translation_x"), transform.translationX); gl.uniform3fv(gl.getUniformLocation(program, "u_color"), component.componentId === selectedComponentId ? [0.95, 0.72, 0.2] : component.color); gl.drawElements(gl.TRIANGLES, component.indices.length, component.indexType, 0); } gl.bindVertexArray(null); };
+    const buffers = () => { for (const component of drawables) { if (component.vao) gl.deleteVertexArray(component.vao); if (component.positionBuffer) gl.deleteBuffer(component.positionBuffer); if (component.indexBuffer) gl.deleteBuffer(component.indexBuffer); component.vao = gl.createVertexArray() ?? undefined; component.positionBuffer = gl.createBuffer() ?? undefined; component.indexBuffer = gl.createBuffer() ?? undefined; if (!component.vao || !component.positionBuffer || !component.indexBuffer) throw new BrowserModelRuntimeError("WEBGL_BUFFER", "The browser could not create a model buffer."); gl.bindVertexArray(component.vao); gl.bindBuffer(gl.ARRAY_BUFFER, component.positionBuffer); gl.bufferData(gl.ARRAY_BUFFER, component.positions, gl.STATIC_DRAW); gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 3, gl.FLOAT, false, 0, 0); gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, component.indexBuffer); gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, component.indices, gl.STATIC_DRAW); } gl.bindVertexArray(null); };
+    const render = () => { if (disposed) return; const { viewProjection, model } = matrices(); gl.viewport(0, 0, canvas.width, canvas.height); gl.clearColor(0.035, 0.09, 0.11, 1); gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT); gl.enable(gl.DEPTH_TEST); gl.useProgram(program); const mvp = multiply(viewProjection, model); gl.uniformMatrix4fv(gl.getUniformLocation(program, "u_mvp"), false, mvp); gl.uniform3fv(gl.getUniformLocation(program, "u_center"), bounds.center); for (const component of drawables) { const transform = state.transforms[component.componentId] ?? { rotationY: 0, translationX: 0 }; gl.bindVertexArray(component.vao ?? null); gl.uniform1f(gl.getUniformLocation(program, "u_rotation_y"), transform.rotationY); gl.uniform1f(gl.getUniformLocation(program, "u_translation_x"), transform.translationX); gl.uniform3fv(gl.getUniformLocation(program, "u_color"), component.componentId === selectedComponentId ? [0.95, 0.72, 0.2] : component.color); gl.drawElements(gl.TRIANGLES, component.indices.length, component.indexType, 0); } gl.bindVertexArray(null); };
     const project = (point: Vec3): [number, number] => { const { viewProjection, model } = matrices(); const clip = transform(multiply(viewProjection, model), [point[0] - bounds.center[0], point[1] - bounds.center[1], point[2] - bounds.center[2]]); return [(clip[0] / clip[3] * 0.5 + 0.5) * canvas.clientWidth, (1 - (clip[1] / clip[3] * 0.5 + 0.5)) * canvas.clientHeight]; };
     const selectComponent = (componentId: string, source: ModelSelectionSource = "COMPONENT_LIST") => { if (!expected.has(componentId)) return; selectedComponentId = componentId; state.selectedComponentId = componentId; emit({ ...state }); render(); options.onSemanticAction?.({ type: "select_component", componentId, source }); };
     const selectAt = (clientX: number, clientY: number) => { const rect = canvas.getBoundingClientRect(); const point: [number, number] = [clientX - rect.left, clientY - rect.top]; for (const component of [...components].reverse()) for (let index = 0; index + 2 < component.indices.length; index += 3) { const triangle = [component.indices[index], component.indices[index + 1], component.indices[index + 2]].map((item) => project([component.positions[item * 3], component.positions[item * 3 + 1], component.positions[item * 3 + 2]]) as [number, number]); if (pointInTriangle(point, triangle[0], triangle[1], triangle[2])) { selectComponent(component.componentId, "CANVAS"); return; } } };
@@ -227,7 +255,7 @@ export async function createWebGlModelRuntime(options: WebGlModelRuntimeOptions)
       else if (!nextState.selectedComponentId) { selectedComponentId = undefined; state.selectedComponentId = undefined; }
       emit({ ...state }); render();
     };
-    return { getState: () => ({ ...state, transforms: { ...state.transforms } }), selectComponent, applyAuthoritativeState, resetView, dispose: () => { disposed = true; cancelAnimationFrame(raf); observer.disconnect(); canvas.removeEventListener("webglcontextlost", handleContextLost); canvas.removeEventListener("webglcontextrestored", handleContextRestored); canvas.removeEventListener("click", handleClick); canvas.removeEventListener("wheel", handleWheel); canvas.removeEventListener("pointerdown", handlePointerDown); canvas.removeEventListener("pointermove", handlePointerMove); canvas.removeEventListener("pointerup", handlePointerUp); canvas.removeEventListener("pointercancel", handlePointerUp); gl.deleteProgram(program); for (const component of components) { if (component.vao) gl.deleteVertexArray(component.vao); if (component.positionBuffer) gl.deleteBuffer(component.positionBuffer); if (component.indexBuffer) gl.deleteBuffer(component.indexBuffer); } } };
+    return { getState: () => ({ ...state, transforms: { ...state.transforms } }), selectComponent, applyAuthoritativeState, resetView, dispose: () => { disposed = true; cancelAnimationFrame(raf); observer.disconnect(); canvas.removeEventListener("webglcontextlost", handleContextLost); canvas.removeEventListener("webglcontextrestored", handleContextRestored); canvas.removeEventListener("click", handleClick); canvas.removeEventListener("wheel", handleWheel); canvas.removeEventListener("pointerdown", handlePointerDown); canvas.removeEventListener("pointermove", handlePointerMove); canvas.removeEventListener("pointerup", handlePointerUp); canvas.removeEventListener("pointercancel", handlePointerUp); gl.deleteProgram(program); for (const component of drawables) { if (component.vao) gl.deleteVertexArray(component.vao); if (component.positionBuffer) gl.deleteBuffer(component.positionBuffer); if (component.indexBuffer) gl.deleteBuffer(component.indexBuffer); } } };
   } catch (error) {
     const failure = error instanceof BrowserModelRuntimeError ? error : new BrowserModelRuntimeError("MODEL_RUNTIME_FAILED", error instanceof Error ? error.message : "The model runtime failed.");
     emit({ phase: "ERROR", componentIds: [], transforms: {}, errorCode: failure.code, errorMessage: failure.message }); throw failure;

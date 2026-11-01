@@ -19,6 +19,10 @@ export interface BabylonModelRuntimeOptions {
   fetcher?: typeof fetch;
   onStateChange?: (state: ModelRuntimeState) => void;
   onSemanticAction?: (action: ModelSemanticAction) => void;
+  transparentBackground?: boolean;
+  interactiveCamera?: boolean;
+  camera?: { alpha: number; beta: number; radius: number; target?: [number, number, number] };
+  modelTransform?: { translationMeters: [number, number, number]; rotationRadians: [number, number, number]; scale: number };
 }
 
 export class BabylonModelRuntimeError extends Error { constructor(readonly code: string, message: string) { super(message); this.name = "BabylonModelRuntimeError"; } }
@@ -64,10 +68,13 @@ export async function createBabylonModelRuntime(options: BabylonModelRuntimeOpti
     if(options.signal?.aborted)throw new BabylonModelRuntimeError('MODEL_LOAD_CANCELLED','Model loading was cancelled.');
     if (!options.canvas.getContext("webgl2")) throw new BabylonModelRuntimeError("WEBGL2_UNAVAILABLE", "This browser does not provide the required WebGL2 baseline.");
 
-    partialEngine = new Engine(options.canvas, true, { preserveDrawingBuffer: false, stencil: true });
-    partialScene = new Scene(partialEngine); partialScene.clearColor = new Color4(0.035, 0.09, 0.11, 1);
+    partialEngine = new Engine(options.canvas, true, { preserveDrawingBuffer: false, stencil: true, alpha: options.transparentBackground === true });
+    partialScene = new Scene(partialEngine); partialScene.clearColor = new Color4(0.035, 0.09, 0.11, options.transparentBackground ? 0 : 1);
     const engine = partialEngine; const scene = partialScene;
-    const camera = new ArcRotateCamera("model-camera", -0.8, Math.PI / 2.8, 3, Vector3.Zero(), scene); camera.attachControl(options.canvas, true); camera.lowerRadiusLimit = 0.1; camera.upperRadiusLimit = 100;
+    const cameraConfig = options.camera;
+    const camera = new ArcRotateCamera("model-camera", cameraConfig?.alpha ?? -0.8, cameraConfig?.beta ?? Math.PI / 2.8, cameraConfig?.radius ?? 3, cameraConfig?.target ? Vector3.FromArray(cameraConfig.target) : Vector3.Zero(), scene);
+    if (options.interactiveCamera !== false) camera.attachControl(options.canvas, true);
+    camera.lowerRadiusLimit = 0.1; camera.upperRadiusLimit = 100;
     new HemisphericLight("model-light", new Vector3(0, 1, 0), scene).intensity = 1.1;
     const imported = await SceneLoader.ImportMeshAsync(null, "", bytes, scene, undefined, ".glb");
     const meshes = imported.meshes.filter((mesh): mesh is Mesh => mesh instanceof Mesh && mesh.getTotalVertices() > 0);
@@ -77,7 +84,16 @@ export async function createBabylonModelRuntime(options: BabylonModelRuntimeOpti
     const textureKeys = ["albedoTexture", "baseTexture", "diffuseTexture", "normalTexture", "metallicTexture", "roughnessTexture", "ambientTexture", "opacityTexture", "emissiveTexture", "bumpTexture", "reflectionTexture", "refractionTexture"] as const;
     const actualTextureCount = new Set(meshes.flatMap((mesh) => textureKeys.map((key) => (mesh.material as unknown as Record<string, unknown> | null)?.[key]).filter((texture): texture is object => Boolean(texture)))).size;
     if (meshes.length !== manifest.meshCount || actualTriangleCount !== manifest.triangleCount || actualMaterialCount !== manifest.materialCount || actualTextureCount !== manifest.textureCount) throw new BabylonModelRuntimeError("MODEL_GEOMETRY_MISMATCH", `The loaded scene does not match the approved model manifest (meshes ${meshes.length}/${manifest.meshCount}, triangles ${actualTriangleCount}/${manifest.triangleCount}, materials ${actualMaterialCount}/${manifest.materialCount}, textures ${actualTextureCount}/${manifest.textureCount}).`);
-    const bounds = modelBounds(meshes); camera.setTarget(bounds.center); camera.radius = bounds.radius * 2.8;
+    const bounds = modelBounds(meshes);
+    if (!cameraConfig) { camera.setTarget(bounds.center); camera.radius = bounds.radius * 2.8; }
+    if (options.modelTransform) {
+      const root = imported.meshes.find((mesh) => mesh.name === "__root__") ?? imported.meshes[0];
+      if (root) {
+        root.position = Vector3.FromArray(options.modelTransform.translationMeters);
+        root.rotation = Vector3.FromArray(options.modelTransform.rotationRadians);
+        root.scaling = new Vector3(options.modelTransform.scale, options.modelTransform.scale, options.modelTransform.scale);
+      }
+    }
     // glTF units are meters: Babylon's one-meter default near plane clips tabletop devices.
     camera.minZ = Math.max(bounds.radius / 100, 0.0001);
     camera.maxZ = Math.max(bounds.radius * 100, 10);
@@ -164,8 +180,8 @@ export async function createBabylonModelRuntime(options: BabylonModelRuntimeOpti
       }
       emit({ ...state });
     };
-    const resetView = () => { camera.setTarget(bounds.center); camera.radius = bounds.radius * 2.8; camera.alpha = -0.8; camera.beta = Math.PI / 2.8; };
-    return { getState: () => ({ ...state, transforms: { ...state.transforms } }), selectComponent, applyAuthoritativeState, resetView, dispose: () => { disposed = true; window.clearTimeout(sampleTimeout); window.removeEventListener("resize", resize); scene.onPointerObservable.remove(pointerObserver); engine.onContextLostObservable.remove(contextLost); engine.onContextRestoredObservable.remove(contextRestored); camera.detachControl(); scene.dispose(); engine.dispose(); } };
+    const resetView = () => { camera.setTarget(cameraConfig?.target ? Vector3.FromArray(cameraConfig.target) : bounds.center); camera.radius = cameraConfig?.radius ?? bounds.radius * 2.8; camera.alpha = cameraConfig?.alpha ?? -0.8; camera.beta = cameraConfig?.beta ?? Math.PI / 2.8; };
+    return { getState: () => ({ ...state, transforms: { ...state.transforms } }), selectComponent, applyAuthoritativeState, resetView, dispose: () => { disposed = true; window.clearTimeout(sampleTimeout); window.removeEventListener("resize", resize); scene.onPointerObservable.remove(pointerObserver); engine.onContextLostObservable.remove(contextLost); engine.onContextRestoredObservable.remove(contextRestored); if (options.interactiveCamera !== false) camera.detachControl(); scene.dispose(); engine.dispose(); } };
   } catch (error) {
     partialScene?.dispose(); partialEngine?.dispose();
     const failure = error instanceof BabylonModelRuntimeError ? error : new BabylonModelRuntimeError("MODEL_RUNTIME_FAILED", error instanceof Error ? error.message : "The Babylon.js runtime failed.");

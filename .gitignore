@@ -19,4 +19,5 @@ output/reconstruction-runtime/
 output/openmvs-v2.4.0/
 output/OpenMVS-Windows-v2.4.0.zip
 tools/reconstruction/__pycache__/
+blender/__pycache__/
 output/triposr-assets/
