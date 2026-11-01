@@ -4,7 +4,7 @@ import {validateBrowserModelManifest} from '@medical-device/model-runtime';
 import type {ModelRuntime} from './model-contract.js';
 
 export function createModelImportReview(host:HTMLElement,api:<T>(path:string,init?:RequestInit)=>Promise<T>){
- const section=document.createElement('section'),heading=document.createElement('h2');heading.textContent='Imported model review';section.append(heading);host.append(section);
+ const section=document.createElement('section');section.dataset.advancedTool='';const heading=document.createElement('h2');heading.textContent='Imported model review';section.append(heading);host.append(section);
  const load=document.createElement('button');load.type='button';load.textContent='Show imported models';section.append(load);
  const list=document.createElement('div'),panel=document.createElement('div'),status=document.createElement('p');status.setAttribute('role','status');section.append(list,panel,status);
  let cursor:string|undefined,epoch=0,runtime:ModelRuntime|undefined,abort:AbortController|undefined;

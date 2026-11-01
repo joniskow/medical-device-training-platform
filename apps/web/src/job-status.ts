@@ -43,6 +43,7 @@ const photoUploadForm = document.querySelector<HTMLFormElement>("#photo-upload-f
 const photoUploadButton = document.querySelector<HTMLButtonElement>("#photo-upload")!;
 const photoUploadStatus = document.querySelector<HTMLElement>("#photo-upload-status")!;
 const photoUploadResults = document.querySelector<HTMLElement>("#photo-upload-results")!;
+const advancedTools = document.querySelector<HTMLDetailsElement>("#advanced-tools")!;
 const jobSection = document.querySelector<HTMLElement>("#job-section")!;
 const reviewSection = document.querySelector<HTMLElement>("#review-section")!;
 const reviewLoadForm = document.querySelector<HTMLFormElement>("#review-load-form")!;
@@ -83,6 +84,8 @@ if (demoMode) {
     window.location.reload();
   });
 }
+
+advancedTools.addEventListener("toggle", () => document.body.classList.toggle("advanced-mode", advancedTools.open));
 
 let accessToken = getAccessToken();
 if(accessToken){
@@ -1018,7 +1021,8 @@ photoUploadForm.addEventListener("submit", async (event) => {
       jobIdInput.value = currentJobId;
       await load();
     }
-    photoUploadStatus.textContent = "Photo collection uploaded. Each photo is now processing privately. After source review and rights confirmation, select the approved photos below to start reconstruction.";
+    document.querySelector<HTMLElement>("[data-reconstruction-panel]")?.removeAttribute("hidden");
+    photoUploadStatus.textContent = "Photos uploaded. We’re checking them now. When they are ready, use the next step below to build your model.";
   } catch (error) {
     photoUploadStatus.textContent = error instanceof Error ? error.message : "Photo collection upload failed. Retry the collection.";
   } finally {
@@ -1120,11 +1124,12 @@ window.setInterval(() => { if (accessToken && currentJobId) void load().catch((e
 createMediaReview(document.querySelector<HTMLElement>('#upload-section')!,apiJson);
 createModelImportReview(document.querySelector<HTMLElement>('#upload-section')!,apiJson);
 const prepareCandidateButton=document.createElement('button');prepareCandidateButton.type='button';prepareCandidateButton.textContent='Prepare reconstruction candidate';uploadSection.append(prepareCandidateButton);
+prepareCandidateButton.dataset.advancedTool='';
 let disposeCandidateWorkbench:(()=>void)|undefined;
 async function openCandidateWorkbench(initial?:ReconstructionFiles){
- const session=getSessionIdentity();prepareCandidateButton.disabled=true;
+  const session=getSessionIdentity();prepareCandidateButton.disabled=true;
  try{const module=await import('./candidate-workbench.js');if(session!==getSessionIdentity())return;
-  disposeCandidateWorkbench?.();const host=document.createElement('div');uploadSection.append(host);
+  disposeCandidateWorkbench?.();const host=document.createElement('div');host.dataset.advancedTool='';uploadSection.append(host);
   const dispose=module.createCandidateWorkbench(host,file=>{if(session!==getSessionIdentity())return;const transfer=new DataTransfer();transfer.items.add(file);document.querySelector<HTMLInputElement>('#source-file')!.files=transfer.files;renderMessage('Prepared reconstruction selected. Use Upload to send it for processing and review.');},initial);
   disposeCandidateWorkbench=()=>{dispose();host.remove();};
  }catch{renderMessage('Candidate preparation could not be loaded. Retry.',true);}finally{prepareCandidateButton.disabled=false;}

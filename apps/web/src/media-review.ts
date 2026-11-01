@@ -2,7 +2,7 @@ import {authenticatedFetch,getOrganizationHeaders,getSessionIdentity} from './au
 import {renderSourceReview} from './source-review-editor.js';
 
 export function createMediaReview(host:HTMLElement,api:<T>(path:string,init?:RequestInit)=>Promise<T>){
- const section=document.createElement('section'),heading=document.createElement('h2'),load=document.createElement('button'),list=document.createElement('div'),panel=document.createElement('div'),status=document.createElement('p');
+ const section=document.createElement('section');section.dataset.advancedTool='';const heading=document.createElement('h2'),load=document.createElement('button'),list=document.createElement('div'),panel=document.createElement('div'),status=document.createElement('p');
  heading.textContent='Image and video review';load.type='button';load.textContent='Show uploaded media';status.setAttribute('role','status');section.append(heading,load,list,panel,status);host.append(section);
  let cursor:string|undefined,epoch=0,identity=getSessionIdentity(),objectUrl:string|undefined,abort:AbortController|undefined;
  const galleryUrls=new Set<string>();
