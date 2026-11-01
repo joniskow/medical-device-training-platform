@@ -12,9 +12,8 @@ assert.match(template, /resource processingQueues 'Microsoft\.ServiceBus\/namesp
 assert.match(template, /deadLetteringOnMessageExpiration:\s*true/);
 assert.match(template, /maxDeliveryCount:\s*10/);
 assert.match(template, /resource workerReceiver 'Microsoft\.Authorization\/roleAssignments@/);
-assert.match(template, /resource apiSender 'Microsoft\.Authorization\/roleAssignments@/);
 assert.match(template, /roleDefinitions',\s*'4a9ae827-6dc8-4573-8ac7-8239d42aa03f'/);
-assert.match(template, /roleDefinitions',\s*'69a216fc-b8fb-44d8-bc22-1f3c2cd27a39'/);
+assert.doesNotMatch(template, /apiSender|apiIdentityName/);
 assert.match(template, /output assetContainers array/);
 assert.match(template, /output processingQueues array/);
 

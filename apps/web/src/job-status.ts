@@ -39,6 +39,10 @@ const demoRoleSelect = document.querySelector<HTMLSelectElement>("#demo-role")!;
 const uploadSection = document.querySelector<HTMLElement>("#upload-section")!;
 const uploadForm = document.querySelector<HTMLFormElement>("#upload-form")!;
 const uploadButton = document.querySelector<HTMLButtonElement>("#upload")!;
+const photoUploadForm = document.querySelector<HTMLFormElement>("#photo-upload-form")!;
+const photoUploadButton = document.querySelector<HTMLButtonElement>("#photo-upload")!;
+const photoUploadStatus = document.querySelector<HTMLElement>("#photo-upload-status")!;
+const photoUploadResults = document.querySelector<HTMLElement>("#photo-upload-results")!;
 const jobSection = document.querySelector<HTMLElement>("#job-section")!;
 const reviewSection = document.querySelector<HTMLElement>("#review-section")!;
 const reviewLoadForm = document.querySelector<HTMLFormElement>("#review-load-form")!;
@@ -949,6 +953,9 @@ signOutButton.addEventListener("click", () => {
   currentJobId = undefined;
   details.classList.add("hidden");
   uploadSection.classList.add("hidden");
+  photoUploadStatus.textContent = "";
+  photoUploadResults.replaceChildren();
+  document.querySelector<HTMLInputElement>("#photo-files")!.value = "";
   jobSection.classList.add("hidden");
   reviewSection.classList.add("hidden");
   signInButton.classList.remove("hidden");
@@ -975,6 +982,47 @@ uploadForm.addEventListener("submit", async (event) => {
     renderMessage(error instanceof Error ? error.message : "Upload failed.", true);
   } finally {
     uploadButton.disabled = false;
+  }
+});
+
+photoUploadForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const input = document.querySelector<HTMLInputElement>("#photo-files")!;
+  const files = [...(input.files ?? [])];
+  const organizationId = document.querySelector<HTMLInputElement>("#organization-id")!.value.trim();
+  const productId = document.querySelector<HTMLInputElement>("#product-id")!.value.trim();
+  if (!organizationId) { photoUploadStatus.textContent = "Enter an organization ID first."; return; }
+  if (files.length < 20 || files.length > 100) {
+    photoUploadStatus.textContent = "Choose 20–100 photos for a multi-view reconstruction.";
+    return;
+  }
+  photoUploadButton.disabled = true;
+  photoUploadResults.replaceChildren();
+  currentJobId = undefined;
+  jobIdInput.value = "";
+  const results = document.createDocumentFragment();
+  try {
+    for (let index = 0; index < files.length; index++) {
+      const file = files[index];
+      photoUploadStatus.textContent = `Uploading photo ${index + 1} of ${files.length}…`;
+      const result = await upload(file, organizationId, productId);
+      if (!result.processingJob?.jobId) throw new Error(`Photo ${file.name} completed without a processing job. Retry this collection.`);
+      const row = document.createElement("div");
+      row.className = "photo-upload-result";
+      row.textContent = `${file.name} — processing job ${result.processingJob.jobId}`;
+      results.append(row);
+      if (result.processingJob?.jobId) currentJobId = result.processingJob.jobId;
+      photoUploadResults.replaceChildren(results.cloneNode(true));
+    }
+    if (currentJobId) {
+      jobIdInput.value = currentJobId;
+      await load();
+    }
+    photoUploadStatus.textContent = "Photo collection uploaded. Each photo is now processing privately. After source review and rights confirmation, select the approved photos below to start reconstruction.";
+  } catch (error) {
+    photoUploadStatus.textContent = error instanceof Error ? error.message : "Photo collection upload failed. Retry the collection.";
+  } finally {
+    photoUploadButton.disabled = false;
   }
 });
 

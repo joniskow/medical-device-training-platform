@@ -1646,6 +1646,27 @@ Acceptance criteria:
 Verification: license report, quota/abuse tests, usage reconciliation, and cost dashboard review.
 Dependencies: E0-S5, E0-S6, E3-S5. Scope: M.
 
+#### Story E8-S5 — Expose the complete photo-to-Babylon pipeline through Azure
+
+As an authorized author, I want one Azure API workflow from private photo upload through reconstruction, Blender processing, artifact storage, and Babylon-ready delivery so no local Blender step is required.
+
+Tasks:
+
+- [ ] E8-T15 Add a bounded headless Blender post-processing/export stage to the Azure reconstruction worker, with executable/script configuration required in the deployed worker.
+- [ ] E8-T16 Record Blender lineage, hashes, stage status, and Babylon-ready GLB artifact metadata in the reconstruction quality report and job outcome.
+- [ ] E8-T17 Expose the upload, job-status, reconstruction, candidate, quality, and private artifact routes as one documented authenticated Azure API flow.
+- [ ] E8-T18 Deploy and verify the API/web and worker revisions from Git/Azure, including a real multi-photo run through Blender output and Babylon candidate preview.
+
+Acceptance criteria:
+
+- [ ] A photo set can be uploaded through authenticated Azure API routes without local file-system or Blender access.
+- [ ] The Azure worker invokes Blender headlessly, exports a self-contained GLB, validates it, and stores it privately with source and stage hashes.
+- [ ] The API reports durable processing state and returns private candidate/quality artifacts that the Babylon workbench can load.
+- [ ] The candidate remains `REVIEW_REQUIRED` and cannot become scored/published geometry without independent review.
+
+Verification: worker configuration test, Blender script/package test, API contract test, real Azure multi-view job, and Babylon browser preview.
+Dependencies: E8-S1, E8-S3, E3-S5. Scope: L.
+
 ## Epic E9 — Discovery, notifications, reporting, exports, and webhooks
 
 Outcome: optional trust surfaces work without becoming required for training or certification, and all downstream effects are durable, redacted, retryable, and observable.

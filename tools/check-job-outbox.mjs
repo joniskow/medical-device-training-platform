@@ -41,7 +41,10 @@ try {
   runtimePool = new Pool({ connectionString: runtimeConnectionString });
   publisherPool = new Pool({ connectionString: publisherConnectionString });
   const jobs = createPostgresJobStore(runtimePool);
-  const outbox = createPostgresOutboxStore(publisherPool);
+  // Keep this fixture isolated from unrelated pending rows left by other
+  // local checks. Production deliberately uses an unscoped publisher so one
+  // worker can drain all organizations; this check only needs one tenant.
+  const outbox = createPostgresOutboxStore(publisherPool, { organizationId: tenant.organizationId });
 
   const queued = await jobs.enqueue(job);
   assert.equal(queued.state, "QUEUED");

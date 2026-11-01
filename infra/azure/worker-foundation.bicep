@@ -61,13 +61,18 @@ resource serviceBus 'Microsoft.ServiceBus/namespaces@2022-10-01-preview' existin
   name: serviceBusNamespaceName
 }
 
+resource processingQueue 'Microsoft.ServiceBus/namespaces/queues@2024-01-01' existing = {
+  parent: serviceBus
+  name: queueName
+}
+
 resource storage 'Microsoft.Storage/storageAccounts@2023-05-01' existing = {
   name: storageAccountName
 }
 
 resource serviceBusReceiverRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-  name: guid(serviceBus.id, workerIdentity.id, 'service-bus-data-receiver')
-  scope: serviceBus
+  name: guid(processingQueue.id, workerIdentity.id, 'service-bus-data-receiver')
+  scope: processingQueue
   properties: {
     roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '4a9ae827-6dc8-4573-8ac7-8239d42aa03f')
     principalId: workerIdentity.properties.principalId
@@ -76,8 +81,8 @@ resource serviceBusReceiverRole 'Microsoft.Authorization/roleAssignments@2022-04
 }
 
 resource serviceBusSenderRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-  name: guid(serviceBus.id, workerIdentity.id, 'service-bus-data-sender')
-  scope: serviceBus
+  name: guid(processingQueue.id, workerIdentity.id, 'service-bus-data-sender')
+  scope: processingQueue
   properties: {
     roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '69a216fc-b8fb-44d8-bc22-1f3c2cd27a39')
     principalId: workerIdentity.properties.principalId

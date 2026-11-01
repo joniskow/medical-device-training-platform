@@ -8,5 +8,7 @@ assert.deepEqual(readReconstructionEngine({RECONSTRUCTION_ASSETS_DIR:'fixture-as
 assert.deepEqual(readReconstructionEngine({...paths,RECONSTRUCTION_ASSETS_DIR:'fixture-assets',PHOTOGRAMMETRY_FFMPEG:'fixture-ffmpeg',PHOTOGRAMMETRY_FFPROBE:'fixture-ffprobe'}).modes,['single-image','multi-view','video']);
 assert.throws(()=>readReconstructionEngine({...paths,PHOTOGRAMMETRY_PYTHON:''}),/CONFIGURATION_MISSING/);
 assert.throws(()=>readReconstructionEngine({...paths,PHOTOGRAMMETRY_FFMPEG:'fixture-ffmpeg'}),/VIDEO_TOOLS_INCOMPLETE/);
+assert.throws(()=>readReconstructionEngine({...paths,BLENDER_EXECUTABLE:'blender'}),/BLENDER_CONFIGURATION_INCOMPLETE/);
+assert.deepEqual(readReconstructionEngine({...paths,BLENDER_EXECUTABLE:'blender',BLENDER_SCRIPT:'fixture-scripts/blender_postprocess.py'}).modes,['multi-view']);
 await assert.rejects(()=>readReconstructionEngine(paths).generate({job:{payload:{mode:'single-image'}},sources:[]}),/ENGINE_UNAVAILABLE/);
 console.log('Reconstruction runtime configuration passed: disabled default, separate single/photo/video capabilities, paired video tools and unsupported-mode denial.');

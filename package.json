@@ -60,6 +60,7 @@
     "draft-generation:validate": "pnpm --filter @medical-device/ai-gateway... build && node tools/check-draft-generation-race.mjs",
     "architecture:test": "node tools/check-architecture-boundaries.mjs",
     "infra:validate": "node tools/check-asset-pipeline-infrastructure.mjs",
+    "backend:validate": "pnpm --filter @medical-device/api build && pnpm --filter @medical-device/worker build && node tools/check-backend-handoffs.mjs",
     "scene-manifest:validate": "pnpm --filter @medical-device/contracts build && node tools/check-training-scene-manifest.mjs",
     "training-scene:validate": "pnpm --filter @medical-device/web build && node tools/check-training-scene-composite.mjs",
     "demo:pipeline:validate": "node tools/check-demo-pipeline.mjs",

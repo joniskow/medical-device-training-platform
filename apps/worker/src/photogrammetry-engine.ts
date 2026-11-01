@@ -7,7 +7,7 @@ import {runReconstructionProcess} from './bounded-reconstruction-process.js';
 
 type VideoTools={kind:'native';ffmpeg:string;ffprobe:string}|{kind:'docker';executable:string;image:string};
 export function createPhotogrammetryEngine(options:{pythonExecutable:string;scriptsDirectory:string;openMvsDirectory:string;workDirectory?:string;videoTools?:VideoTools;
-  retainEvidenceDirectory?:string;calibration?:{file:string;sourceHashes:readonly string[]}}):ReconstructionEngine{
+  retainEvidenceDirectory?:string;calibration?:{file:string;sourceHashes:readonly string[]};blender?:{executable:string;script:string}}):ReconstructionEngine{
  return {modes:options.videoTools?['multi-view','video']:['multi-view'],async generate({job,sources}){
   if(!['multi-view','video'].includes(job.payload.mode)||job.payload.mode==='video'&&(!options.videoTools||sources.length!==1)||job.payload.mode==='multi-view'&&(sources.length<20||sources.length>100))throw Error('RECONSTRUCTION_MODE_UNAVAILABLE');
   const root=resolve(options.workDirectory??tmpdir());await mkdir(root,{recursive:true});const work=await mkdtemp(join(root,'mdt-photogrammetry-')),images=join(work,'images'),run=join(work,'result'),scripts=resolve(options.scriptsDirectory);
@@ -33,6 +33,21 @@ export function createPhotogrammetryEngine(options:{pythonExecutable:string;scri
    const args=[join(scripts,'reconstruct.py'),'--images',inputImages,'--output',run,'--openmvs-dir',resolve(options.openMvsDirectory),'--detail','high'];
    if(options.calibration){const actual=sources.map(({source})=>source.sourceHash).sort(),expected=[...options.calibration.sourceHashes].sort();if(JSON.stringify(actual)!==JSON.stringify(expected))throw Error('RECONSTRUCTION_CALIBRATION_SOURCE_MISMATCH');args.push('--camera-calibration',resolve(options.calibration.file));}
    await launch(options.pythonExecutable,args,3_300_000);
+   if(options.blender){
+    const source=join(run,'candidate.glb'),blenderCandidate=join(run,'candidate-blender.glb');
+    const originalHash=createHash('sha256').update(await readFile(source)).digest('hex');
+    const blenderResult=await launch(options.blender.executable,['-b','--python',resolve(options.blender.script),'--','--input',source,'--output',blenderCandidate],300_000);
+    const blenderLine=blenderResult.stdout.trim().split(/\r?\n/).filter(Boolean).at(-1);
+    let blenderReport:any;try{blenderReport=JSON.parse(blenderLine??'');}catch{throw Error('BLENDER_STAGE_INVALID');}
+    if(blenderReport?.stage!=='blender'||blenderReport.inputSha256!==originalHash)throw Error('BLENDER_STAGE_INVALID');
+    const blenderBytes=await readFile(blenderCandidate),blenderOutputHash=createHash('sha256').update(blenderBytes).digest('hex');
+    if(blenderReport.outputSha256!==blenderOutputHash)throw Error('BLENDER_STAGE_INVALID');
+    await copyFile(blenderCandidate,source);
+    await launch(options.pythonExecutable,[join(scripts,'package_candidate.py'),run],180_000);
+    const packaged=JSON.parse((await readFile(join(run,'quality.json'))).toString('utf8'));
+    packaged.adapter={...(packaged.adapter??{}),blender:{version:blenderReport.version,inputSha256:originalHash,outputSha256:blenderOutputHash,meshObjects:blenderReport.meshObjects}};
+    await writeFile(join(run,'quality.json'),JSON.stringify(packaged,null,2)+'\n');
+   }
    async function artifact(name:string,limit:number){const file=join(run,name),stat=await lstat(file);if(!stat.isFile()||stat.isSymbolicLink()||stat.size<1||stat.size>limit||!(await realpath(file)).startsWith(await realpath(run)+sep))throw Error('RECONSTRUCTION_OUTPUT_INVALID');return readFile(file);}
    const candidate=await artifact('candidate-private.glb',64*1024*1024),quality=await artifact('quality.json',256*1024);
    const report=JSON.parse(quality.toString('utf8')),sourceViews=[];

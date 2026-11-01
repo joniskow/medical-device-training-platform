@@ -16,6 +16,18 @@ The POC uses operator-assisted reconstruction from photo sets only. The server g
 
 The worker is configured for one reconstruction at a time with 4 CPU and 8 GiB memory. Its reconstruction runtime is `/opt/reconstruction-runtime/bin/python`, its OpenMVS directory is `/opt/openmvs`, and its working directory is `/tmp/reconstruction`. Blob storage and queue/database secrets remain managed by Azure identity and Key Vault; no secrets are stored in the image or workspace.
 
+## Azure API flow
+
+The complete authenticated handoff is:
+
+1. `POST /api/v1/organizations/{organizationId}/assets/upload-sessions` once per photo.
+2. `PUT /api/v1/upload-sessions/{uploadSessionId}/content`, then `POST /api/v1/upload-sessions/{uploadSessionId}/complete` for each photo.
+3. After source processing, review and rights attestation, `POST /api/v1/reconstructions` with 20–100 approved source references.
+4. Poll `GET /api/v1/reconstructions/{jobId}` or `GET /api/v1/jobs/{jobId}` until the durable job reaches `REVIEW_REQUIRED`.
+5. Retrieve the private `candidate` and `quality` routes from the reconstruction detail and open the candidate in the Babylon workbench.
+
+The worker revision targeted by the current source changes adds a required headless Blender stage between photogrammetry and artifact publication. It imports the reconstructed GLB, exports a self-contained GLB, records Blender input/output hashes and version in `quality.json`, validates the exported candidate, and stores it privately. The currently deployed revision listed above predates that Blender stage and must not be described as completing it.
+
 ## Validation evidence
 
 The worker image completed an actual 48-photo run with all 48 views registered. The output candidate was private/self-contained and had 176,844 triangles, 115,322 vertices, zero degenerate triangles, zero non-manifold edges, and `REVIEW_REQUIRED` status. The run retained the required uncertainty flags: scale and component mapping were not verified.

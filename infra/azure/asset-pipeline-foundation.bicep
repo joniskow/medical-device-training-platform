@@ -15,9 +15,6 @@ param serviceBusNamespaceName string
 @description('Existing worker identity that consumes processing queues.')
 param workerIdentityName string
 
-@description('Existing API identity that submits processing jobs.')
-param apiIdentityName string
-
 @description('Private containers required by the asset and reconstruction pipeline.')
 param containerNames array = [
   'source-assets'
@@ -133,10 +130,6 @@ resource workerIdentity 'Microsoft.ManagedIdentity/userAssignedIdentities@2023-0
   name: workerIdentityName
 }
 
-resource apiIdentity 'Microsoft.ManagedIdentity/userAssignedIdentities@2023-01-31' existing = {
-  name: apiIdentityName
-}
-
 resource workerReceiver 'Microsoft.Authorization/roleAssignments@2022-04-01' = [for (queueName, index) in processingQueueNames: {
   name: guid(processingQueues[index].id, workerIdentity.id, 'asset-pipeline-worker-receiver')
   scope: processingQueues[index]
@@ -144,16 +137,6 @@ resource workerReceiver 'Microsoft.Authorization/roleAssignments@2022-04-01' = [
     principalId: workerIdentity.properties.principalId
     principalType: 'ServicePrincipal'
     roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '4a9ae827-6dc8-4573-8ac7-8239d42aa03f')
-  }
-}]
-
-resource apiSender 'Microsoft.Authorization/roleAssignments@2022-04-01' = [for (queueName, index) in processingQueueNames: {
-  name: guid(processingQueues[index].id, apiIdentity.id, 'asset-pipeline-api-sender')
-  scope: processingQueues[index]
-  properties: {
-    principalId: apiIdentity.properties.principalId
-    principalType: 'ServicePrincipal'
-    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '69a216fc-b8fb-44d8-bc22-1f3c2cd27a39')
   }
 }]
 

@@ -76,6 +76,17 @@
             <label for="source-file">Source file <input id="source-file" name="sourceFile" type="file" accept=".glb,model/gltf-binary,application/pdf,image/png,image/jpeg,image/webp,video/mp4,video/webm,video/quicktime" required /></label>
             <button id="upload" type="submit">Upload and start processing</button>
           </form>
+
+          <section id="photo-upload-panel" aria-labelledby="photo-upload-title">
+            <h2 id="photo-upload-title">Upload photos for a 3D model</h2>
+            <p class="muted">Choose 20–100 overlapping photos of the same device. Photos are uploaded privately and processed independently so each source can be checked before reconstruction.</p>
+            <form id="photo-upload-form">
+              <label for="photo-files">Device photos <input id="photo-files" name="photoFiles" type="file" accept="image/png,image/jpeg,image/webp" multiple required /></label>
+              <button id="photo-upload" type="submit">Upload photo collection</button>
+            </form>
+            <p id="photo-upload-status" role="status" aria-live="polite"></p>
+            <div id="photo-upload-results" class="photo-upload-results" aria-live="polite"></div>
+          </section>
         </section>
 
         <section id="job-section" class="hidden" aria-labelledby="job-title">

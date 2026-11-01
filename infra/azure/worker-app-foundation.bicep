@@ -117,6 +117,8 @@ resource worker 'Microsoft.App/containerApps@2024-03-01' = {
             { name: 'RECONSTRUCTION_SCRIPTS_DIR', value: '/opt/reconstruction-scripts' }
             { name: 'PHOTOGRAMMETRY_OPENMVS_DIR', value: '/opt/openmvs' }
             { name: 'RECONSTRUCTION_WORK_DIR', value: '/tmp/reconstruction' }
+            { name: 'BLENDER_EXECUTABLE', value: '/usr/bin/blender' }
+            { name: 'BLENDER_SCRIPT', value: '/opt/reconstruction-scripts/blender_postprocess.py' }
             { name: 'WORKER_MAX_CONCURRENT_CALLS', value: '1' }
           ]
         }
