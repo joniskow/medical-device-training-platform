@@ -1,0 +1,41 @@
+import assert from 'node:assert/strict';
+import {readFile,mkdir,writeFile} from 'node:fs/promises';
+import {randomUUID,createHash} from 'node:crypto';
+import {Pool} from 'pg';
+import {applyProcessingJobMigration,createPostgresJobStore,createPostgresAssetLifecycleStore,createPostgresKnowledgeStore,createPostgresCourseReviewStore,createPostgresAiRunStore} from '../packages/db/dist/index.js';
+import {createPdfAssetProcessor} from '../apps/worker/dist/pdf-asset-processor.js';
+import {processAssetJob} from '../apps/worker/dist/job-runner.js';
+import {createDeterministicAssetScanner} from '../apps/worker/dist/asset-scanner.js';
+import {createSourceGroundedDraftService,createDeterministicAiGateway,createAzureOpenAiGateway} from '../packages/ai-gateway/dist/index.js';
+const pool=new Pool({connectionString:process.env.DATABASE_ADMIN_URL??'postgresql://local_app:local_only_change_me@127.0.0.1:54329/medical_device'});
+const id='pdf:'+randomUUID(),tenant={organizationId:id,actorId:'author',correlationId:id},assetVersionId=id+':version';
+const bytes=await readFile('fixtures/reference/manual/aurora-infusion-controller-manual.pdf'),sha256=createHash('sha256').update(bytes).digest('hex');
+const objects=new Map([[id+'/manual.pdf',bytes]]);
+const storage={readObject:async({blobKey,maxBytes})=>{const data=objects.get(blobKey);assert(data&&data.length<=maxBytes);return {bytes:data,contentType:'application/pdf',sha256:createHash('sha256').update(data).digest('hex')};},verifyChecksum:async()=>true,putObject:async({blobKey,bytes})=>{objects.set(blobKey,Buffer.from(bytes));},quarantine:async()=>{}};
+try{
+ await applyProcessingJobMigration(pool);
+ await pool.query("INSERT INTO assets(asset_id,organization_id,source_type,status,created_by,updated_by,created_at,updated_at) VALUES($1,$2,'pdf','APPROVED','author','author',now(),now())",[id+':asset',id]);
+ await pool.query("INSERT INTO asset_versions(asset_version_id,asset_id,organization_id,source_type,blob_key,file_name,content_type,size_bytes,sha256,state,created_by,created_at,updated_at) VALUES($1,$2,$3,'pdf',$4,'manual.pdf','application/pdf',$5,$6,'READY_FOR_SCAN','author',now(),now())",[assetVersionId,id+':asset',id,id+'/manual.pdf',bytes.length,sha256]);
+ const knowledge=createPostgresKnowledgeStore(pool),jobs=createPostgresJobStore(pool),drafts=createPostgresCourseReviewStore(pool);
+ const processor=createPdfAssetProcessor({storage,knowledge,python:process.env.PDF_PYTHON??'python',fallback:{inspect:async()=>({supported:false,reasons:['UNSUPPORTED']}),canProcess:async()=>false,process:async()=>{throw Error('Unexpected fallback');}}});
+ const payload={inputAssetVersionId:assetVersionId,sourceType:'pdf',blobKey:id+'/manual.pdf',sha256,sizeBytes:bytes.length,contentType:'application/pdf'};
+ const job={jobId:id+':job',jobType:'asset.process',attempt:1,maxAttempts:3,idempotency:{key:id,requestHash:sha256},tenant,payload};
+ await jobs.enqueue(job);
+ const processed=await processAssetJob({tenant,jobId:job.jobId,workerId:'pdf-fixture',jobStore:jobs,storage,processor,lifecycleStore:createPostgresAssetLifecycleStore(pool),scanner:createDeterministicAssetScanner()});
+ assert.equal(processed.state,'SUCCEEDED',JSON.stringify(processed.lastFailure));
+ const passages=await knowledge.listForAssetVersions(tenant,[assetVersionId]);assert(passages.length>0);assert(passages.every(c=>c.citation.assetVersionId===assetVersionId&&c.citation.page>0));
+ const firstIds=passages.map(c=>c.chunkId);await processor.process(payload,job);assert.deepEqual((await knowledge.listForAssetVersions(tenant,[assetVersionId])).map(c=>c.chunkId),firstIds,'Retry changed extraction identity');
+ const draft=await drafts.createDraft({tenant,title:'Uploaded manual course',idempotencyKey:'course'});
+ const live=process.argv.includes('--azure');
+ const provider=live?createAzureOpenAiGateway({endpoint:process.env.AZURE_OPENAI_ENDPOINT,apiKey:process.env.AZURE_OPENAI_API_KEY,deployment:process.env.AZURE_OPENAI_DEPLOYMENT,model:process.env.AZURE_OPENAI_MODEL,apiVersion:process.env.AZURE_OPENAI_API_VERSION,fetchImpl:(url,init)=>fetch(url,{...init,signal:AbortSignal.timeout(90000)})}):createDeterministicAiGateway();
+ const gateway={execute:async request=>{const result=await provider.execute(request);if(live){await mkdir('output',{recursive:true});await writeFile('output/pdf-course-provider-response.json',JSON.stringify(result,null,2));}return result;}};
+ const generated=await createSourceGroundedDraftService({knowledge,gateway,aiRuns:createPostgresAiRunStore(pool),draftStore:drafts}).generate({...tenant,courseVersionId:draft.courseVersionId},{sourceArtifactIds:[assetVersionId],tokenBudget:4000,userInstruction:'Create a useful source-grounded course from this fictional manual, with instructional rich_text activities. Use only documented procedures. Copy exact citations on each activity and the course. Do not invent models, media or certification policies.'});
+ assert.equal(generated.result.status,'DRAFT',JSON.stringify(generated.result));assert.equal(generated.appliedToCourse,true);
+ const saved=(await drafts.get(tenant,draft.courseVersionId)).courseVersion;
+ assert.equal(saved.content._source.aiRunId,generated.aiRunId);assert.equal(saved.revision,2);
+ await mkdir('output',{recursive:true});await writeFile(live?'output/pdf-course-live.json':'output/pdf-course-local.json',JSON.stringify({provider:live?'azure':'deterministic',pages:processed.outcome.details.pageCount,passageCount:passages.length,jobState:processed.state,course:saved.content,usage:generated.result.metrics,warnings:generated.result.warnings},null,2));
+ console.log(`PDF-to-course passed: real PDF extraction, durable job/lifecycle, searchable citations, repeat-safe indexing, ${live?'live Azure':'deterministic'} generation and persisted editable course.`);
+}finally{
+ for(const table of ['audit_events','ai_runs','course_versions','courses','processing_job_outbox','processing_jobs','knowledge_chunks','asset_versions','assets'])await pool.query('DELETE FROM '+table+' WHERE organization_id=$1',[id]).catch(()=>{});
+ await pool.end();
+}

@@ -1,0 +1,13 @@
+import assert from 'node:assert/strict';
+import {readFile} from 'node:fs/promises';
+const template=JSON.parse(await readFile('infra/azure/email-delivery-reports.json','utf8'));
+const resources=template.resources;
+const bus=resources.find(r=>r.type==='Microsoft.ServiceBus/namespaces');assert.equal(bus.properties.disableLocalAuth,true);assert.equal(bus.properties.minimumTlsVersion,'1.2');
+const queue=resources.find(r=>r.type==='Microsoft.ServiceBus/namespaces/queues');assert.equal(queue.properties.maxDeliveryCount,5);assert.equal(queue.properties.deadLetteringOnMessageExpiration,true);
+assert.equal(template.parameters.messageTimeToLive.defaultValue,undefined);assert.equal(template.parameters.eventTimeToLiveMinutes.defaultValue,undefined);
+const roles=resources.filter(r=>r.type==='Microsoft.Authorization/roleAssignments');assert.equal(roles.length,3);
+const worker=roles.find(r=>r.properties.principalId==="[parameters('workerPrincipalId')]");assert.ok(worker.scope.includes('namespaces/queues'));assert.ok(worker.properties.roleDefinitionId.includes('4f6d3b9b-027b-4f4c-9142-0e5a2a2247e0'));
+const subscription=resources.find(r=>r.type==='Microsoft.EventGrid/systemTopics/eventSubscriptions');assert.deepEqual(subscription.properties.filter.includedEventTypes,['Microsoft.Communication.EmailDeliveryReportReceived']);assert.equal(subscription.properties.eventDeliverySchema,'EventGridSchema');
+assert.equal(subscription.properties.deliveryWithResourceIdentity.identity.type,'SystemAssigned');assert.equal(subscription.properties.deliveryWithResourceIdentity.destination.endpointType,'ServiceBusQueue');
+assert.equal(subscription.properties.deadLetterWithResourceIdentity.identity.type,'SystemAssigned');assert.equal(subscription.properties.deadLetterWithResourceIdentity.deadLetterDestination.endpointType,'StorageBlob');
+console.log('Compiled email-report infrastructure passed: dedicated namespace, local authentication disabled, queue-scoped receiver/sender, managed Event Grid delivery, durable failure destinations and explicit retention inputs. Not deployed.');

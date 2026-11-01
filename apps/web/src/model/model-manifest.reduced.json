@@ -1,0 +1,137 @@
+{
+  "schemaVersion": "model-manifest.v1",
+  "format": "glb",
+  "modelVersionId": "modelv_aic001_reference_v1",
+  "releaseBindingId": "releasebind_aic001_preview_v1",
+  "sourceHash": "35157c3eb2e70a4a3aea9b066e45ee97d3b05c652f42c520ac7b516e4efc9620",
+  "unitSystem": "meter",
+  "scaleMeters": 1,
+  "upAxis": "Y",
+  "handedness": "right",
+  "origin": "bounding-box-center",
+  "forwardAxis": "-Z",
+  "normalizationStatus": "CANONICAL",
+  "sceneNodeCount": 4,
+  "meshCount": 3,
+  "materialCount": 3,
+  "textureCount": 0,
+  "triangleCount": 3,
+  "materials": [
+    {
+      "materialId": "mat-control-panel",
+      "name": "Control panel"
+    },
+    {
+      "materialId": "mat-safety-cover",
+      "name": "Safety cover"
+    },
+    {
+      "materialId": "mat-line-sensor",
+      "name": "Line sensor"
+    }
+  ],
+  "textures": [],
+  "performanceBudget": {
+    "minimumFps": 30,
+    "interactiveWithinMs": 5000,
+    "maxMemoryMb": 96
+  },
+  "components": [
+    {
+      "componentId": "AIC-C01",
+      "nodePath": "Aurora Infusion Controller/Control Panel",
+      "displayName": "Control Panel",
+      "aliases": [],
+      "interactionCapabilities": [
+        "select"
+      ],
+      "interactionVolume": {
+        "min": [
+          -0.4,
+          -0.4,
+          -0.4
+        ],
+        "max": [
+          0.4,
+          0.4,
+          0.4
+        ]
+      }
+    },
+    {
+      "componentId": "AIC-C02",
+      "nodePath": "Aurora Infusion Controller/Safety Cover",
+      "displayName": "Safety Cover",
+      "aliases": [],
+      "interactionCapabilities": [
+        "select",
+        "rotate"
+      ],
+      "interactionVolume": {
+        "min": [
+          -0.4,
+          -0.4,
+          -0.4
+        ],
+        "max": [
+          0.4,
+          0.4,
+          0.4
+        ]
+      },
+      "permittedTransforms": {
+        "rotationY": {
+          "min": 0,
+          "max": 1.5707963267948966,
+          "step": 1.5707963267948966,
+          "snap": 1.5707963267948966
+        }
+      }
+    },
+    {
+      "componentId": "AIC-C03",
+      "nodePath": "Aurora Infusion Controller/Line Sensor",
+      "displayName": "Line Sensor",
+      "aliases": [],
+      "interactionCapabilities": [
+        "select",
+        "translate"
+      ],
+      "interactionVolume": {
+        "min": [
+          -0.4,
+          -0.4,
+          -0.4
+        ],
+        "max": [
+          0.4,
+          0.4,
+          0.4
+        ]
+      },
+      "permittedTransforms": {
+        "translationX": {
+          "min": 0,
+          "max": 0.2,
+          "step": 0.2,
+          "snap": 0.2
+        }
+      }
+    }
+  ],
+  "variant": {
+    "variantId": "reduced",
+    "role": "reduced-complexity",
+    "targetProfiles": [
+      "ios-webgl2",
+      "android-webgl2"
+    ],
+    "materialMode": "flat-reduced",
+    "geometryReduction": "not-applicable-three-component-floor",
+    "preservesComponentIds": [
+      "AIC-C01",
+      "AIC-C02",
+      "AIC-C03"
+    ]
+  }
+}

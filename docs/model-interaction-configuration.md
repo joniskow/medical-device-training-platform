@@ -1,0 +1,9 @@
+# Imported model interaction configuration
+
+Before approval, authors can edit component display names and enable rotation around Y (radians) or translation along X (metres), with minimum, maximum, step and optional snap. These are the movement axes supported by the current renderer and authoritative simulation engine. Component IDs and node mappings are preserved. Limits must include zero and snapping must preserve the resting position.
+
+The imported-model review screen saves these controls through `POST /api/v1/model-imports/:id/configuration`. Requests contain `expectedRevision` and the complete component configuration. The API requires an author role. The transaction locks the model and source, checks review state and revision, writes a new private manifest object, updates model/component metadata and records an audit event. A failed database commit can leave an unreferenced manifest object, but does not replace the previous manifest. Approved models are immutable; a new upload is required to change their configuration.
+
+Model approval now requires `expectedRevision` alongside the source hash, confirmation, rationale and idempotency key. This prevents approval of interaction settings changed since the reviewer opened the model. The browser requires saved settings and a fresh preview before approval. Unsaved configuration blocks approval. Successful review messages are no longer overwritten by preview performance updates.
+
+Full build, architecture boundaries, restricted PostgreSQL/HTTP GLB import/configuration/review tests, and source-review regression passed. Tests verify stored manifest/component consistency, invalid limits and unknown-component rejection, stale edits/reviews, author/reviewer roles, duplicate review audit and approved-model immutability. Deployed browser usability and a complete configured simulation remain unverified while browser target approval is pending.

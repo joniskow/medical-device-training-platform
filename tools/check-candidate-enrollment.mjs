@@ -1,0 +1,130 @@
+import {createPersonalWalletStore} from '../packages/db/dist/index.js';
+import {createPostgresEnrollmentService} from '../apps/api/dist/enrollment-service.js';
+import {createPostgresAssessmentSessionService} from '../apps/api/dist/assessment-session-service.js';
+import assert from 'node:assert/strict';
+import {randomUUID} from 'node:crypto';
+import {Pool} from 'pg';
+import {applyProcessingJobMigration,createPostgresOrganizationMembershipStore,createPostgresCourseReviewStore,createCourseOfferingStore,createCandidateEnrollmentStore,createPersonalAccountStore,createCandidateLearningAccessStore,createPostgresCredentialService,seedActiveOrganizationMembership,withTenantTransaction,assignEnrollmentInTransaction} from '../packages/db/dist/index.js';
+import {verifiedAccountFixture} from './verified-account-fixture.mjs';
+import {createJobStatusHttpServer} from '../apps/api/dist/job-status-http.js';
+const pool=new Pool({connectionString:'postgresql://local_app:local_only_change_me@127.0.0.1:54329/medical_device'}),runtime=new Pool({connectionString:'postgresql://local_runtime:local_runtime_only_change_me@127.0.0.1:54329/medical_device'});
+const fixtureId='candidate:'+randomUUID(),actor=fixtureId+':admin',learner=fixtureId+':learner',other=fixtureId+':other',race=fixtureId+':race',grants=[],orgs=[],accounts=verifiedAccountFixture(pool,fixtureId);
+let server;
+try{
+ await applyProcessingJobMigration(pool);await accounts.prepare();for(const user of [learner,other,race])await accounts.seed(user);
+ for(const fn of ['public.resolve_personal_credential(text,text)','public.read_personal_wallet(text,text)','public.read_candidate_learning_access(text,text,text)','public.enroll_course_candidate(text,uuid,integer,text,text,text)','public.manage_course_offering(text,text,text,jsonb,integer,text,text,text)','public.create_training_organization(text,text,text,text)'])if(!(await pool.query("SELECT has_function_privilege('local_runtime',$1,'EXECUTE') allowed",[fn])).rows[0].allowed){await pool.query(`GRANT EXECUTE ON FUNCTION ${fn} TO local_runtime`);grants.push(fn);}
+ const membership=createPostgresOrganizationMembershipStore(runtime),offering=createCourseOfferingStore(runtime),candidates=createCandidateEnrollmentStore(runtime);
+ const organizationId=(await membership.createOrganization(actor,'Candidate issuer','create',fixtureId)).organizationId;orgs.push(organizationId);const tenant={organizationId,actorId:actor,correlationId:fixtureId};
+ const access=createCandidateLearningAccessStore(runtime);
+ const assessment={schemaVersion:'assessment-definition.v1',assessmentId:'quiz',version:1,passScore:1,questions:[{questionId:'q',type:'multiple_choice',prompt:'Choose',options:[{optionId:'a',text:'First'},{optionId:'b',text:'Second'}],correctOptionIds:['a'],points:1,competencyIds:['skill'],rationale:'Private rationale',citations:[{assetVersionId:'manual',page:1}]}]};
+ const policy={schemaVersion:'certification-policy.v1',policyId:'policy',version:1,requiredActivityIds:['activity'],requiredModuleIds:[],requiredEvidence:['assessment.passed'],resultSelection:'latest',passScore:1,maxAttempts:3,cooldownSeconds:0,attemptTtlSeconds:1800,repeatedFailureReviewAfter:null,expirationDays:365,publicVerification:{enabled:true,issuerName:'Issuer',courseTitle:'Candidate course'}};
+ const content={title:'Candidate course',policy,modules:[{moduleId:'module',activities:[{activityId:'activity',type:'multiple_choice',assessment}]}]};
+ const draft=await createPostgresCourseReviewStore(pool).createDraft({tenant,title:'Candidate course',idempotencyKey:'draft'}),release='release:'+randomUUID();
+ await pool.query(`INSERT INTO release_manifests(release_id,organization_id,course_version_id,status,manifest,release_hash,published_by,idempotency_key,request_hash,created_at) VALUES($1,$2,$3,'PUBLISHED',$4,$5,$6,'publish','hash',now())`,[release,organizationId,draft.courseVersionId,{revision:4,content},'b'.repeat(64),actor]);
+ const settings={mode:'UNLISTED',audience:'Candidates',productScope:'Synthetic product',prerequisites:'None',issuerStatement:'Product training',intendedUse:'Not licensure',accessibilityPath:'Text',estimatedMinutes:30,revision:0,reason:'Candidate course',idempotencyKey:'offer'};
+ const opened=await offering.update(tenant,release,settings),input={publicId:opened.publicId,revision:opened.revision,noticeVersion:'candidate-notice.v2',idempotencyKey:'enroll'};
+ await assert.rejects(candidates.enroll('unknown',input,'test'),/VERIFIED_ACCOUNT_REQUIRED/);
+ await accounts.verify(learner,false);await assert.rejects(candidates.enroll(learner,input,'test'),/VERIFIED_ACCOUNT_REQUIRED/);await accounts.verify(learner);
+ await assert.rejects(candidates.enroll(learner,{...input,revision:99},'test'),/DISCLOSURES_CHANGED/);
+ const broken={async query(sql,args){const c=await runtime.connect();try{await c.query('BEGIN');await c.query(sql,args);throw Error('Injected rollback');}finally{await c.query('ROLLBACK');c.release();}}};
+ await assert.rejects(createCandidateEnrollmentStore(broken).enroll(learner,input,'rollback'),/Injected rollback/);assert.equal((await pool.query('SELECT count(*)::int n FROM enrollments WHERE organization_id=$1',[organizationId])).rows[0].n,0);
+ const results=await Promise.all(Array.from({length:4},()=>candidates.enroll(learner,input,'test')));assert.ok(results.every(value=>value.enrollmentId===results[0].enrollmentId));
+ assert.equal((await pool.query('SELECT count(*)::int n FROM candidate_enrollment_consents WHERE user_id=$1',[learner])).rows[0].n,1);
+ assert.equal((await pool.query("SELECT count(*)::int n FROM audit_events WHERE organization_id=$1 AND event_type='CANDIDATE_ENROLLED'",[organizationId])).rows[0].n,1);
+ for(const table of ['organization_memberships','role_assignments'])assert.equal((await pool.query(`SELECT count(*)::int n FROM ${table} WHERE organization_id=$1 AND subject=$2`,[organizationId,learner])).rows[0].n,0);
+ const consent=(await pool.query('SELECT * FROM candidate_enrollment_consents WHERE user_id=$1',[learner])).rows[0];assert.equal(consent.disclosures.issuerName,'Candidate issuer');assert.equal(consent.disclosures.title,'Candidate course');assert.equal(consent.disclosures.publishedRevision,4);assert.equal(consent.disclosures.certification.passScore,1);assert.deepEqual(consent.disclosures.certification.requiredActivities,[{title:'Required activity',kind:'assessment',passScore:1}]);assert.ok(!JSON.stringify(consent.disclosures.certification).includes('Private rationale'));assert.equal(consent.release_hash,'b'.repeat(64));
+ await assert.rejects(candidates.enroll(learner,{...input,noticeVersion:'candidate-notice.v1',idempotencyKey:'fresh-old-notice'},fixtureId),/CANDIDATE_DISCLOSURES_CHANGED/);
+ await pool.query(`INSERT INTO candidate_enrollment_consents SELECT user_id,'legacy-notice',organization_id,enrollment_id,release_id,encode(sha256(convert_to(jsonb_build_array($2::uuid,$3::integer,'candidate-notice.v1')::text,'UTF8')),'hex'),offering_revision,release_hash,disclosures-'certification'-'publishedRevision','candidate-notice.v1',accepted_at FROM candidate_enrollment_consents WHERE user_id=$1 AND request_key='enroll'`,[learner,input.publicId,input.revision]);
+ const legacyReplay=await candidates.enroll(learner,{...input,noticeVersion:'candidate-notice.v1',idempotencyKey:'legacy-notice'},fixtureId);assert.equal(legacyReplay.enrollmentId,consent.enrollment_id);assert.equal((await pool.query("SELECT disclosures ? 'certification' present FROM candidate_enrollment_consents WHERE user_id=$1 AND request_key='legacy-notice'",[learner])).rows[0].present,false,'Legacy consent was rewritten');
+ assert.ok(!JSON.stringify(consent.disclosures).includes('assessmentSecret'));
+ await assert.rejects(candidates.enroll(learner,{...input,revision:2},'test'),/IDEMPOTENCY_KEY_REUSED/);
+ await seedActiveOrganizationMembership(pool,{subject:race,organizationId});
+ const raced=await Promise.all([candidates.enroll(race,input,'race'),withTenantTransaction(runtime,tenant,c=>assignEnrollmentInTransaction(c,tenant,race,release))]);assert.equal(raced[0].enrollmentId,raced[1].enrollmentId);assert.equal((await pool.query('SELECT count(*)::int n FROM enrollments WHERE organization_id=$1 AND learner_id=$2',[organizationId,race])).rows[0].n,1);
+ await pool.query("UPDATE enrollments SET status='SUSPENDED' WHERE enrollment_id=$1",[results[0].enrollmentId]);await assert.rejects(candidates.enroll(learner,input,'test'),/ENROLLMENT_INACTIVE/);await pool.query("UPDATE enrollments SET status='ACTIVE' WHERE enrollment_id=$1",[results[0].enrollmentId]);
+ await offering.update(tenant,release,{...settings,mode:'PRIVATE',revision:1,idempotencyKey:'private'});assert.equal((await candidates.enroll(learner,input,'test')).enrollmentId,results[0].enrollmentId);await assert.rejects(candidates.enroll(other,input,'test'),/COURSE_UNAVAILABLE/);
+ await pool.query("UPDATE organizations SET status='SUSPENDED' WHERE organization_id=$1",[organizationId]);await assert.rejects(candidates.enroll(learner,input,'test'),/COURSE_UNAVAILABLE/);await pool.query("UPDATE organizations SET status='ACTIVE' WHERE organization_id=$1",[organizationId]);
+ await assert.rejects(runtime.query('SELECT * FROM candidate_enrollment_consents'),/permission denied/);assert.equal((await pool.query("SELECT count(*)::int n FROM pg_proc p,LATERAL aclexplode(p.proacl) a WHERE p.proname='enroll_course_candidate' AND a.grantee=0 AND a.privilege_type='EXECUTE'")).rows[0].n,0);
+ const reopened=await offering.update(tenant,release,{...settings,mode:'PUBLIC',revision:2,idempotencyKey:'reopen'});
+ const principal={subject:other,issuer:'https://fixture.example.test/'+encodeURIComponent(fixtureId),identityTenant:fixtureId,verifiedEmail:'synthetic@example.test',verificationExpiresAt:new Date(Date.now()+3600000).toISOString(),roles:[]};
+ let allowMembershipLookup=false;
+ server=createJobStatusHttpServer({personalWalletStore:createPersonalWalletStore(runtime),candidateLearningAccessStore:access,enrollmentService:createPostgresEnrollmentService(runtime),assessmentSessionService:createPostgresAssessmentSessionService(runtime),credentialService:createPostgresCredentialService(runtime),candidateEnrollmentStore:candidates,personalAccountStore:createPersonalAccountStore(pool),statusService:{get:async()=>null,retry:async()=>null},authenticator:{authenticate:async req=>req.headers.authorization?principal:null},organizationContextResolver:{resolveActiveOrganizations:async()=>{if(!allowMembershipLookup)throw Error('Candidate enrollment must not require memberships');return [];}}});await new Promise(r=>server.listen(0,'127.0.0.1',r));
+ const url=`http://127.0.0.1:${server.address().port}/api/v1/candidate-enrollments`,headers={authorization:'signed-test','content-type':'application/json','idempotency-key':'http'},body={publicId:reopened.publicId,revision:reopened.revision,noticeVersion:'candidate-notice.v2',confirmed:true};
+ assert.equal((await fetch(url,{method:'POST'})).status,401);
+ for(const extra of [{confirmed:false},{learnerId:learner},{organizationId},{sharingEnabled:true},{noticeVersion:'unknown'}])assert.equal((await fetch(url,{method:'POST',headers,body:JSON.stringify({...body,...extra})})).status,422);
+ assert.equal((await fetch(url,{method:'POST',headers,body:JSON.stringify(body)})).status,200);
+ principal.verifiedEmail=undefined;assert.equal((await fetch(url,{method:'POST',headers,body:JSON.stringify(body)})).status,403);
+ principal.verifiedEmail='synthetic@example.test';principal.roles=['operator','organization_admin'];
+ const mine=await fetch(new URL('/api/v1/my-candidate-enrollments',url),{headers});assert.equal(mine.status,200);const list=await mine.json();assert.equal(list.items.length,1);assert.equal(list.items[0].issuerName,'Candidate issuer');assert.ok(!JSON.stringify(list).includes('correctOptionIds'));
+ const myEnrollment=list.items[0].enrollmentId;allowMembershipLookup=true;
+ const scoped={...headers,'x-organization-id':organizationId};
+ const request=(path,method='GET',body)=>fetch(new URL('/api/v1/'+path,url),{method,headers:scoped,...(body?{body:JSON.stringify(body)}:{})});
+ const own=await request('enrollments/'+encodeURIComponent(myEnrollment));assert.equal(own.status,200);assert.ok(!JSON.stringify(await own.json()).includes('correctOptionIds'));
+ assert.equal((await request('enrollments/'+encodeURIComponent(results[0].enrollmentId))).status,404);
+ for(const path of ['organization-profile','members','knowledge-sources','courses','enrollments/options?kind=members','credentials?learnerId='+encodeURIComponent(learner)])assert.equal((await request(path)).status,403,path);
+ assert.equal((await request('enrollments','POST',{learnerId:other,releaseId:release})).status,403);
+ assert.equal((await fetch(new URL('/api/v1/enrollments',url),{headers:{...scoped,'x-organization-id':'foreign'}})).status,403);
+ const started=await request('assessment-sessions','POST',{enrollmentId:myEnrollment,releaseId:release,activityId:'activity'});assert.equal(started.status,201);const session=await started.json();assert.ok(!JSON.stringify(session).includes('correctOptionIds'));
+ const submitted=await request('assessment-sessions/'+encodeURIComponent(session.sessionId)+'/submit','POST',{answers:[{questionId:'q',selectedOptionIds:['a']}]});assert.equal(submitted.status,200);
+ const wallet=await request('credentials');assert.equal(wallet.status,200);const credentials=await wallet.json();assert.equal(credentials.items.length,1);assert.equal(credentials.items[0].verificationEnabled,false,'Candidate credential was shared without opt-in');
+ const credential=credentials.items[0];assert.equal((await pool.query('SELECT sharing_enabled FROM credential_verifications WHERE public_id_hash=(SELECT public_id_hash FROM credentials WHERE credential_id=$1)',[credential.credentialId])).rows[0].sharing_enabled,false);
+ const enabled=await request('credentials/'+encodeURIComponent(credential.credentialId)+'/sharing','POST',{enabled:true,revision:credential.sharingRevision});assert.equal(enabled.status,200);assert.equal((await enabled.json()).verificationEnabled,true);
+ assert.equal((await request('credentials/'+encodeURIComponent(credential.credentialId)+'/revoke','POST',{reason:'forged operator'})).status,403);
+ await pool.query("UPDATE enrollments SET status='SUSPENDED' WHERE enrollment_id=$1",[myEnrollment]);assert.equal(await access.canAccess(other,organizationId),false);assert.equal((await request('enrollments')).status,403);assert.equal((await access.list(other)).items.length,0);
+ await pool.query("UPDATE enrollments SET status='ACTIVE' WHERE enrollment_id=$1",[myEnrollment]);assert.equal(await access.canAccess(other,organizationId),true);
+ await pool.query("UPDATE personal_accounts SET status='LOCKED' WHERE user_id=$1",[other]);assert.equal(await access.canAccess(other,organizationId),false);assert.equal((await access.list(other)).items.length,0);await pool.query("UPDATE personal_accounts SET status='ACTIVE' WHERE user_id=$1",[other]);
+ await pool.query("UPDATE organizations SET status='SUSPENDED' WHERE organization_id=$1",[organizationId]);assert.equal(await access.canAccess(other,organizationId),false);await pool.query("UPDATE organizations SET status='ACTIVE' WHERE organization_id=$1",[organizationId]);
+ await pool.query("UPDATE release_manifests SET status='RETIRED' WHERE release_id=$1",[release]);assert.equal(await access.canAccess(other,organizationId),false);await pool.query("UPDATE release_manifests SET status='PUBLISHED' WHERE release_id=$1",[release]);
+ const contextClient=await runtime.connect();try{await contextClient.query('BEGIN');await contextClient.query("SELECT set_config('app.organization_id','prior-org',true),set_config('app.user_id','prior-user',true)");await contextClient.query('SELECT public.read_candidate_learning_access($1,$2,NULL)',[other,organizationId]);const restored=(await contextClient.query("SELECT current_setting('app.organization_id') org,current_setting('app.user_id') usr")).rows[0];assert.deepEqual(restored,{org:'prior-org',usr:'prior-user'});await contextClient.query('ROLLBACK');}finally{contextClient.release();}
+ await assert.rejects(access.list(other,'bad cursor'),/CANDIDATE_ACCESS_INVALID/);
+ await seedActiveOrganizationMembership(pool,{subject:other,organizationId});await pool.query("UPDATE organization_memberships SET status='SUSPENDED' WHERE subject=$1 AND organization_id=$2",[other,organizationId]);assert.equal(await access.canAccess(other,organizationId),false);
+ const personalWallet=createPersonalWalletStore(runtime);
+ allowMembershipLookup=false;
+ const walletUrl=new URL('/api/v1/my-credentials',url);
+ assert.equal((await fetch(walletUrl)).status,401);
+ assert.equal((await fetch(walletUrl,{method:'POST',headers})).status,405);
+ assert.equal((await fetch(new URL('/api/v1/my-credentials?learnerId='+learner,url),{headers})).status,422);
+ const historical=await fetch(walletUrl,{headers});assert.equal(historical.status,200);assert.equal((await historical.json()).items[0].credentialId,credential.credentialId);
+ assert.equal((await personalWallet.list(learner)).items.length,0,'Foreign owner received credential');
+ await pool.query("UPDATE enrollments SET status='SUSPENDED' WHERE enrollment_id=$1",[myEnrollment]);
+ await pool.query("UPDATE release_manifests SET status='RETIRED' WHERE release_id=$1",[release]);
+ await pool.query("UPDATE organizations SET status='SUSPENDED' WHERE organization_id=$1",[organizationId]);
+ assert.equal((await personalWallet.list(other)).items.length,1,'Historical ownership lost with issuer/training access');
+ await pool.query("UPDATE credentials SET expires_at=now()-interval '1 second' WHERE credential_id=$1",[credential.credentialId]);assert.equal((await personalWallet.list(other)).items[0].status,'EXPIRED');
+ await pool.query("UPDATE credentials SET status='REVOKED' WHERE credential_id=$1",[credential.credentialId]);assert.equal((await personalWallet.list(other)).items[0].status,'REVOKED');
+ const shareUrl=new URL('/api/v1/my-credentials/'+encodeURIComponent(credential.credentialId)+'/sharing',url);
+ const shareHeaders={...headers,'idempotency-key':'wallet-share:'+randomUUID(),'x-organization-id':'forged-context'};
+ const shareBody={enabled:false,revision:(await personalWallet.list(other)).items[0].sharingRevision};
+ assert.equal(await personalWallet.resolveOwner(learner,credential.credentialId),null);
+ assert.equal(await personalWallet.resolveOwner(other,credential.credentialId),organizationId);
+ assert.equal((await fetch(shareUrl)).status,401);assert.equal((await fetch(shareUrl,{headers})).status,405);
+ for(const extra of [{organizationId},{learnerId:learner},{revision:-1},{enabled:'true'}])assert.equal((await fetch(shareUrl,{method:'POST',headers:shareHeaders,body:JSON.stringify({...shareBody,...extra})})).status,422);
+ const shareResults=await Promise.all([1,2].map(()=>fetch(shareUrl,{method:'POST',headers:shareHeaders,body:JSON.stringify(shareBody)})));
+ for(const response of shareResults){assert.equal(response.status,200);const result=await response.json();assert.equal(result.verificationEnabled,false);assert.equal(result.status,'REVOKED');}
+ assert.equal((await pool.query('SELECT count(*)::int n FROM credential_events WHERE organization_id=$1 AND idempotency_key=$2',[organizationId,shareHeaders['idempotency-key']])).rows[0].n,1);
+ assert.equal((await fetch(shareUrl,{method:'POST',headers:{...shareHeaders,'idempotency-key':'wallet-stale'},body:JSON.stringify(shareBody)})).status,409);
+ const restoreBody={enabled:true,revision:(await personalWallet.list(other)).items[0].sharingRevision};
+ assert.equal((await fetch(shareUrl,{method:'POST',headers:{...shareHeaders,'idempotency-key':'wallet-enable'},body:JSON.stringify(restoreBody)})).status,200);
+ assert.equal((await fetch(shareUrl,{method:'POST',headers:shareHeaders,body:JSON.stringify(shareBody)})).status,200);assert.equal((await personalWallet.list(other)).items[0].verificationEnabled,true,'Old retry reversed sharing');
+ assert.equal((await fetch(new URL('/api/v1/my-credentials/unknown/sharing',url),{method:'POST',headers:shareHeaders,body:JSON.stringify(shareBody)})).status,404);
+ await pool.query("UPDATE personal_accounts SET status='LOCKED' WHERE user_id=$1",[other]);assert.equal((await personalWallet.list(other)).items.length,0);assert.equal((await fetch(walletUrl,{headers})).status,403);assert.equal(await personalWallet.resolveOwner(other,credential.credentialId),null);assert.equal((await fetch(shareUrl,{method:'POST',headers:shareHeaders,body:JSON.stringify(shareBody)})).status,403);await pool.query("UPDATE personal_accounts SET status='ACTIVE' WHERE user_id=$1",[other]);
+ const secondOrg=(await membership.createOrganization(actor,'Second issuer','wallet-second',fixtureId)).organizationId;orgs.push(secondOrg);
+ const secondTenant={organizationId:secondOrg,actorId:actor,correlationId:fixtureId};const secondDraft=await createPostgresCourseReviewStore(pool).createDraft({tenant:secondTenant,title:'Second course',idempotencyKey:'second'});
+ // Synthetic historical records exercise paging/routing independently of issuance, which is exercised above.
+ for(let i=0;i<52;i++)await pool.query(`INSERT INTO credentials SELECT (jsonb_populate_record(NULL::credentials,to_jsonb(c)||$2::jsonb)).* FROM credentials c WHERE credential_id=$1`,[credential.credentialId,JSON.stringify({credential_id:fixtureId+':wallet:'+String(i).padStart(2,'0'),organization_id:secondOrg,course_version_id:secondDraft.courseVersionId,release_id:null,public_id:randomUUID(),public_id_hash:randomUUID(),qualification_id:'wallet:'+i,status:i===0?'SUPERSEDED':'ACTIVE',expires_at:null})]);
+ const seen=[];let after;do{const page=await personalWallet.list(other,after);assert.ok(page.items.length<=50);seen.push(...page.items);after=page.nextCursor??undefined;}while(after);
+ assert.equal(seen.length,53);assert.equal(new Set(seen.map(x=>x.credentialId)).size,53);assert.equal(new Set(seen.map(x=>x.issuerId)).size,2);assert.ok(seen.some(x=>x.status==='SUPERSEDED'));assert.ok(!JSON.stringify(seen).includes('correctOptionIds'));
+ assert.deepEqual(Object.keys(seen[0]).sort(),['credentialId','issuerId','issuerName','title','releaseId','courseVersionId','policyVersion','status','supersededBy','issuedAt','expiresAt','publicId','verificationAllowed','verificationEnabled','sharingRevision','intendedUse'].sort());
+ await assert.rejects(runtime.query('SELECT * FROM personal_credential_routes'),/permission denied/);await assert.rejects(personalWallet.list(other,'bad cursor'),/PERSONAL_WALLET_INVALID/);
+ assert.equal((await pool.query("SELECT has_function_privilege('public','public.read_personal_wallet(text,text)','EXECUTE') allowed")).rows[0].allowed,false);
+ assert.equal((await pool.query("SELECT has_function_privilege('public','public.resolve_personal_credential(text,text)','EXECUTE') allowed")).rows[0].allowed,false);
+ const walletClient=await runtime.connect();try{await walletClient.query('BEGIN');await walletClient.query("SELECT set_config('app.organization_id','prior-org',true),set_config('app.user_id','prior-user',true)");await walletClient.query('SELECT public.read_personal_wallet($1,NULL)',[other]);await walletClient.query('SELECT public.resolve_personal_credential($1,$2)',[other,credential.credentialId]);assert.deepEqual((await walletClient.query("SELECT current_setting('app.organization_id') org,current_setting('app.user_id') usr")).rows[0],{org:'prior-org',usr:'prior-user'});await walletClient.query('ROLLBACK');}finally{walletClient.release();}
+ await pool.query('DELETE FROM personal_credential_routes WHERE credential_id=$1',[credential.credentialId]);await applyProcessingJobMigration(pool);const restoredRoutes=await pool.query('SELECT user_id FROM personal_credential_routes WHERE credential_id=$1',[credential.credentialId]);assert.equal(restoredRoutes.rows[0]?.user_id,other,'Migration backfill failed');
+ console.log('Personal wallet passed: historical owner access without memberships, retired/suspended training and issuer, two-issuer 53-record paging, lifecycle status, private projection, locked-account denial, context restoration and backfill.');
+ console.log('Candidate learning access passed: independent list/read, ownership isolation, administrator denial despite claimed roles, assessment completion, private-by-default credential and explicit sharing, and suspended access.');
+ console.log('Candidate enrollment passed: verified account, consent revision, rollback, concurrent retry, assignment race, no membership/roles, immutable disclosures, privacy withdrawal, suspension and strict pre-membership HTTP authorization.');
+}finally{
+ if(server?.listening){server.closeAllConnections();await new Promise(r=>server.close(r));}
+ try{await pool.query('DELETE FROM credential_verifications WHERE public_id_hash IN (SELECT public_id_hash FROM credentials WHERE organization_id=ANY($1::text[]))',[orgs]);for(const table of ['credential_events','credentials','assessment_sessions','progress_events','outbox_events','candidate_enrollment_consents','enrollments','course_offerings','release_manifests','audit_events','course_versions','courses','role_assignments','organization_memberships','organizations'])await pool.query(`DELETE FROM ${table} WHERE organization_id=ANY($1::text[])`,[orgs]);await accounts.cleanup();}
+ finally{for(const fn of grants)await pool.query(`REVOKE EXECUTE ON FUNCTION ${fn} FROM local_runtime`);await runtime.end();await pool.end();}
+}
+

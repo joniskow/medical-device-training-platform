@@ -1,0 +1,237 @@
+{
+  "fixtureId": "AIC-001",
+  "version": "1.0.0",
+  "name": "Aurora Infusion Controller",
+  "provenance": "synthetic",
+  "rightsStatus": "generated-for-testing",
+  "containsPhi": false,
+  "language": "en-US",
+  "createdAt": "2026-10-22T00:00:00Z",
+  "assets": [
+    {
+      "path": "fixtures/reference/manual/aurora-infusion-controller-manual.pdf",
+      "sha256": "1c5e30daab897f6645f5c78a92f9fd1c2732cebc2f8f1e90155bb461fad22030",
+      "bytes": 4899
+    },
+    {
+      "path": "fixtures/reference/model/aurora-infusion-controller.glb",
+      "sha256": "f109aa4b8dd97639b1b953250f89fa403f4f80bf26848ebd9593f186dec3d2ea",
+      "bytes": 2508
+    },
+    {
+      "path": "fixtures/reference/images/aic-overview.png",
+      "sha256": "1246a8829835432a18a2a096715c88d638779e2696dce655d7eb498e0af21714",
+      "bytes": 15436
+    },
+    {
+      "path": "fixtures/reference/images/aic-control-panel.png",
+      "sha256": "8840a27b93a91133e1e6e0dc2a289cd8bf760addccdcf5ba16ca4347b70b2e57",
+      "bytes": 14763
+    },
+    {
+      "path": "fixtures/reference/images/aic-safety-cover.png",
+      "sha256": "2b172c58b70c69303119a6d36c5597ddfd4f45903d5442894d478777d61ae206",
+      "bytes": 15950
+    },
+    {
+      "path": "fixtures/reference/video/aic-priming-demo.mp4",
+      "sha256": "e2bab1ac38ec047021110fedeec1928827f30a63cdbdb1bb1afbee86e7874b76",
+      "bytes": 15305
+    }
+  ],
+  "device": {
+    "scaleMeters": 1.0,
+    "upAxis": "Y",
+    "canonicalModel": "model/aurora-infusion-controller.glb"
+  },
+  "citations": [
+    {
+      "asset": "manual/aurora-infusion-controller-manual.pdf",
+      "page": 1,
+      "anchor": "intended-use"
+    },
+    {
+      "asset": "manual/aurora-infusion-controller-manual.pdf",
+      "page": 1,
+      "anchor": "components-and-procedure"
+    },
+    {
+      "asset": "manual/aurora-infusion-controller-manual.pdf",
+      "page": 1,
+      "anchor": "fault-condition"
+    },
+    {
+      "asset": "manual/aurora-infusion-controller-manual.pdf",
+      "page": 2,
+      "anchor": "assessment-and-credential-expectation"
+    },
+    {
+      "asset": "video/aic-priming-demo.mp4",
+      "startSeconds": 0,
+      "endSeconds": 3,
+      "anchor": "priming-demo"
+    },
+    {
+      "asset": "images/aic-overview.png",
+      "anchor": "device-overview"
+    },
+    {
+      "asset": "images/aic-control-panel.png",
+      "anchor": "control-panel"
+    },
+    {
+      "asset": "images/aic-safety-cover.png",
+      "anchor": "safety-cover"
+    },
+    {
+      "asset": "model/aurora-infusion-controller.glb",
+      "anchor": "named-component-nodes"
+    }
+  ],
+  "components": [
+    {
+      "id": "AIC-C01",
+      "name": "Control panel",
+      "modelNode": "Control Panel",
+      "interaction": "select"
+    },
+    {
+      "id": "AIC-C02",
+      "name": "Safety cover",
+      "modelNode": "Safety Cover",
+      "interaction": "open"
+    },
+    {
+      "id": "AIC-C03",
+      "name": "Line sensor",
+      "modelNode": "Line Sensor",
+      "interaction": "inspect"
+    }
+  ],
+  "procedure": {
+    "id": "AIC-P01",
+    "name": "Simulated priming",
+    "requiredSteps": [
+      "identify-control-panel",
+      "open-safety-cover",
+      "select-prime",
+      "acknowledge-blocked-line",
+      "clear-blockage",
+      "confirm-ready",
+      "shutdown"
+    ]
+  },
+  "fault": {
+    "id": "AIC-F01",
+    "name": "Blocked line",
+    "requiredSequence": [
+      "warning",
+      "acknowledge",
+      "inspect-line-sensor",
+      "clear-blockage",
+      "resume-ready"
+    ]
+  },
+  "assessment": {
+    "passingScore": 0.8,
+    "requiredEvidence": [
+      "component-identification",
+      "fault-sequence",
+      "procedure-sequence",
+      "safety-boundary-acknowledgement"
+    ]
+  },
+  "expectedOutcomes": {
+    "author": [
+      "receives a cited structured draft",
+      "sees conflicts and safety warnings",
+      "must approve before publication"
+    ],
+    "learner": [
+      "completes the simulation-only procedure",
+      "handles the blocked-line fault",
+      "receives a deterministic result"
+    ],
+    "verifier": [
+      "can verify credential status by URL and QR",
+      "sees organization-issued platform certification meaning"
+    ],
+    "operator": [
+      "can inspect job state and evidence",
+      "can replay or quarantine failed processing",
+      "can trace tenant and source boundaries"
+    ]
+  },
+  "gateEvidence": [
+    {
+      "gate": "ingestion",
+      "required": [
+        "asset checksum",
+        "source extraction report",
+        "explicit terminal failure or ready state"
+      ]
+    },
+    {
+      "gate": "authoring",
+      "required": [
+        "schema-valid draft",
+        "claim-level citations",
+        "reviewer decision",
+        "immutable release manifest"
+      ]
+    },
+    {
+      "gate": "simulation",
+      "required": [
+        "semantic action trace",
+        "procedure sequence",
+        "fault sequence",
+        "equivalent-path result"
+      ]
+    },
+    {
+      "gate": "credential",
+      "required": [
+        "server-authoritative assessment",
+        "credential event",
+        "online verification response"
+      ]
+    }
+  ],
+  "credential": {
+    "type": "organization-issued-platform-certification",
+    "verification": "online-url-and-qr",
+    "not": [
+      "license",
+      "accreditation",
+      "regulatory-approval",
+      "portable-cryptographic-credential"
+    ]
+  },
+  "negativeVariants": [
+    {
+      "path": "fixtures/reference/variants/incomplete-source.json",
+      "expectedOutcome": "terminal-rejection-or-review-queue"
+    },
+    {
+      "path": "fixtures/reference/variants/corrupt-manual.pdf",
+      "expectedOutcome": "terminal-rejection-or-review-queue"
+    },
+    {
+      "path": "fixtures/reference/variants/unsupported-model.txt",
+      "expectedOutcome": "terminal-rejection-or-review-queue"
+    },
+    {
+      "path": "fixtures/reference/variants/prompt-injection-source.txt",
+      "expectedOutcome": "terminal-rejection-or-review-queue"
+    },
+    {
+      "path": "fixtures/reference/variants/conflicting-source.json",
+      "expectedOutcome": "terminal-rejection-or-review-queue"
+    },
+    {
+      "path": "fixtures/reference/variants/low-quality-reconstruction.json",
+      "expectedOutcome": "terminal-rejection-or-review-queue"
+    }
+  ]
+}

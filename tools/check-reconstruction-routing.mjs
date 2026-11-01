@@ -1,0 +1,14 @@
+import assert from 'node:assert/strict';
+import {createAzureServiceBusDispatcher} from '../apps/worker/dist/messaging/azure-service-bus-dispatcher.js';
+import {handleAzureServiceBusJobMessage,createAzureServiceBusWorker} from '../apps/worker/dist/messaging/azure-service-bus-consumer.js';
+import {createInMemoryJobStore} from '../tests/doubles/deterministic-adapters.mjs';
+const signingSecret='reconstruction-fixture-signing-secret-long-enough',messages=[],store=createInMemoryJobStore();
+const tenant={organizationId:'routing-fixture',actorId:'author',correlationId:'routing'};
+const job={jobId:'reconstruction-routing-fixture',jobType:'reconstruction.generate',attempt:1,maxAttempts:2,idempotency:{key:'routing-fixture',requestHash:'routing-fixture'},tenant,payload:{schemaVersion:'reconstruction-request.v1',mode:'single-image',sources:[]}};
+const dispatcher=createAzureServiceBusDispatcher({client:{createSender:()=>({sendMessages:async message=>messages.push(message),close:async()=>{}})},queueName:'fixture',signingSecret});
+await store.enqueue(job);await dispatcher.enqueue(job);let routed=0,completed=0,deadLettered=0;
+const input={message:messages[0],signingSecret,jobStore:store,storage:{},processor:{inspect:async()=>{throw Error('Reconstruction must never be treated as an asset upload');}},workerId:'fixture-worker',settle:{complete:async()=>completed++,abandon:async()=>{throw Error('Unexpected abandon');},deadLetter:async()=>deadLettered++}};
+assert.equal(await handleAzureServiceBusJobMessage({...input,processReconstruction:async request=>{routed++;assert.equal(request.jobId,job.jobId);assert.equal(request.tenant.organizationId,tenant.organizationId);return {state:'SUCCEEDED'};}}),'COMPLETED');assert.equal(routed,1);assert.equal(completed,1);
+assert.equal(await handleAzureServiceBusJobMessage(input),'DEAD_LETTERED');assert.equal(deadLettered,1);
+let receiverOptions;const worker=createAzureServiceBusWorker({...input,queueName:'fixture',processReconstruction:async()=>null,client:{createReceiver:(_queue,options)=>{receiverOptions=options;return {subscribe:()=>({close:async()=>{}}),close:async()=>{}};}}});assert.equal(receiverOptions.maxAutoLockRenewalDurationInMs,3_600_000);await worker.close();await dispatcher.close();
+console.log('Reconstruction queue routing passed: persisted job type, dedicated handler, explicit missing-handler denial and bounded lock renewal.');

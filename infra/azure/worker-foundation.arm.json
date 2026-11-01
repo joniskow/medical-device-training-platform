@@ -1,0 +1,139 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "environmentName": {
+      "type": "string",
+      "defaultValue": "dev",
+      "metadata": { "description": "Short environment name used in resource names." }
+    },
+    "location": {
+      "type": "string",
+      "defaultValue": "eastus",
+      "metadata": { "description": "Azure region for the worker foundation." }
+    },
+    "serviceBusNamespaceName": {
+      "type": "string",
+      "defaultValue": "mdt-dev-sb-01",
+      "metadata": { "description": "Existing Service Bus namespace name." }
+    },
+    "storageAccountName": {
+      "type": "string",
+      "defaultValue": "mdtdevstorage01",
+      "metadata": { "description": "Existing storage account name." }
+    },
+    "queueName": {
+      "type": "string",
+      "defaultValue": "asset-processing",
+      "metadata": { "description": "Existing Service Bus queue name." }
+    }
+  },
+  "resources": [
+    {
+      "type": "Microsoft.OperationalInsights/workspaces",
+      "apiVersion": "2023-09-01",
+      "name": "[format('mdt-{0}-logs', parameters('environmentName'))]",
+      "location": "[parameters('location')]",
+      "tags": {
+        "project": "medical-device-training",
+        "environment": "[parameters('environmentName')]"
+      },
+      "properties": {
+        "sku": { "name": "PerGB2018" },
+        "retentionInDays": 30
+      }
+    },
+    {
+      "type": "Microsoft.App/managedEnvironments",
+      "apiVersion": "2024-03-01",
+      "name": "[format('mdt-{0}-aca-env', parameters('environmentName'))]",
+      "location": "[parameters('location')]",
+      "tags": {
+        "project": "medical-device-training",
+        "environment": "[parameters('environmentName')]"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.OperationalInsights/workspaces', format('mdt-{0}-logs', parameters('environmentName')))]"
+      ],
+      "properties": {
+        "appLogsConfiguration": {
+          "destination": "log-analytics",
+          "logAnalyticsConfiguration": {
+            "customerId": "[reference(resourceId('Microsoft.OperationalInsights/workspaces', format('mdt-{0}-logs', parameters('environmentName'))), '2023-09-01').customerId]",
+            "sharedKey": "[listKeys(resourceId('Microsoft.OperationalInsights/workspaces', format('mdt-{0}-logs', parameters('environmentName'))), '2023-09-01').primarySharedKey]"
+          }
+        }
+      }
+    },
+    {
+      "type": "Microsoft.ManagedIdentity/userAssignedIdentities",
+      "apiVersion": "2023-01-31",
+      "name": "[format('mdt-{0}-worker-id', parameters('environmentName'))]",
+      "location": "[parameters('location')]",
+      "tags": {
+        "project": "medical-device-training",
+        "environment": "[parameters('environmentName')]"
+      }
+    },
+    {
+      "type": "Microsoft.Authorization/roleAssignments",
+      "apiVersion": "2022-04-01",
+      "name": "[guid(resourceId('Microsoft.ServiceBus/namespaces', parameters('serviceBusNamespaceName')), resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', format('mdt-{0}-worker-id', parameters('environmentName'))), 'service-bus-data-receiver')]",
+      "scope": "[resourceId('Microsoft.ServiceBus/namespaces', parameters('serviceBusNamespaceName'))]",
+      "dependsOn": [
+        "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', format('mdt-{0}-worker-id', parameters('environmentName')))]"
+      ],
+      "properties": {
+        "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '4a9ae827-6dc8-4573-8ac7-8239d42aa03f')]",
+        "principalId": "[reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', format('mdt-{0}-worker-id', parameters('environmentName'))), '2023-01-31').principalId]",
+        "principalType": "ServicePrincipal"
+      }
+    },
+    {
+      "type": "Microsoft.Authorization/roleAssignments",
+      "apiVersion": "2022-04-01",
+      "name": "[guid(resourceId('Microsoft.ServiceBus/namespaces', parameters('serviceBusNamespaceName')), resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', format('mdt-{0}-worker-id', parameters('environmentName'))), 'service-bus-data-sender')]",
+      "scope": "[resourceId('Microsoft.ServiceBus/namespaces', parameters('serviceBusNamespaceName'))]",
+      "dependsOn": [
+        "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', format('mdt-{0}-worker-id', parameters('environmentName')))]"
+      ],
+      "properties": {
+        "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '69a216fc-b8fb-44d8-bc22-1f3c2cd27a39')]",
+        "principalId": "[reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', format('mdt-{0}-worker-id', parameters('environmentName'))), '2023-01-31').principalId]",
+        "principalType": "ServicePrincipal"
+      }
+    },
+    {
+      "type": "Microsoft.Authorization/roleAssignments",
+      "apiVersion": "2022-04-01",
+      "name": "[guid(resourceId('Microsoft.Storage/storageAccounts', parameters('storageAccountName')), resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', format('mdt-{0}-worker-id', parameters('environmentName'))), 'storage-blob-data-contributor')]",
+      "scope": "[resourceId('Microsoft.Storage/storageAccounts', parameters('storageAccountName'))]",
+      "dependsOn": [
+        "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', format('mdt-{0}-worker-id', parameters('environmentName')))]"
+      ],
+      "properties": {
+        "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', 'ba92f5b4-2d11-453d-a403-e96b0029c9fe')]",
+        "principalId": "[reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', format('mdt-{0}-worker-id', parameters('environmentName'))), '2023-01-31').principalId]",
+        "principalType": "ServicePrincipal"
+      }
+    }
+  ],
+  "outputs": {
+    "managedEnvironmentName": {
+      "type": "string",
+      "value": "[format('mdt-{0}-aca-env', parameters('environmentName'))]"
+    },
+    "workerIdentityClientId": {
+      "type": "string",
+      "value": "[reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', format('mdt-{0}-worker-id', parameters('environmentName'))), '2023-01-31').clientId]"
+    },
+    "workerIdentityPrincipalId": {
+      "type": "string",
+      "value": "[reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', format('mdt-{0}-worker-id', parameters('environmentName'))), '2023-01-31').principalId]"
+    },
+    "serviceBusQueueName": {
+      "type": "string",
+      "value": "[parameters('queueName')]"
+    }
+  }
+}

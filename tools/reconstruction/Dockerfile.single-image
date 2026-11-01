@@ -1,0 +1,13 @@
+# Local CPU experiment. Source API: https://github.com/VAST-AI-Research/TripoSR/blob/107cefdc244c39106fa830359024f6a2f1c78871/tsr/system.py
+FROM python:3.11.11-slim-bookworm
+ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 OMP_NUM_THREADS=4 OPENBLAS_NUM_THREADS=4 MAX_JOBS=2
+RUN apt-get update && apt-get install -y --no-install-recommends git g++ libgomp1 && rm -rf /var/lib/apt/lists/*
+RUN pip install --no-cache-dir torch==2.6.0 --index-url https://download.pytorch.org/whl/cpu
+COPY requirements-single-image.txt /tmp/requirements.txt
+RUN pip install --no-cache-dir -r /tmp/requirements.txt
+RUN git clone https://github.com/VAST-AI-Research/TripoSR.git /opt/TripoSR && git -C /opt/TripoSR checkout 107cefdc244c39106fa830359024f6a2f1c78871
+RUN git clone https://github.com/tatsy/torchmcubes.git /opt/torchmcubes && git -C /opt/torchmcubes checkout bc36b08c62c5931e1dfc666581b3a8589278647f && pip install --no-cache-dir --no-build-isolation /opt/torchmcubes
+ENV PYTHONPATH=/opt/TripoSR HF_HUB_DISABLE_TELEMETRY=1 DO_NOT_TRACK=1
+COPY single_image_assets.py single_image.py package_candidate.py /checks/
+WORKDIR /checks
+ENTRYPOINT ["python", "/checks/single_image.py"]

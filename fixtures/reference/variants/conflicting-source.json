@@ -1,0 +1,4 @@
+{
+  "variant": "conflicting-source",
+  "expectedFailure": "source states Prime is safe while safety boundary forbids unsupervised use"
+}

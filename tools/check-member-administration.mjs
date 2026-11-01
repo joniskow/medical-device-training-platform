@@ -1,0 +1,85 @@
+import {verifiedAccountFixture} from './verified-account-fixture.mjs';
+import assert from 'node:assert/strict';
+import {randomUUID} from 'node:crypto';
+import {Pool} from 'pg';
+import {applyProcessingJobMigration,seedActiveOrganizationMembership,createPostgresOrganizationMembershipStore,withTenantTransaction,createPostgresCourseReviewStore} from '../packages/db/dist/index.js';
+import {createMemberService} from '../apps/api/dist/member-service.js';
+import {createJobStatusHttpServer} from '../apps/api/dist/job-status-http.js';
+const pool=new Pool({connectionString:'postgresql://local_app:local_only_change_me@127.0.0.1:54329/medical_device'}),runtime=new Pool({connectionString:'postgresql://local_runtime:local_runtime_only_change_me@127.0.0.1:54329/medical_device'});
+const org='members:'+randomUUID(),tenant={organizationId:org,actorId:'admin',correlationId:org},operator={...tenant,actorId:'operator'},service=createMemberService(runtime),added=[];let addedStatusExecution=false;
+let addedOrganizationRead=false;
+const verified=verifiedAccountFixture(pool,org);
+try{
+ await applyProcessingJobMigration(pool);
+ await verified.prepare();await verified.seed('target');
+ if(!(await pool.query("SELECT has_table_privilege('local_runtime','organizations','SELECT') allowed")).rows[0].allowed){await pool.query('GRANT SELECT ON organizations TO local_runtime');addedOrganizationRead=true;}
+ if(!(await pool.query("SELECT has_function_privilege('local_runtime','public.set_tenant_membership_status(text,text,text,timestamptz)','EXECUTE') allowed")).rows[0].allowed){await pool.query('GRANT EXECUTE ON FUNCTION public.set_tenant_membership_status(text,text,text,timestamptz) TO local_runtime');addedStatusExecution=true;}
+ for(const privilege of ['SELECT','INSERT','DELETE'])if(!(await pool.query(`SELECT has_table_privilege('local_runtime','role_assignments',$1) allowed`,[privilege])).rows[0].allowed){await pool.query(`GRANT ${privilege} ON role_assignments TO local_runtime`);added.push(privilege);}
+ for(const [subject,roles] of [['admin',['organization_admin']],['target',['learner']],['operator',['learner']],['suspended',['learner']]])await seedActiveOrganizationMembership(pool,{subject,organizationId:org,roles});
+ const historical=await createPostgresCourseReviewStore(pool).createDraft({tenant,title:'Historical training',idempotencyKey:'history'});
+ await pool.query(`INSERT INTO enrollments(enrollment_id,organization_id,learner_id,course_version_id,status,created_at,updated_at) VALUES($1,$2,'target',$3,'ACTIVE',now(),now())`,[org+':enrollment',org,historical.courseVersionId]);
+ await pool.query(`INSERT INTO progress_events(progress_event_id,organization_id,enrollment_id,learner_id,event_type,payload,created_at) VALUES($1,$2,$3,'target','content.acknowledged','{"activityId":"historical-reading"}',now())`,[org+':progress',org,org+':enrollment']);
+ await pool.query(`UPDATE organization_memberships SET status='SUSPENDED' WHERE organization_id=$1 AND subject='suspended'`,[org]);
+ await pool.query(`INSERT INTO organization_memberships(membership_id,subject,organization_id,status,created_at,updated_at) SELECT $1||n,'member:'||lpad(n::text,3,'0'),$1,'ACTIVE',now(),now() FROM generate_series(1,51)n`,[org]);
+ await pool.query(`INSERT INTO role_assignments(role_assignment_id,organization_id,subject,role,scope_type,scope_id,created_at,updated_at) VALUES($1,$2,'target','publisher','course','course:private',now(),now())`,[org+':scoped',org]);
+ const first=await service.list(tenant),second=await service.list(tenant,first.nextCursor);assert.equal(first.items.length,50);assert.equal(second.items.length,5);assert.equal(second.nextCursor,null);
+ const get=async subject=>[...(await service.list(operator,undefined,true)).items,...(await service.list(operator,(await service.list(operator,undefined,true)).nextCursor,true)).items].find(item=>item.subject===subject);
+ await assert.rejects(service.list({...tenant,actorId:'target'}),/MEMBER_ADMIN_REQUIRED/);await assert.rejects(service.list({...tenant,organizationId:'foreign'}),/MEMBER_ADMIN_REQUIRED/);
+ const target=await get('target'),request={roles:['author'],reason:'Author training responsibility',revision:target.revision,idempotencyKey:'author'};
+ await assert.rejects(service.setRoles(tenant,'target',{...request,roles:['operator']}),/MEMBER_REQUEST_INVALID/);
+ const brokenPool={async connect(){const c=await runtime.connect();return {query(sql,args){if(String(sql).includes('INSERT INTO audit_events'))throw Error('Injected role audit failure');return c.query(sql,args);},release(){c.release();}};}};
+ await assert.rejects(createMemberService(brokenPool).setRoles(tenant,'target',request),/Injected role audit/);assert.equal((await get('target')).revision,target.revision);
+ const concurrent=await Promise.all([service.setRoles(tenant,'target',request),service.setRoles(tenant,'target',request)]);assert.deepEqual(concurrent[0].roles,['author']);assert.deepEqual(concurrent[0],concurrent[1]);
+ assert.equal((await pool.query(`SELECT count(*)::int n FROM audit_events WHERE organization_id=$1 AND event_type='MEMBER_ROLES_CHANGED'`,[org])).rows[0].n,1);
+ assert.equal((await pool.query(`SELECT count(*)::int n FROM role_assignments WHERE role_assignment_id=$1`,[org+':scoped'])).rows[0].n,1);
+ await assert.rejects(service.setRoles(tenant,'target',{...request,idempotencyKey:'stale'}),/MEMBER_CHANGED/);
+ await assert.rejects(service.setRoles(tenant,'target',{...request,reason:'Changed meaning'}),/IDEMPOTENCY_KEY_REUSED/);
+ await service.setRoles(tenant,'target',{...request,roles:['publisher'],revision:(await get('target')).revision,idempotencyKey:'publisher'});
+ assert.deepEqual((await service.setRoles(tenant,'target',request)).roles,['publisher']);
+ const admin=await get('admin');await assert.rejects(service.setRoles(operator,'admin',{roles:['learner'],reason:'Remove admin',revision:admin.revision,idempotencyKey:'last'},true),/LAST_ORGANIZATION_ADMIN/);
+ await assert.rejects(service.setStatus(operator,'admin',{status:'REMOVED',reason:'Remove sole admin',revision:admin.revision,idempotencyKey:'last-status'},true),/LAST_ORGANIZATION_ADMIN/);
+ const beforeStatus=await get('target'),suspend={status:'SUSPENDED',reason:'Access review',revision:beforeStatus.revision,idempotencyKey:'suspend'};
+ await assert.rejects(createMemberService(brokenPool).setStatus(tenant,'target',suspend),/Injected role audit/);assert.equal((await get('target')).revision,beforeStatus.revision);
+ await Promise.all([service.setStatus(tenant,'target',suspend),service.setStatus(tenant,'target',suspend)]);
+ assert.deepEqual((await get('target')).roles,['publisher']);assert.deepEqual(await createPostgresOrganizationMembershipStore(runtime).resolveActiveOrganizations('target'),[]);
+ await assert.rejects(service.setStatus(tenant,'target',{...suspend,idempotencyKey:'stale-status'}),/MEMBER_CHANGED/);
+ await verified.verify('target',false);
+ await assert.rejects(service.setStatus(tenant,'target',{status:'ACTIVE',reason:'Review completed',revision:(await get('target')).revision,idempotencyKey:'reactivate'}),/MEMBER_VERIFIED_ACCOUNT_REQUIRED/);
+ await verified.verify('target');
+ await service.setStatus(tenant,'target',{status:'ACTIVE',reason:'Review completed',revision:(await get('target')).revision,idempotencyKey:'reactivate'});
+ assert.equal((await service.setStatus(tenant,'target',suspend)).status,'ACTIVE');
+ assert.deepEqual(await createPostgresOrganizationMembershipStore(runtime).resolveOrganizationRoles('target',org),['publisher']);
+ const remove={status:'REMOVED',reason:'Left organization',revision:(await get('target')).revision,idempotencyKey:'remove'};
+ await assert.rejects(createMemberService(brokenPool).setStatus(tenant,'target',remove),/Injected role audit/);
+ assert.equal((await pool.query(`SELECT count(*)::int n FROM role_assignments WHERE organization_id=$1 AND subject='target'`,[org])).rows[0].n,2);
+ await service.setStatus(tenant,'target',remove);assert.deepEqual((await get('target')).roles,['learner']);
+ assert.equal((await pool.query(`SELECT status FROM enrollments WHERE enrollment_id=$1`,[org+':enrollment'])).rows[0].status,'ACTIVE');
+ assert.deepEqual((await pool.query(`SELECT payload FROM progress_events WHERE progress_event_id=$1`,[org+':progress'])).rows[0].payload,{activityId:'historical-reading'});
+ assert.equal((await pool.query(`SELECT count(*)::int n FROM role_assignments WHERE organization_id=$1 AND subject='target'`,[org])).rows[0].n,0);
+ await service.setStatus(tenant,'target',{status:'ACTIVE',reason:'Rejoined organization',revision:(await get('target')).revision,idempotencyKey:'rejoin'});assert.deepEqual((await get('target')).roles,['learner']);
+ assert.equal((await service.setStatus(tenant,'target',remove)).status,'ACTIVE');
+ const timestamp=(await pool.query(`SELECT updated_at::text stamp FROM organization_memberships WHERE organization_id=$1 AND subject='target'`,[org])).rows[0].stamp;
+ await assert.rejects(withTenantTransaction(runtime,tenant,c=>c.query(`UPDATE organization_memberships SET status='REMOVED' WHERE organization_id=$1 AND subject='target'`,[org])),/permission denied/);
+ const outside=await withTenantTransaction(runtime,{...tenant,organizationId:'foreign'},c=>c.query(`SELECT public.set_tenant_membership_status('target','REMOVED','ACTIVE',$1) changed`,[timestamp]));assert.equal(outside.rows[0].changed,false);assert.equal((await get('target')).status,'ACTIVE');
+ await assert.rejects(runtime.query(`SELECT public.set_tenant_membership_status('target','REMOVED','ACTIVE',$1)`,[timestamp]),/MEMBER_REQUEST_INVALID/);
+ assert.equal((await pool.query(`SELECT count(*)::int n FROM pg_proc p CROSS JOIN LATERAL aclexplode(p.proacl) a WHERE p.oid='public.set_tenant_membership_status(text,text,text,timestamptz)'::regprocedure AND a.grantee=0 AND a.privilege_type='EXECUTE'`)).rows[0].n,0);
+ await assert.rejects(service.setRoles(tenant,'suspended',{...request,revision:(await get('suspended')).revision,idempotencyKey:'suspended'}),/MEMBER_INACTIVE/);
+ await service.setRoles(tenant,'target',{...request,roles:['organization_admin'],revision:(await get('target')).revision,idempotencyKey:'promote'});
+ const snapshots=await Promise.all(['admin','target'].map(get));
+ const demotions=await Promise.allSettled(snapshots.map((member,index)=>index===0?service.setStatus(operator,member.subject,{status:'SUSPENDED',reason:'Concurrent suspension',revision:member.revision,idempotencyKey:'suspend-admin'},true):service.setRoles(operator,member.subject,{roles:['learner'],reason:'Concurrent demotion',revision:member.revision,idempotencyKey:'demote:'+member.subject},true)));
+ assert.equal(demotions.filter(result=>result.status==='fulfilled').length,1);assert(demotions.some(result=>result.status==='rejected'&&result.reason.message==='LAST_ORGANIZATION_ADMIN'));
+ const http=createJobStatusHttpServer({memberService:service,statusService:{get:async()=>null,retry:async()=>null},organizationContextResolver:createPostgresOrganizationMembershipStore(runtime),authenticator:{authenticate:async req=>req.headers.authorization?{subject:'operator',roles:[req.headers.authorization==='Bearer operator'?'operator':'organization_admin']}:null}});
+ await new Promise(resolve=>http.listen(0,'127.0.0.1',resolve));
+ try{
+  const base=`http://127.0.0.1:${http.address().port}/api/v1/members`,headers={authorization:'Bearer operator','content-type':'application/json','idempotency-key':'http','x-organization-id':org};
+  assert.equal((await fetch(base)).status,401);assert.equal((await fetch(base,{headers:{...headers,authorization:'Bearer claimed-admin'}})).status,403);assert.equal((await fetch(base,{headers})).status,200);
+  const member=await get('member:001'),body={roles:['reviewer'],reason:'Review duty',revision:member.revision};
+  assert.equal((await fetch(base+'/member:001/roles',{method:'POST',headers,body:JSON.stringify({...body,operator:true})})).status,422);
+  assert.equal((await fetch(base+'/member:001/roles',{method:'POST',headers,body:JSON.stringify(body)})).status,200);
+  const statusBody={status:'SUSPENDED',reason:'Access review',revision:(await get('member:001')).revision};
+  assert.equal((await fetch(base+'/member:001/status',{method:'POST',headers:{...headers,'idempotency-key':'http-status'},body:JSON.stringify({...statusBody,organizationId:'foreign'})})).status,422);
+  assert.equal((await fetch(base+'/member:001/status',{method:'POST',headers:{...headers,'idempotency-key':'http-status'},body:JSON.stringify(statusBody)})).status,200);
+  assert.equal((await fetch(base,{headers:{...headers,'x-organization-id':'foreign'}})).status,403);
+ }finally{http.closeAllConnections();await new Promise(resolve=>http.close(resolve));}
+ console.log('Member administration passed: scoped paging/roles, preserved course roles, audit rollback, idempotent replay, stale snapshots, inactive denial, concurrent last-admin protection and HTTP authorization.');
+}finally{try{for(const table of ['progress_events','enrollments','course_versions','courses','role_assignments','audit_events','organization_memberships'])await pool.query(`DELETE FROM ${table} WHERE organization_id=$1`,[org]);}finally{if(addedStatusExecution)await pool.query('REVOKE EXECUTE ON FUNCTION public.set_tenant_membership_status(text,text,text,timestamptz) FROM local_runtime');for(const privilege of added)await pool.query(`REVOKE ${privilege} ON role_assignments FROM local_runtime`);if(addedOrganizationRead)await pool.query('REVOKE SELECT ON organizations FROM local_runtime');await verified.cleanup();await runtime.end();await pool.end();}}

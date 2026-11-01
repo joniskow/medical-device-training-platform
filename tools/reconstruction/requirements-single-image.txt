@@ -1,0 +1,14 @@
+# Match the official TripoSR APIs; keep this separate from the PyCOLMAP environment.
+numpy==1.26.4
+Pillow==10.1.0
+omegaconf==2.3.0
+einops==0.7.0
+transformers==4.35.0
+huggingface-hub==0.17.3
+trimesh==4.0.5
+rembg==2.0.57
+onnxruntime==1.19.2
+imageio==2.36.1
+setuptools==75.8.0
+wheel==0.45.1
+ninja==1.11.1.3

@@ -1,0 +1,4 @@
+{
+  "variant": "incomplete-source",
+  "expectedFailure": "missing required procedure and assessment anchors"
+}

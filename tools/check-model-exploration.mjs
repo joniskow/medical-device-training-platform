@@ -1,0 +1,14 @@
+import assert from 'node:assert/strict';
+import {validateModelExploration,validateCourseForPublication} from '../packages/simulation-schema/dist/index.js';
+const components=['panel','cover'],content={overview:'Inspect the controller.',hotspots:[{componentId:'panel',title:'Control panel',text:'The panel shows the operating state.'}]};
+const before=JSON.stringify(content);
+assert(validateModelExploration('hotspot',content,components).valid);
+assert(validateModelExploration('3d_viewer',{overview:'Overview',hotspots:[]},components).valid);
+for(const invalid of [null,[],{}, {...content,script:'run()'}, {...content,overview:' '}, {...content,hotspots:[]}, {...content,hotspots:[...content.hotspots,...content.hotspots]}, {...content,hotspots:[{...content.hotspots[0],componentId:'foreign'}]}, {...content,hotspots:[{...content.hotspots[0],score:100}]}, {...content,hotspots:Array(101).fill(content.hotspots[0])}])assert.equal(validateModelExploration('hotspot',invalid,components).valid,false);
+assert.equal(validateModelExploration('hotspot',content,['panel','panel']).valid,false);
+assert.equal(JSON.stringify(content),before);
+const report=validateCourseForPublication({course:{modules:[{activities:[{type:'hotspot',exploration:content}]}]},approvedSourceArtifactIds:[]});
+assert(!report.findings.some(f=>f.code==='EXPLORATION_DELIVERY_UNAVAILABLE'));
+assert(report.findings.some(f=>f.code==='EXPLORATION_COMPONENT_INVALID'));
+assert(!report.findings.some(f=>['POLICY_EVIDENCE_REQUIRED','POLICY_EQUIVALENT_PATH_REQUIRED','ASSESSMENT_POLICY_INVALID'].includes(f.code)),'Passive exploration required simulation evidence');
+console.log('Model exploration passed: bounded equivalent content, known unique components, strict fields, nonmutation and passive/scored separation.');

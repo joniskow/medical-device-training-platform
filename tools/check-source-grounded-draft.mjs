@@ -1,0 +1,98 @@
+import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
+import { Pool } from "pg";
+import { createPostgresAiRunStore, createPostgresKnowledgeStore, applyProcessingJobMigration } from "../packages/db/dist/index.js";
+import { createAzureOpenAiGateway, createDeterministicAiGateway, createSourceGroundedDraftService } from "../packages/ai-gateway/dist/index.js";
+
+const pool = new Pool({ connectionString: "postgresql://local_app:local_only_change_me@127.0.0.1:54329/medical_device" });
+const id = `draft_${randomUUID()}`;
+const tenant = { organizationId: `${id}_org`, actorId: `${id}_actor`, correlationId: `${id}_corr`, courseVersionId: `${id}_course` };
+const assetVersionId = `${id}_assetv`;
+
+try {
+  await applyProcessingJobMigration(pool);
+  await pool.query(`INSERT INTO assets (asset_id, organization_id, source_type, status, created_by, updated_by, created_at, updated_at) VALUES ($1, $2, 'pdf', 'APPROVED', $3, $3, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`, [`${id}_asset`, tenant.organizationId, tenant.actorId]);
+  await pool.query(`INSERT INTO asset_versions (asset_version_id, asset_id, organization_id, source_type, blob_key, file_name, content_type, size_bytes, sha256, state, created_by, created_at, updated_at) VALUES ($1, $2, $3, 'pdf', $4, 'manual.pdf', 'application/pdf', 1, $5, 'APPROVED', $6, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`, [assetVersionId, `${id}_asset`, tenant.organizationId, `${tenant.organizationId}/manual.pdf`, "a".repeat(64), tenant.actorId]);
+  const knowledge = createPostgresKnowledgeStore(pool);
+  await knowledge.replaceForAssetVersion(tenant, assetVersionId, [{ chunkId: `${id}_chunk`, organizationId: tenant.organizationId, assetVersionId, text: "Prime the controller before use.", citation: { assetVersionId, page: 1 } }]);
+  const service = createSourceGroundedDraftService({ knowledge, gateway: createDeterministicAiGateway(), aiRuns: createPostgresAiRunStore(pool) });
+  assert.equal((await knowledge.listSources(tenant)).items[0].assetVersionId, assetVersionId);
+  assert.deepEqual((await knowledge.listSources({ ...tenant, organizationId: 'foreign' })).items, []);
+  assert.deepEqual(await knowledge.listForAssetVersions({ ...tenant, organizationId: 'foreign' }, [assetVersionId]), []);
+  assert.deepEqual(await knowledge.search({ ...tenant, organizationId: 'foreign' }, 'controller'), []);
+  await assert.rejects(knowledge.replaceForAssetVersion({ ...tenant, organizationId: 'foreign' }, assetVersionId, []), /SOURCE_ARTIFACT_NOT_FOUND/);
+  assert.equal((await knowledge.search(tenant, 'controller')).length, 1);
+  await assert.rejects(service.generate(tenant, { sourceArtifactIds: [assetVersionId, 'unavailable-source'] }), /SOURCE_KNOWLEDGE_NOT_FOUND/);
+  const generated = await service.generate(tenant, { sourceArtifactIds: [assetVersionId] });
+  assert.equal(generated.result.status, "DRAFT");
+  assert.equal(generated.result.output.schemaVersion, "course-draft.v1");
+  const persisted = await pool.query("SELECT organization_id, status FROM ai_runs WHERE ai_run_id = $1", [generated.aiRunId]);
+  assert.deepEqual(persisted.rows[0], { organization_id: tenant.organizationId, status: "DRAFT" });
+  const inputEvidence=(await pool.query('SELECT input_evidence FROM ai_runs WHERE ai_run_id=$1',[generated.aiRunId])).rows[0].input_evidence;
+  assert.equal(inputEvidence.schemaVersion,'ai-input-evidence.v1');assert.equal(inputEvidence.passages[0].chunkId,id+'_chunk');assert.equal(inputEvidence.passages[0].sourceHash,'a'.repeat(64));
+  assert.equal(inputEvidence.retrievalVersion,'english-lexical-interleaved.v1');assert.deepEqual(inputEvidence.sourceCoverage,[{assetVersionId,selectedPassages:1,totalPassages:1}]);assert.ok(!JSON.stringify(inputEvidence).includes('Prime the controller'));
+  await pool.query("UPDATE knowledge_chunks SET source_hash=$2 WHERE asset_version_id=$1",[assetVersionId,'f'.repeat(64)]);
+  assert.deepEqual(await knowledge.listForAssetVersions(tenant,[assetVersionId]),[]);await assert.rejects(service.generate(tenant,{sourceArtifactIds:[assetVersionId]}),/SOURCE_KNOWLEDGE_NOT_FOUND/);
+  await pool.query("UPDATE knowledge_chunks SET source_hash=$2 WHERE asset_version_id=$1",[assetVersionId,'a'.repeat(64)]);
+  const incompleteGateway=createAzureOpenAiGateway({endpoint:'https://example.openai.azure.com',apiKey:'fixture',deployment:'fixture',model:'fixture',apiVersion:'2024-10-21',fetchImpl:async()=>Response.json({choices:[{finish_reason:'length',message:{content:'{"schemaVersion":"course-draft.v1"}'}}],usage:{prompt_tokens:90,completion_tokens:50}})});
+  const rejected=await createSourceGroundedDraftService({knowledge,gateway:incompleteGateway,aiRuns:createPostgresAiRunStore(pool)}).generate(tenant,{sourceArtifactIds:[assetVersionId]});
+  assert.equal(rejected.result.status,'REJECTED');
+  const rejectedRow=(await pool.query('SELECT status, output, metrics, warnings, input_evidence FROM ai_runs WHERE ai_run_id=$1',[rejected.aiRunId])).rows[0];
+  assert.equal(rejectedRow.status,'REJECTED');assert.equal(rejectedRow.input_evidence.passages[0].chunkId,id+'_chunk');assert.equal(rejectedRow.output,null);
+  assert.deepEqual(rejectedRow.metrics,{inputTokens:90,outputTokens:50});
+  assert.equal(rejectedRow.warnings[0].code,'AI_OUTPUT_INCOMPLETE');
+  const forgedGateway={execute:async request=>{const result=await createDeterministicAiGateway().execute(request);result.output.modules[0].activities[0].citations[0]={assetVersionId:'foreign',page:1};return result;}};
+  const forged=await createSourceGroundedDraftService({knowledge,gateway:forgedGateway,aiRuns:createPostgresAiRunStore(pool)}).generate(tenant,{sourceArtifactIds:[assetVersionId]});
+  const forgedRow=(await pool.query('SELECT status,output,warnings FROM ai_runs WHERE ai_run_id=$1',[forged.aiRunId])).rows[0];
+  assert.equal(forgedRow.status,'REJECTED');assert.equal(forgedRow.output,null);assert.equal(forgedRow.warnings.at(-1).code,'AI_CITATION_INVALID');
+  const secondSource=assetVersionId+':second';
+  await pool.query(`INSERT INTO asset_versions (asset_version_id,asset_id,organization_id,source_type,blob_key,file_name,content_type,size_bytes,sha256,state,created_by,created_at,updated_at) SELECT $2,asset_id,organization_id,source_type,blob_key||'.second','second.pdf',content_type,size_bytes,sha256,state,created_by,now(),now() FROM asset_versions WHERE asset_version_id=$1`,[assetVersionId,secondSource]);
+  for(const source of [assetVersionId,secondSource])await knowledge.replaceForAssetVersion(tenant,source,Array.from({length:40},(_,i)=>({chunkId:source+':'+String(i).padStart(2,'0'),organizationId:tenant.organizationId,assetVersionId:source,text:'Passage '+i,citation:{assetVersionId:source,page:i+1}})));
+  const balanced=await knowledge.listForAssetVersions(tenant,[assetVersionId,secondSource],32);
+  assert.equal(balanced.filter(c=>c.assetVersionId===assetVersionId).length,16);assert.equal(balanced.filter(c=>c.assetVersionId===secondSource).length,16);
+  assert.ok(balanced.every(c=>c.sourceChunkCount===40));
+  await pool.query("UPDATE knowledge_chunks SET chunk_text='Pressure relief valve inspection' WHERE asset_version_id=ANY($1::text[]) AND citation->>'page'='40'",[[assetVersionId,secondSource]]);
+  const ranked=await knowledge.listForAssetVersions(tenant,[assetVersionId,secondSource],32,'Create training about pressure relief');
+  assert.ok(ranked.slice(0,2).every(c=>c.citation.page===40),'Relevant later passages were omitted');
+  assert.equal(ranked.filter(c=>c.assetVersionId===assetVersionId).length,16);
+  assert.deepEqual(await knowledge.listForAssetVersions(tenant,[assetVersionId,secondSource],32,'Create training about pressure relief'),ranked,'Ranking unstable');
+  assert.deepEqual(await knowledge.listForAssetVersions(tenant,[assetVersionId,secondSource],32,'the and'),balanced.map(c=>({...c})), 'Stopword query did not preserve default order');
+  assert.deepEqual(await knowledge.listForAssetVersions({...tenant,organizationId:'foreign'},[assetVersionId,secondSource],32,'pressure'),[]);
+  assert.equal((await knowledge.listForAssetVersions(tenant,[assetVersionId],32,"' OR 1=1; DROP TABLE knowledge_chunks; --")).length,32);
+  await assert.rejects(knowledge.listForAssetVersions(tenant,[assetVersionId],32,'x'.repeat(2001)),/RETRIEVAL_QUERY_INVALID/);
+  const partial=await service.generate(tenant,{sourceArtifactIds:[assetVersionId,secondSource]});
+  assert.ok(partial.sourceCoverage.every(c=>c.selectedPassages===16&&c.totalPassages===40));
+  const coverageWarnings=(await pool.query('SELECT warnings FROM ai_runs WHERE ai_run_id=$1',[partial.aiRunId])).rows[0].warnings.filter(w=>w.code==='SOURCE_CONTEXT_PARTIAL');
+  assert.equal(coverageWarnings.length,2);assert.ok(coverageWarnings.every(w=>w.message.includes('16 of 40')));
+  await pool.query('DELETE FROM knowledge_chunks WHERE asset_version_id=$1',[secondSource]);await pool.query('DELETE FROM asset_versions WHERE asset_version_id=$1',[secondSource]);
+  await knowledge.replaceForAssetVersion(tenant, assetVersionId, Array.from({length:22}, (_, index) => ({
+    chunkId: `${id}_chunk_${String(index).padStart(2,'0')}`, organizationId:tenant.organizationId, assetVersionId,
+    text:`Passage ${index}`, citation:{assetVersionId,page:index+1}
+  })));
+  const sourcePage = await knowledge.readSource(tenant, assetVersionId);
+  assert.equal(sourcePage.items.length, 20);
+  assert.equal(sourcePage.sourceHash, 'a'.repeat(64));
+  assert.equal(sourcePage.items[0].citation.page, 1);
+  const lastPage = await knowledge.readSource(tenant, assetVersionId, sourcePage.nextCursor);
+  assert.equal(lastPage.items.length, 2);
+  assert.equal(lastPage.nextCursor, undefined);
+  assert.equal(new Set([...sourcePage.items,...lastPage.items].map(item=>item.chunkId)).size, 22);
+  assert.equal(await knowledge.readSource({ ...tenant, organizationId:'foreign' }, assetVersionId), null);
+  await pool.query("UPDATE asset_versions SET state='QUARANTINED' WHERE asset_version_id=$1", [assetVersionId]);
+  assert.equal(await knowledge.readSource(tenant, assetVersionId), null);
+  assert.deepEqual((await knowledge.listSources(tenant)).items, []);
+  assert.deepEqual(await knowledge.listForAssetVersions(tenant, [assetVersionId]), []);
+  assert.deepEqual(await knowledge.search(tenant, 'controller'), []);
+  await assert.rejects(service.generate(tenant, { sourceArtifactIds: [assetVersionId] }), /SOURCE_KNOWLEDGE_NOT_FOUND/);
+  await pool.query("UPDATE asset_versions SET state='APPROVED' WHERE asset_version_id=$1", [assetVersionId]);
+  await pool.query("UPDATE assets SET status='RETIRED' WHERE asset_id=$1", [`${id}_asset`]);
+  assert.deepEqual((await knowledge.listSources(tenant)).items, []);
+  assert.deepEqual(await knowledge.listForAssetVersions(tenant, [assetVersionId]), []);
+  console.log("Source-grounded draft passed: tenant-scoped knowledge, deterministic draft, citations, and persisted AI-run evidence.");
+} finally {
+  await pool.query("DELETE FROM ai_runs WHERE organization_id = $1", [tenant.organizationId]).catch(() => {});
+  await pool.query("DELETE FROM knowledge_chunks WHERE organization_id = $1", [tenant.organizationId]).catch(() => {});
+  await pool.query("DELETE FROM asset_versions WHERE organization_id = $1", [tenant.organizationId]).catch(() => {});
+  await pool.query("DELETE FROM assets WHERE organization_id = $1", [tenant.organizationId]).catch(() => {});
+  await pool.end();
+}

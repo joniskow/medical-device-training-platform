@@ -1,0 +1,6 @@
+{
+  "name": "@medical-device/domain",
+  "private": true,
+  "type": "module",
+  "scripts": {}
+}

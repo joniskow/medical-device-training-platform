@@ -1,0 +1,55 @@
+import assert from 'node:assert/strict';
+import {readFile,writeFile,mkdtemp,rm,mkdir} from 'node:fs/promises';
+import {createServer} from 'node:http';
+import {spawn} from 'node:child_process';
+import {tmpdir} from 'node:os';
+import {resolve} from 'node:path';
+import {createRequire} from 'node:module';
+const {build}=createRequire(new URL('../apps/web/package.json',import.meta.url))('esbuild');
+const mode=process.env.RECONSTRUCTION_BROWSER_MODE??'single-image';assert(['single-image','multi-view','video'].includes(mode));
+const run=process.env.RECONSTRUCTION_BROWSER_RUN??(mode==='single-image'?'output/reconstruction-workflow':`output/photogrammetry-workflow/${mode}`),candidate=await readFile(resolve(run,'candidate-private.glb')),quality=await readFile(resolve(run,'quality.json'));
+const parsed=JSON.parse(quality),jobId=parsed.serverLineage.jobId,sources=mode==='single-image'?[{...parsed.serverLineage.sources[0],fileName:'Aurora reference.png',sourceType:'image'}]:JSON.parse(await readFile(resolve(run,'sources.json'),'utf8'));
+const photos=new Map();if(mode!=='video')for(const source of sources)photos.set(source.assetVersionId,await readFile(mode==='single-image'?'output/single-image-capture/images/view-003.png':resolve('output/reconstruction-capture/images',source.fileName)));
+const views=mode==='video'?await Promise.all(parsed.reviewViews.map(async(view,index)=>({...view,contentUrl:'/api/v1/fixture/views?index='+index,bytes:await readFile(resolve(run,`view-${index}.png`))}))):[];
+const source=sources[0];source.fileName='<img src=x onerror=window.injected=1>.png';
+const harness=`import {createReconstructionPanel} from './src/reconstruction-panel.ts';import {createCandidateWorkbench} from './src/candidate-workbench.ts';import {clearAccessToken,authenticatedFetch} from './src/auth-session.ts';sessionStorage.setItem('mdt.auth.access-token','fixture');sessionStorage.setItem('mdt.auth.organization-id','org');window.handoffs=0;let disposeWorkbench;const api=async(path,init)=>{const response=await authenticatedFetch(path,{...init,headers:{authorization:'Bearer fixture',...init?.headers}});if(!response.ok)throw Error('HTTP '+response.status);return response.json();};window.disposePanel=createReconstructionPanel(document.querySelector('main'),api,files=>{window.handoffs++;disposeWorkbench?.();disposeWorkbench=createCandidateWorkbench(document.querySelector('aside'),()=>{throw Error('No upload was requested');},files);});window.signOut=clearAccessToken;window.ready=true;`;
+const built=await build({stdin:{contents:harness,resolveDir:resolve('apps/web'),sourcefile:'reconstruction-browser.ts'},bundle:true,platform:'browser',format:'esm',write:false});
+const style=(await readFile('apps/web/src/index.html','utf8')).match(/<style>([\s\S]*?)<\/style>/)[1];
+let state='QUEUED',postKeys=[],delay=false,pendingResponse;
+const server=createServer(async(req,res)=>{
+ res.setHeader('cache-control','no-store');
+ const send=(value,status=200)=>{res.writeHead(status,{'content-type':'application/json'}).end(JSON.stringify(value));};
+ if(req.url==='/app.js'){res.setHeader('content-type','text/javascript');res.end(built.outputFiles[0].contents);return;}
+ if(req.url==='/api/v1/reconstructions'&&req.method==='POST'){for await(const _ of req){}postKeys.push(req.headers['idempotency-key']);send({jobId,state},postKeys.length===1?503:202);return;}
+ if(req.url==='/api/v1/reconstructions'){send({items:postKeys.length>1?[{jobId,mode,state}]:[],enabledModes:[mode]});return;}
+ if(req.url==='/api/v1/reconstructions/sources'){send({items:sources});return;}
+ if(req.url==='/api/v1/reconstructions/'+encodeURIComponent(jobId)){send({jobId,state,mode,sources,...(mode==='video'?{views:views.map(({bytes,...view})=>view)}:{}),...(state==='SUCCEEDED'?{candidateUrl:'/api/v1/fixture/candidate',qualityUrl:'/api/v1/fixture/quality'}:{})});return;}
+ if(req.url==='/api/v1/fixture/candidate'){if(delay){pendingResponse=res;return;}res.writeHead(200,{'content-type':'model/gltf-binary'}).end(candidate);return;}
+ if(req.url==='/api/v1/fixture/quality'){res.writeHead(200,{'content-type':'application/json'}).end(quality);return;}
+ if(req.url?.startsWith('/api/v1/fixture/views?')){const view=views[Number(new URL(req.url,'http://fixture').searchParams.get('index'))];res.writeHead(200,{'content-type':'image/png'}).end(view.bytes);return;}
+ if(req.url?.startsWith('/api/v1/media-review/')){const id=decodeURIComponent(req.url.split('/')[4]);res.writeHead(200,{'content-type':'image/png'}).end(photos.get(id));return;}
+ if(req.url?.startsWith('/api/')){send({},404);return;}
+ res.setHeader('content-type','text/html');res.end(`<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Reconstruction author workflow</title><style>${style}main,aside{display:block;padding:18px;max-width:1050px;margin:auto;overflow-wrap:anywhere}button{margin:4px}canvas{max-width:100%}label,input,select{max-width:100%;box-sizing:border-box}</style><main><h1>Reviewed media to 3D candidate</h1></main><aside></aside><script type="module" src="/app.js"></script></html>`);
+});
+await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));const profile=await mkdtemp(resolve(tmpdir(),'reconstruction-browser-'));
+const browser=spawn('C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',['--headless=new','--no-first-run','--no-default-browser-check','--use-angle=swiftshader','--enable-unsafe-swiftshader','--remote-debugging-port=0',`--user-data-dir=${profile}`,'--window-size=1100,1200',`http://127.0.0.1:${server.address().port}`],{windowsHide:true,stdio:'ignore'});
+let socket,id=0;const requests=new Map(),errors=[];
+function command(method,params={}){return new Promise((resolve,reject)=>{const key=++id;requests.set(key,{resolve,reject});socket.send(JSON.stringify({id:key,method,params}));});}
+async function evaluate(expression){const result=await command('Runtime.evaluate',{expression,returnByValue:true,awaitPromise:true});if(result.exceptionDetails)throw Error(JSON.stringify(result.exceptionDetails));return result.result.value;}
+async function until(expression){for(let i=0;i<250;i++){if(await evaluate(expression))return;await new Promise(resolve=>setTimeout(resolve,50));}assert.fail('Timed out: '+expression+' '+await evaluate('document.body.innerText.slice(-1200)'));}
+const click=name=>evaluate(`document.querySelector('[data-reconstruction-${name}]').click();true`);
+try{
+ let port;for(let i=0;i<100;i++){try{port=(await readFile(resolve(profile,'DevToolsActivePort'),'utf8')).split('\n')[0];break;}catch{await new Promise(resolve=>setTimeout(resolve,100));}}assert(port,'Chrome started');
+ const page=(await(await fetch(`http://127.0.0.1:${port}/json`)).json()).find(page=>page.type==='page');socket=new WebSocket(page.webSocketDebuggerUrl);socket.onmessage=event=>{const value=JSON.parse(String(event.data));if(value.method==='Runtime.exceptionThrown')errors.push(value.params.exceptionDetails);const request=requests.get(value.id);if(request){requests.delete(value.id);value.error?request.reject(Error(value.error.message)):request.resolve(value.result);}};await new Promise((resolve,reject)=>{socket.onopen=resolve;socket.onerror=reject;});await command('Runtime.enable');
+ await until('window.ready&&!document.querySelector("[data-reconstruction-panel]").hidden');await click('create');assert.equal(postKeys.length,0);
+ await click('sources');await until(`document.querySelectorAll("[data-reconstruction-source]").length===${sources.length}`);assert.equal(await evaluate('window.injected'),undefined);assert.equal(await evaluate('document.querySelectorAll("[data-reconstruction-selection] img").length'),0);
+ source.fileName='Aurora reference.png';await click('sources');await until('document.querySelector("[data-reconstruction-selection]").textContent.includes("Aurora reference.png")');
+ await evaluate('for(const source of document.querySelectorAll("[data-reconstruction-source]")){source.checked=true;source.dispatchEvent(new Event("change"));}true');await click('create');await until('document.querySelector("[data-reconstruction-status]").textContent.includes("could not be confirmed")');await click('create');await until('Boolean(document.querySelector("[data-reconstruction-check]"))');assert.equal(postKeys.length,2);assert.equal(postKeys[0],postKeys[1]);
+ assert.equal(await evaluate('Boolean(document.querySelector("[data-reconstruction-prepare]"))'),false);state='SUCCEEDED';await click('check');await until('Boolean(document.querySelector("[data-reconstruction-prepare]"))');await click('prepare');
+ await until('document.querySelector("[data-status]")?.textContent==="Matching source photographs loaded."');assert.equal(await evaluate('window.handoffs'),1);if(mode==='single-image')assert((await evaluate('document.querySelector("[data-quality]").textContent')).includes('Hidden surfaces are inferred and unverified'));assert.equal(await evaluate('document.querySelectorAll("[data-photos] img").length'),mode==='single-image'?1:8);assert.equal(await evaluate('document.querySelector("[data-photos] img").alt'),mode==='video'?`Video ${views[0].timestampSeconds.toFixed(2)} s — ${views[0].sourceName}`:source.fileName);
+ await mkdir(run,{recursive:true});await command('Emulation.setDeviceMetricsOverride',{width:1100,height:1200,deviceScaleFactor:1,mobile:false});await evaluate('document.querySelector("[data-candidate-workbench]").scrollIntoView({block:"start"});true');const screenshot=await command('Page.captureScreenshot',{format:'png'});await writeFile(resolve(run,'author-panel.png'),Buffer.from(screenshot.data,'base64'));
+ await command('Emulation.setDeviceMetricsOverride',{width:390,height:1000,deviceScaleFactor:1,mobile:false});assert.equal(await evaluate('document.documentElement.scrollWidth<=innerWidth'),true);
+ delay=true;await click('check');await until('Boolean(document.querySelector("[data-reconstruction-prepare]"))');await click('prepare');for(let i=0;i<100&&!pendingResponse;i++)await new Promise(resolve=>setTimeout(resolve,20));assert(pendingResponse);
+ await evaluate('window.signOut();true');await until('document.querySelector("[data-reconstruction-panel]").hidden');pendingResponse.end(candidate);await new Promise(resolve=>setTimeout(resolve,100));assert.equal(await evaluate('window.handoffs'),1);assert.equal(errors.length,0,JSON.stringify(errors));
+ console.log('Reconstruction Chrome passed: approved-source selection, inert filenames, retry with the same key, saved progress, private actual-candidate handoff, automatic matching source photo, visible uncertainty, responsive layout and stale-response/sign-out cleanup. Fixture HTTP drives UI states; actual DB/engine/HTTP are checked by check-reconstruction-workflow.mjs.');
+}finally{socket?.close();browser.kill();if(browser.exitCode===null)await new Promise(resolve=>browser.once('close',resolve));server.closeAllConnections();await new Promise(resolve=>server.close(resolve));await rm(profile,{recursive:true,force:true});}

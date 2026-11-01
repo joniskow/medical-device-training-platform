@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>AIC-001 · Model runtime preview</title>
+    <style>
+      :root { color-scheme: light; font-family: system-ui, sans-serif; color: #18323a; background: #f4f8f7; }
+      body { margin: 0; min-height: 100vh; }
+      main { max-width: 1180px; margin: 0 auto; padding: 1.5rem 1rem 4rem; }
+      .shell { background: #fff; border: 1px solid #cbdedb; border-radius: 14px; padding: 1.25rem; box-shadow: 0 8px 24px #18323a12; }
+      h1 { margin: 0 0 .35rem; font-size: clamp(1.45rem, 4vw, 2rem); }
+      h2 { margin: 1.25rem 0 .45rem; font-size: 1.1rem; }
+      p { color: #48666d; }
+      .notice { background: #fff7df; border-left: 4px solid #d18a12; padding: .75rem; }
+      .layout { display: grid; gap: 1rem; grid-template-columns: minmax(0, 1.6fr) minmax(220px, .8fr); margin-top: 1rem; }
+      .stage { min-height: 420px; background: #091a1e; border-radius: 10px; overflow: hidden; }
+      canvas { display: block; width: 100%; height: 420px; touch-action: none; cursor: grab; }
+      canvas:active { cursor: grabbing; }
+      .controls { display: flex; gap: .55rem; flex-wrap: wrap; margin-top: .7rem; }
+      button { min-height: 2.7rem; border-radius: 8px; border: 1px solid #9dbab7; padding: 0 .8rem; font: inherit; cursor: pointer; background: #fff; color: #0d6b68; font-weight: 650; }
+      button:focus-visible { outline: 3px solid #e5a93d; outline-offset: 2px; }
+      .component-button[aria-current="true"] { background: #0d6b68; color: #fff; border-color: #0d6b68; }
+      .panel { border: 1px solid #cbdedb; border-radius: 10px; padding: .9rem; }
+      .component-list { display: grid; gap: .55rem; }
+      .metrics { display: grid; grid-template-columns: repeat(3, 1fr); gap: .55rem; margin-top: .85rem; }
+      .metric { background: #eef6f4; border-radius: 8px; padding: .65rem; font-size: .85rem; }
+      .metric strong { display: block; margin-top: .2rem; font-size: 1rem; overflow-wrap: anywhere; }
+      .status { min-height: 1.5rem; margin: .75rem 0 0; }
+      .error { color: #9f2d2d; min-height: 1.5rem; margin: .75rem 0 0; }
+      .fallback { background: #f8ecec; border-left: 4px solid #9f2d2d; padding: .65rem; margin-top: .75rem; }
+      .muted { font-size: .9rem; color: #5a7479; }
+      @media (max-width: 768px) { .layout { grid-template-columns: 1fr; } .stage, canvas { min-height: 320px; height: 320px; } }
+    </style>
+  </head>
+  <body>
+    <main>
+      <p><a href="/learner/courses">Return to my courses</a></p>
+      <section class="shell" aria-labelledby="title">
+        <h1 id="title">AIC-001 model activity</h1>
+        <p>Inspect the approved model, select each named component, and complete the permitted semantic actions. The browser renders only the server-authoritative state projection.</p>
+        <p class="notice" role="note">Synthetic release-bound rehearsal: this fixture exercises the E4 runtime and action contract. Production delivery uses a private, short-lived URL issued only for an approved course release.</p>
+        <div class="layout">
+          <section aria-labelledby="viewer-title">
+            <h2 id="viewer-title">Interactive model</h2>
+            <div class="stage"><canvas id="model-canvas" aria-label="Interactive AIC-001 model. Drag to rotate, use the wheel to zoom, and click a component to select it."></canvas></div>
+            <div class="controls"><button id="reset-view" type="button">Reset view</button><button id="fit-view" type="button">Fit model</button></div>
+            <p id="model-status" class="status" role="status" aria-live="polite">Preparing model runtime…</p>
+            <p id="fallback" class="fallback" role="alert" hidden></p>
+          </section>
+          <aside class="panel" aria-labelledby="component-title">
+            <h2 id="component-title">Components</h2>
+            <p class="muted">Keyboard-accessible selection is the equivalent path for this preview.</p>
+            <p id="first-use-hint" class="notice" role="note">First use: select a component, then choose one of the permitted actions shown below.</p>
+            <div id="component-list" class="component-list" role="list"></div>
+            <div id="action-controls" class="controls" aria-label="Permitted component actions"></div>
+            <button id="hint" type="button">Request hint</button>
+            <button id="retry-action" type="button" hidden>Retry pending action</button>
+            <button id="resume-session" type="button" hidden>Resume session</button>
+            <div class="metrics" aria-label="Runtime metrics">
+              <div class="metric">Runtime<strong id="runtime-state">LOADING</strong></div>
+              <div class="metric">Load<strong id="load-time">—</strong></div>
+              <div class="metric">Sample<strong id="fps">—</strong></div>
+              <div class="metric">Estimated memory<strong id="memory">—</strong></div>
+              <div class="metric">Score<strong id="score">0</strong></div>
+            </div>
+            <h2>Procedure context</h2>
+            <p id="procedure-step">Step 1 · Inspect the control panel, safety cover, and line sensor. Then open the safety cover and position the line sensor.</p>
+            <p id="allowed-actions" class="muted" role="status" aria-live="polite">Allowed actions · awaiting authoritative procedure state.</p>
+            <p id="procedure-fault" class="warning" role="status" aria-live="polite" hidden></p>
+            <p id="action-log" class="muted" role="status" aria-live="polite">No semantic action emitted.</p>
+            <p id="completion" class="muted" role="status" aria-live="polite">Completion is determined by the authoritative session.</p>
+          </aside>
+        </div>
+      </section>
+    </main>
+    <script type="module" src="/learner/model-player.js"></script>
+  </body>
+</html>

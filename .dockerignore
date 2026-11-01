@@ -1,0 +1,14 @@
+**/node_modules
+**/.git
+**/.env
+**/.env.*
+**/__pycache__
+**/*.log
+output
+tmp-openmvs-*
+worker-upload-*
+worker-deploy-*
+.codex
+.agents
+.azure
+.aws

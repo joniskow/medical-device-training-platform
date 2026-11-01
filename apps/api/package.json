@@ -1,0 +1,22 @@
+{
+  "name": "@medical-device/api",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc --noEmit false",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@azure/identity": "^4.14.0",
+    "@medical-device/ai-gateway": "workspace:*",
+    "@medical-device/contracts": "workspace:*",
+    "@medical-device/db": "workspace:*",
+    "@medical-device/model-runtime": "workspace:*",
+    "@medical-device/simulation-schema": "workspace:*",
+    "@medical-device/storage": "workspace:*",
+    "pg": "^8.23.1"
+  },
+  "devDependencies": {
+    "@types/pg": "^8.23.1"
+  }
+}

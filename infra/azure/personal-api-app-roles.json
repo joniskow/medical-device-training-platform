@@ -1,0 +1,20 @@
+{
+  "appRoles": [
+    {
+      "allowedMemberTypes": ["User"],
+      "description": "Can operate and recover background-processing jobs.",
+      "displayName": "Operator",
+      "id": "b9be7d9f-4c82-4f3a-bf8d-3f5dc819d5b0",
+      "isEnabled": true,
+      "value": "operator"
+    },
+    {
+      "allowedMemberTypes": ["User"],
+      "description": "Can use learner-facing training experiences.",
+      "displayName": "Learner",
+      "id": "9627f73c-2d26-44c6-a0cf-3d2b84f99f2b",
+      "isEnabled": true,
+      "value": "learner"
+    }
+  ]
+}

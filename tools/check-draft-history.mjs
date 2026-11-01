@@ -1,0 +1,61 @@
+import {createJobStatusHttpServer} from '../apps/api/dist/job-status-http.js';
+import assert from 'node:assert/strict';
+import {randomUUID} from 'node:crypto';
+import {Pool} from 'pg';
+import {applyProcessingJobMigration,createPostgresCourseReviewStore} from '../packages/db/dist/index.js';
+const admin=new Pool({connectionString:'postgresql://local_app:local_only_change_me@127.0.0.1:54329/medical_device'});
+const runtime=new Pool({connectionString:'postgresql://local_runtime:local_runtime_only_change_me@127.0.0.1:54329/medical_device'});
+const org='history:'+randomUUID(),tenant={organizationId:org,actorId:'author',correlationId:org};
+const store=createPostgresCourseReviewStore(runtime);
+const server=createJobStatusHttpServer({courseReviewStore:store,statusService:{get:async()=>null,retry:async()=>null},authenticator:{authenticate:async req=>{const actor=req.headers.authorization?.replace('Bearer ','');return ['author','learner','foreign'].includes(actor)?{subject:actor,roles:[actor==='foreign'?'author':actor]}:null;}},organizationContextResolver:{resolveActiveOrganizations:async actor=>[actor==='foreign'?'foreign':org]}});
+try{
+ await applyProcessingJobMigration(admin);
+ await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
+ const draft=await store.createDraft({tenant,title:'Original',idempotencyKey:'create'}),courseVersionId=draft.courseVersionId;
+ const read=async()=>(await createPostgresCourseReviewStore(admin).get(tenant,courseVersionId)).courseVersion;
+ const initial=(await read()).content;
+ const changed={...initial,title:'Edited',modules:[{moduleId:'stable',title:'Module',activities:[]}]};
+ await store.saveDraft({tenant,courseVersionId,revision:1,content:changed});
+ const history=await store.listDraftHistory(tenant,courseVersionId);assert.equal(history.items.length,1);assert.equal(history.items[0].nextRevision,2);assert.equal(Object.hasOwn(history.items[0],'content'),false);
+ const input={tenant,courseVersionId,revision:2,eventId:history.items[0].eventId,side:'before',reason:'Undo mistaken edit',idempotencyKey:'undo'};
+ const url=`http://127.0.0.1:${server.address().port}/api/v1/course-versions/${encodeURIComponent(courseVersionId)}/history`;
+ const get=(actor,suffix='')=>fetch(url+suffix,{headers:actor?{authorization:'Bearer '+actor}:{}});
+ const post=(actor,body)=>fetch(url,{method:'POST',headers:{authorization:'Bearer '+actor,'content-type':'application/json','idempotency-key':'undo'},body:JSON.stringify(body)});
+ const body={revision:2,eventId:input.eventId,side:'before',reason:input.reason,confirmed:true};
+ assert.equal((await get()).status,401);assert.equal((await get('learner')).status,403);assert.equal((await get('foreign')).status,404);
+ const listed=await get('author');assert.equal(listed.status,200);assert.match(listed.headers.get('cache-control'),/no-store/);assert.deepEqual(await listed.json(),history);
+ const preview=await store.previewDraftHistory(tenant,courseVersionId,input.eventId,'before');assert.deepEqual(preview,{revision:2,status:'DRAFT',current:changed,selected:initial});assert.equal((await read()).revision,2);
+ assert.deepEqual(await (await get('author','?eventId='+encodeURIComponent(input.eventId)+'&side=before')).json(),preview);
+ assert.equal((await get('learner','?eventId='+encodeURIComponent(input.eventId)+'&side=before')).status,403);assert.equal((await get('foreign','?eventId='+encodeURIComponent(input.eventId)+'&side=before')).status,404);
+ assert.equal((await get('author','?eventId='+encodeURIComponent(input.eventId)+'&side=before&beforeRevision=3')).status,422);
+ await assert.rejects(store.previewDraftHistory(tenant,courseVersionId,'missing','before'),/DRAFT_HISTORY_NOT_FOUND/);
+ assert.equal((await get('author','?beforeRevision=bad')).status,422);assert.equal((await get('author','?beforeRevision=2&beforeRevision=1')).status,422);
+ assert.equal((await post('learner',body)).status,403);assert.equal((await post('foreign',body)).status,404);
+ assert.equal((await post('author',{...body,confirmed:false})).status,422);assert.equal((await post('author',{...body,content:{title:'forged'}})).status,422);
+ await assert.rejects(store.listDraftHistory({...tenant,organizationId:'foreign'},courseVersionId),/COURSE_VERSION_NOT_FOUND/);
+ await assert.rejects(store.restoreDraftHistory({...input,tenant:{...tenant,organizationId:'foreign'}}),/COURSE_VERSION_NOT_FOUND/);
+ await assert.rejects(store.restoreDraftHistory({...input,revision:1}),/COURSE_VERSION_STALE/);
+ await assert.rejects(store.restoreDraftHistory({...input,eventId:'foreign-event'}),/DRAFT_HISTORY_NOT_FOUND/);
+ const other=await store.createDraft({tenant,title:'Other',idempotencyKey:'other'});await assert.rejects(store.restoreDraftHistory({...input,courseVersionId:other.courseVersionId,revision:1}),/DRAFT_HISTORY_NOT_FOUND/);
+ const failing=createPostgresCourseReviewStore({async connect(){const c=await runtime.connect();return {query(sql,args){if(sql.includes("'COURSE_DRAFT_RESTORED'"))throw Error('Injected restore audit failure');return c.query(sql,args);},release(){c.release();}};}});
+ await assert.rejects(failing.restoreDraftHistory(input),/Injected restore audit failure/);assert.equal((await read()).revision,2);assert.deepEqual((await read()).content,changed);
+ await admin.query("UPDATE course_versions SET status='IN_REVIEW' WHERE course_version_id=$1",[courseVersionId]);
+ assert.deepEqual(await Promise.all([store.restoreDraftHistory(input),store.restoreDraftHistory(input)]),[{revision:3},{revision:3}]);assert.deepEqual((await read()).content,initial);assert.equal((await read()).status,'DRAFT');
+ await assert.rejects(store.restoreDraftHistory({...input,side:'after'}),/IDEMPOTENCY_KEY_REUSED/);assert.equal((await post('author',body)).status,200);assert.equal((await post('author',{...body,side:'after'})).status,409);
+ const undo=(await store.listDraftHistory(tenant,courseVersionId)).items[0];assert.equal(undo.eventType,'COURSE_DRAFT_RESTORED');
+ await store.restoreDraftHistory({...input,revision:3,eventId:undo.eventId,idempotencyKey:'redo',reason:'Redo reviewed edit'});assert.deepEqual((await read()).content,changed);assert.equal((await read()).revision,4);
+ await store.saveDraft({tenant,courseVersionId,revision:4,content:{...changed,title:'Later edit'}});await store.restoreDraftHistory(input);assert.equal((await read()).content.title,'Later edit');assert.equal((await read()).revision,5);
+ // Restoration preserves immutable successor lineage even if the older snapshot has different lineage.
+ await admin.query("UPDATE course_versions SET content=content||$2::jsonb WHERE course_version_id=$1",[courseVersionId,JSON.stringify({_lineage:{sourceReleaseId:'original-release'}})]);
+ await store.restoreDraftHistory({...input,revision:5,idempotencyKey:'lineage'});assert.deepEqual((await read()).content._lineage,{sourceReleaseId:'original-release'});
+ let revision=6;
+ for(let i=0;i<51;i++){await store.saveDraft({tenant,courseVersionId,revision,content:{...initial,title:'History '+i}});revision++;}
+ const first=await store.listDraftHistory(tenant,courseVersionId),second=await store.listDraftHistory(tenant,courseVersionId,first.nextBeforeRevision);assert.equal(first.items.length,50);assert(second.items.length>0);assert.equal(new Set([...first.items,...second.items].map(item=>item.eventId)).size,first.items.length+second.items.length);
+ await admin.query("UPDATE course_versions SET status='PUBLISHED' WHERE course_version_id=$1",[courseVersionId]);await assert.rejects(store.restoreDraftHistory({...input,revision,idempotencyKey:'published'}),/COURSE_VERSION_IMMUTABLE/);
+ assert.equal((await admin.query("SELECT count(*)::int n FROM audit_events WHERE organization_id=$1 AND event_type='COURSE_DRAFT_RESTORED'",[org])).rows[0].n,3);
+ console.log('Draft history passed: restricted-role undo/redo, revision conflict, cross-tenant/course denial, audit rollback, concurrent retry, later-edit retention, lineage preservation, pagination and published immutability.');
+}finally{
+ server.closeAllConnections();if(server.listening)await new Promise(resolve=>server.close(resolve));
+ for(const table of ['audit_events','course_versions','courses'])await admin.query(`DELETE FROM ${table} WHERE organization_id=$1`,[org]);
+ await runtime.end();await admin.end();
+}

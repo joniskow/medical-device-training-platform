@@ -1,0 +1,15 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Organization settings</title>
+<style>
+:root{--ink:#18323a;--surface:#fff;--background:#f4f8f7;--border:#71888d;--focus:#ac6b00;--action:#164f58}*{box-sizing:border-box}body{margin:0;font:1rem/1.5 system-ui,sans-serif;color:var(--ink);background:var(--background)}main{max-width:48rem;margin:2rem auto;padding:1.5rem}nav{display:flex;gap:1rem;flex-wrap:wrap;align-items:center}a{color:var(--action)}h1{font-size:2rem;margin-bottom:.5rem}fieldset{min-width:0;border:1px solid var(--border);padding:1.5rem;background:var(--surface)}label{display:block;font-weight:600;margin-top:1rem}input,textarea,button{font:inherit;min-height:2.75rem}input,textarea{display:block;width:100%;padding:.75rem;border:1px solid var(--border);border-radius:.25rem;margin:.25rem 0}textarea{resize:vertical}button{padding:.5rem 1rem;cursor:pointer;border:1px solid var(--border);border-radius:.25rem;background:var(--surface);color:var(--ink)}button[type=submit]{background:var(--action);color:white;margin-top:1rem}button:disabled{cursor:default;opacity:.65}:focus-visible{outline:3px solid var(--focus);outline-offset:3px}.hint{font-size:.875rem;margin:.25rem 0 1rem}#message,#context{overflow-wrap:anywhere}#message{min-height:3rem}#reload{margin-bottom:1rem}@media(max-width:480px){main{padding:1rem;margin:1rem auto}fieldset{padding:1rem}}
+</style></head><body><main>
+<nav aria-label="Organization navigation"><a href="/organizations">Choose organization</a><a href="/author/members">Members</a><a href="/author/invitations">Invitations</a><button id="sign-out" type="button">Sign out</button><a href="/author/course-availability">Course availability</a></nav>
+<h1>Organization settings</h1><p id="context"></p><p>Update your organization's profile. Published course and credential issuer details retain their approved values.</p>
+<p id="message" role="status" aria-live="polite"></p><button id="reload" type="button">Reload saved profile</button>
+<form id="profile-form"><fieldset id="profile-fields" disabled><legend>Organization profile</legend>
+<label for="profile-name">Display name</label><input id="profile-name" required maxlength="160" autocomplete="organization">
+<label for="profile-description">Description (optional)</label><textarea id="profile-description" rows="4" maxlength="2000"></textarea>
+<label for="profile-website">Website (optional)</label><input id="profile-website" type="url" maxlength="2048" aria-describedby="website-help"><p id="website-help" class="hint">Use a full HTTPS address without sign-in credentials.</p>
+<label for="profile-reason">Reason for this change</label><textarea id="profile-reason" rows="2" maxlength="2000" required aria-describedby="reason-help"></textarea><p id="reason-help" class="hint">Recorded in the organization audit history. Avoid personal or sensitive information.</p>
+<button type="submit">Save profile</button></fieldset></form>
+</main><script type="module" src="/author/organization-settings.js"></script></body></html>

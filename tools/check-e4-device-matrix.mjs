@@ -1,0 +1,20 @@
+import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
+import { resolve } from "node:path";
+
+const root = resolve(import.meta.dirname, "..");
+const matrix = JSON.parse(await readFile(resolve(root, "config/e4-device-matrix.json"), "utf8"));
+assert.equal(matrix.schemaVersion, "e4-device-matrix.v1");
+assert.equal(matrix.acceptanceStatus, "pending-physical-device-validation");
+const requiredBrowsers = new Set(["Chrome", "Edge", "Safari", "Firefox"]);
+assert.ok(Array.isArray(matrix.browserBaseline) && matrix.browserBaseline.length >= requiredBrowsers.size);
+assert.deepEqual(new Set(matrix.browserBaseline.map((item) => item.browser)), requiredBrowsers);
+assert.ok(matrix.browserBaseline.every((item) => typeof item.browser === "string" && typeof item.versionPolicy === "string" && typeof item.verification === "string"));
+assert.ok(Array.isArray(matrix.localEvidence) && matrix.localEvidence.length >= 2);
+assert.ok(matrix.localEvidence.every((item) => typeof item.browser === "string" && /^\d+\.\d+\.\d+\.\d+$/.test(item.version) && item.os === "Windows host"));
+assert.equal(matrix.profiles.length, 3);
+assert.ok(matrix.profiles.every((profile) => Array.isArray(profile.viewport) && profile.viewport.length === 2 && profile.targetFps >= 30 && profile.interactiveWithinMs <= 5000 && profile.maxMemoryMb > 0));
+assert.ok(matrix.profiles.some((profile) => profile.verification === "pending-physical-device"));
+assert.ok(matrix.testNetwork && typeof matrix.testNetwork.name === "string" && matrix.testNetwork.latencyMs >= 0 && matrix.testNetwork.downloadBytesPerSecond > 0 && matrix.testNetwork.uploadBytesPerSecond > 0);
+assert.ok(matrix.sceneBudgets.maxTriangles > 0 && matrix.sceneBudgets.maxTextures > 0 && matrix.sceneBudgets.maxTextureBytes > 0);
+console.log("E4 device matrix contract passed: exact local evidence is recorded and physical acceptance remains explicitly fail-closed.");

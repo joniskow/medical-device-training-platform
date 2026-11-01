@@ -1,0 +1,52 @@
+import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
+import { resolve } from "node:path";
+
+const root = resolve(import.meta.dirname, "..");
+const html = await readFile(resolve(root, "apps/web/src/model.html"), "utf8");
+const textOnlyHtml = await readFile(resolve(root, "apps/web/src/index.html"), "utf8");
+const source = await readFile(resolve(root, "apps/web/src/model-player.ts"), "utf8");
+const runtimeSource = await readFile(resolve(root, "apps/web/src/babylon-model-runtime.ts"), "utf8");
+const bundle = await readFile(resolve(root, "apps/web/dist/model-player.js"), "utf8");
+
+assert.match(html, /id="model-canvas"[^>]+aria-label=/, "the canvas needs a useful accessible name");
+assert.match(html, /id="component-list"[^>]+role="list"/, "the equivalent component list must be exposed as a list");
+assert.match(source, /listItem\.setAttribute\("role", "listitem"\)/, "component buttons must have accessible list-item structure");
+assert.match(html, /id="first-use-hint"[^>]+role="note"/, "first-use instructions must be visible outside the canvas");
+assert.match(html, /id="procedure-step"/, "the current procedure projection must be visible outside the canvas");
+assert.match(html, /id="allowed-actions"/, "server-projected allowed actions must be visible outside the canvas");
+assert.match(html, /id="procedure-fault"[^>]+role="status"/, "fault feedback must be announced outside the canvas");
+assert.match(html, /id="action-log"[^>]+role="status"/, "semantic action feedback must be announced");
+assert.match(html, /id="score"/, "authoritative score must have a visible projection");
+assert.match(html, /id="completion"/, "authoritative completion must have a visible projection");
+assert.match(html, /src="\/learner\/model-player\.js"/, "the model route must explicitly load the 3D feature");
+assert.doesNotMatch(textOnlyHtml, /model-player|babylon|model-manifest|model-canvas/, "text-only routes must not load the 3D feature");
+
+assert.match(source, /onSemanticAction:/, "canvas interaction must emit semantic actions");
+assert.match(source, /action\.type === "select_component"/, "selection must be handled as a semantic action");
+assert.match(source, /event\.key === "Enter" \|\| event\.key === " "/, "component buttons must expose explicit keyboard activation");
+assert.match(source, /renderActions\(\);\s*void submit\(\{ \.\.\.action/, "canvas selection must expose permitted actions immediately");
+assert.match(source, /selectedComponentId = result\.state\.selectedComponentId/, "authoritative state must restore or clear the selected component");
+assert.match(source, /if \(result\.status !== "accepted"\)/, "rejected actions must restore the last authoritative selection");
+assert.match(source, /if \(!assetLoadFailure\) try/, "a bound asset lookup failure must not fall back to the static preview manifest");
+assert.match(source, /releaseHash/, "bound sessions must carry the immutable release hash");
+assert.doesNotMatch(source, /releaseManifestUrl/, "Learner sessions must not require the private full release manifest");
+assert.match(source, /procedureStep\.textContent = state\.authoritative\.activeStepTitle/, "procedure text must come from authoritative state");
+assert.match(source, /renderAuthoritativeState\(result\.state\)/, "equivalent controls must project authoritative state without a renderer");
+assert.match(source, /procedureFault\.hidden = !state\.authoritative\.activeFaultTitle/, "fault visibility must come from authoritative state");
+assert.match(source, /createHttpSemanticActionTransport/, "bound sessions must use the HTTP semantic-action transport");
+assert.match(source, /releaseBindingId: manifest\.releaseBindingId, modelVersionId: manifest\.modelVersionId/, "bound action transport must carry the approved model binding");
+assert.match(source, /const boundAuthorization = getAccessToken\(\)/, "bound actions must resolve the session-scoped bearer token");
+assert.match(source, /authorization: boundAuthorization \? `Bearer \$\{boundAuthorization\}`/, "bound actions must forward the session-scoped bearer token");
+assert.match(source, /await authenticatedFetch\(`/, "bound asset lookup must use renewable authentication");
+assert.match(source, /return authenticatedFetch\(input,init\)/, "bound action requests must use renewable authentication");
+assert.match(source, /getSessionIdentity\(\)!==boundIdentity/, "bound action requests must reject a changed session");
+assert.match(source, /AUTHENTICATION_REQUIRED/, "bound sessions must fail clearly when no learner token is available");
+assert.match(source, /previewTransport/, "preview behavior must remain explicitly separated from bound sessions");
+assert.match(bundle, /onContextLostObservable/, "the shipped runtime must handle WebGL context loss");
+assert.match(runtimeSource, /state\.selectedComponentId = undefined/, "the runtime must clear stale local selection when authoritative state clears it");
+assert.match(bundle, /estimatedMemoryMb/, "the shipped runtime must expose memory telemetry");
+assert.match(bundle, /REDUCED_COMPLEXITY/, "the shipped runtime must include the equivalent-path state");
+assert.match(bundle, /BrowserSemanticActionClient/, "the shipped learner bundle must include the action client");
+
+console.log("Model player contract passed: accessible equivalent controls, authoritative procedure projection, canvas-selection actions, resume restoration, and bound-session transport are wired.");

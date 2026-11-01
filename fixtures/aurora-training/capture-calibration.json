@@ -1,0 +1,9 @@
+{
+  "width": 1920,
+  "height": 1080,
+  "fx": 1277.2201068211198,
+  "fy": 1277.2201068211198,
+  "cx": 960,
+  "cy": 540,
+  "provenance": "Known synthetic renderer intrinsics: vertical field of view 0.8 radians. Not a calibration for a real camera. No poses or source geometry are supplied to reconstruction."
+}

@@ -1,0 +1,55 @@
+{
+  "schemaVersion": "observability-contract.v1",
+  "status": "contract-pending-telemetry-wiring",
+  "correlation": {
+    "requestHeader": "x-correlation-id",
+    "responseHeader": "x-correlation-id",
+    "generatedPrefix": "corr:",
+    "maxLength": 128,
+    "propagation": [
+      "TenantContext.correlationId",
+      "JobEnvelope.tenant.correlationId",
+      "ServiceBus.correlationId",
+      "ServiceBus.applicationProperties.correlationId"
+    ]
+  },
+  "safeDimensions": [
+    "environment",
+    "service",
+    "release",
+    "route",
+    "jobType",
+    "jobState",
+    "failureClass",
+    "errorCode",
+    "organizationHash",
+    "correlationId"
+  ],
+  "forbiddenDimensions": [
+    "sourceText",
+    "prompt",
+    "answerKey",
+    "accessToken",
+    "blobSas",
+    "rawEmail",
+    "phi"
+  ],
+  "dashboards": [
+    { "id": "api-health", "panels": ["request-rate", "5xx-rate", "p95-latency", "auth-denials", "correlation-drilldown"] },
+    { "id": "queue-recovery", "panels": ["active-age", "retry-rate", "dead-letter-count", "terminal-failures", "oldest-correlation-id"] },
+    { "id": "provider-cost", "panels": ["provider-latency", "provider-errors", "tokens", "estimated-cost", "quota-denials"] },
+    { "id": "content-delivery", "panels": ["asset-success-by-type", "reconstruction-failures", "publication-failures", "webhook-email-failures", "credential-anomalies"] }
+  ],
+  "alerts": [
+    "api-availability",
+    "api-error-rate",
+    "database-exhaustion",
+    "queue-age",
+    "dead-letter-growth",
+    "provider-failure-or-quota",
+    "authorization-denial-spike",
+    "credential-issuance-failure",
+    "login-or-inquiry-abuse",
+    "budget-threshold"
+  ]
+}

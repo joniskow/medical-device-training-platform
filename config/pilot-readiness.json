@@ -1,0 +1,74 @@
+{
+  "schemaVersion": "pilot-readiness.v1",
+  "deploymentBoundary": "personal-azure",
+  "ai": {
+    "providerBoundary": "azure-openai-foundry",
+    "deployment": "training-draft",
+    "region": "eastus",
+    "model": "gpt-4.1-mini",
+    "apiVersion": "2024-10-21",
+    "ocrPath": "worker-local-poppler-tesseract-english-v1",
+    "transcriptionPath": "disabled-for-pilot",
+    "retrieval": "postgres-full-text-pgvector",
+    "modelVersion": "2025-04-14",
+    "resourceName": "mdtpersonalai01",
+    "endpoint": "https://mdtpersonalai01.openai.azure.com/"
+  },
+  "deviceBaseline": {
+    "graphics": "webgl2",
+    "optionalGraphics": "webgpu",
+    "interactiveWithinSeconds": 5,
+    "minimumFps": 30,
+    "non3dAccessibility": "wcag-2.2-aa",
+    "equivalentPathRequired": true,
+    "profiles": [
+      {
+        "id": "desktop-windows-chrome-edge",
+        "browser": ["Chrome", "Edge"],
+        "versionPolicy": "latest-two",
+        "os": "Windows 11",
+        "deviceClass": "desktop-webgl2",
+        "viewport": [1280, 800]
+      },
+      {
+        "id": "ios-safari-webgl2",
+        "browser": ["Safari"],
+        "versionPolicy": "latest-two",
+        "os": "iOS/iPadOS",
+        "deviceClass": "physical-mobile-webgl2",
+        "viewport": [390, 844]
+      },
+      {
+        "id": "android-chrome-webgl2",
+        "browser": ["Chrome"],
+        "versionPolicy": "latest-two",
+        "os": "Android",
+        "deviceClass": "physical-mobile-webgl2",
+        "viewport": [412, 915]
+      }
+    ]
+  },
+  "privacy": {
+    "noPhi": true,
+    "discoveryDefault": "off",
+    "rightsAttestationRequired": true,
+    "retentionDays": 365,
+    "legalHoldOwner": "security-privacy-legal-owner"
+  },
+  "economics": {
+    "monthlyBudgetUsd": 500,
+    "maxConcurrentJobs": 4,
+    "maxAiTokensPerRun": 4000,
+    "alertThresholdPercent": 80
+  },
+  "recovery": {
+    "rpoMinutes": 15,
+    "restoreRegion": "southeastus"
+  },
+  "credential": {
+    "issuerWordingApproved": true,
+    "issuerWording": "This credential is an organization-issued platform certification for completion of {courseTitle} training. It is not a professional license, accreditation, regulatory approval, or portable cryptographic credential.",
+    "excludesLicensureAccreditation": true,
+    "onlineVerificationOnly": true
+  }
+}

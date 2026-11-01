@@ -1,0 +1,426 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "environmentName": {
+      "type": "string",
+      "defaultValue": "dev",
+      "metadata": { "description": "Short environment name used in resource names." }
+    },
+    "location": {
+      "type": "string",
+      "defaultValue": "eastus",
+      "metadata": { "description": "Azure region for the data foundation." }
+    },
+    "logAnalyticsWorkspaceName": {
+      "type": "string",
+      "defaultValue": "mdt-dev-logs",
+      "metadata": { "description": "Existing Log Analytics workspace name." }
+    },
+    "storageAccountName": {
+      "type": "string",
+      "defaultValue": "mdtdevstorage01",
+      "metadata": { "description": "Existing storage account name." }
+    },
+    "workerIdentityName": {
+      "type": "string",
+      "defaultValue": "mdt-dev-worker-id",
+      "metadata": { "description": "Existing worker managed identity name." }
+    },
+    "postgresAdminLogin": {
+      "type": "string",
+      "defaultValue": "mdtadmin",
+      "metadata": { "description": "PostgreSQL administrator login." }
+    },
+    "postgresAdminPassword": {
+      "type": "secureString",
+      "metadata": { "description": "PostgreSQL administrator password. It will be stored in the project Key Vault and never in the repository." }
+    },
+    "postgresRuntimePassword": {
+      "type": "secureString",
+      "metadata": { "description": "Non-owner PostgreSQL runtime role password. It will be stored in the project Key Vault and never in the repository." }
+    },
+    "serviceBusSigningSecret": {
+      "type": "secureString",
+      "metadata": { "description": "HMAC secret for internal Service Bus job envelopes. It will be stored in the project Key Vault and never in the repository." }
+    },
+    "postgresDatabaseName": {
+      "type": "string",
+      "defaultValue": "medical_device",
+      "metadata": { "description": "PostgreSQL database name." }
+    }
+  },
+  "variables": {
+    "vnetName": "[format('mdt-{0}-vnet', parameters('environmentName'))]",
+    "acaEnvironmentName": "[format('mdt-{0}-aca-private', parameters('environmentName'))]",
+    "postgresServerName": "[format('mdt-{0}-pg', parameters('environmentName'))]",
+    "keyVaultName": "[format('mdt{0}kv01', parameters('environmentName'))]",
+    "blobPrivateDnsZoneName": "privatelink.blob.core.windows.net",
+    "postgresPrivateDnsZoneName": "[format('mdt-{0}.postgres.database.azure.com', parameters('environmentName'))]",
+    "keyVaultPrivateDnsZoneName": "privatelink.vaultcore.azure.net",
+    "acaSubnetName": "aca-infrastructure",
+    "postgresSubnetName": "postgres",
+    "privateEndpointSubnetName": "private-endpoints"
+  },
+  "resources": [
+    {
+      "type": "Microsoft.Network/virtualNetworks",
+      "apiVersion": "2023-11-01",
+      "name": "[variables('vnetName')]",
+      "location": "[parameters('location')]",
+      "tags": {
+        "project": "medical-device-training",
+        "environment": "[parameters('environmentName')]"
+      },
+      "properties": {
+        "addressSpace": { "addressPrefixes": [ "10.50.0.0/16" ] },
+        "subnets": [
+          {
+            "name": "[variables('acaSubnetName')]",
+            "properties": {
+              "addressPrefix": "10.50.0.0/23",
+              "delegations": [
+                {
+                  "name": "aca-environment-delegation",
+                  "properties": { "serviceName": "Microsoft.App/environments" }
+                }
+              ]
+            }
+          },
+          {
+            "name": "[variables('postgresSubnetName')]",
+            "properties": {
+              "addressPrefix": "10.50.2.0/28",
+              "delegations": [
+                {
+                  "name": "postgres-flexible-server-delegation",
+                  "properties": { "serviceName": "Microsoft.DBforPostgreSQL/flexibleServers" }
+                }
+              ]
+            }
+          },
+          {
+            "name": "[variables('privateEndpointSubnetName')]",
+            "properties": {
+              "addressPrefix": "10.50.2.32/27",
+              "privateEndpointNetworkPolicies": "Disabled"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "type": "Microsoft.Network/privateDnsZones",
+      "apiVersion": "2020-06-01",
+      "name": "[variables('blobPrivateDnsZoneName')]",
+      "location": "global",
+      "tags": {
+        "project": "medical-device-training",
+        "environment": "[parameters('environmentName')]"
+      }
+    },
+    {
+      "type": "Microsoft.Network/privateDnsZones/virtualNetworkLinks",
+      "apiVersion": "2020-06-01",
+      "name": "[format('{0}/{1}', variables('blobPrivateDnsZoneName'), variables('vnetName'))]",
+      "location": "global",
+      "dependsOn": [
+        "[resourceId('Microsoft.Network/privateDnsZones', variables('blobPrivateDnsZoneName'))]",
+        "[resourceId('Microsoft.Network/virtualNetworks', variables('vnetName'))]"
+      ],
+      "properties": {
+        "registrationEnabled": false,
+        "virtualNetwork": { "id": "[resourceId('Microsoft.Network/virtualNetworks', variables('vnetName'))]" }
+      }
+    },
+    {
+      "type": "Microsoft.Network/privateDnsZones",
+      "apiVersion": "2020-06-01",
+      "name": "[variables('postgresPrivateDnsZoneName')]",
+      "location": "global",
+      "tags": {
+        "project": "medical-device-training",
+        "environment": "[parameters('environmentName')]"
+      }
+    },
+    {
+      "type": "Microsoft.Network/privateDnsZones/virtualNetworkLinks",
+      "apiVersion": "2020-06-01",
+      "name": "[format('{0}/{1}', variables('postgresPrivateDnsZoneName'), variables('vnetName'))]",
+      "location": "global",
+      "dependsOn": [
+        "[resourceId('Microsoft.Network/privateDnsZones', variables('postgresPrivateDnsZoneName'))]",
+        "[resourceId('Microsoft.Network/virtualNetworks', variables('vnetName'))]"
+      ],
+      "properties": {
+        "registrationEnabled": false,
+        "virtualNetwork": { "id": "[resourceId('Microsoft.Network/virtualNetworks', variables('vnetName'))]" }
+      }
+    },
+    {
+      "type": "Microsoft.Network/privateDnsZones",
+      "apiVersion": "2020-06-01",
+      "name": "[variables('keyVaultPrivateDnsZoneName')]",
+      "location": "global",
+      "tags": {
+        "project": "medical-device-training",
+        "environment": "[parameters('environmentName')]"
+      }
+    },
+    {
+      "type": "Microsoft.Network/privateDnsZones/virtualNetworkLinks",
+      "apiVersion": "2020-06-01",
+      "name": "[format('{0}/{1}', variables('keyVaultPrivateDnsZoneName'), variables('vnetName'))]",
+      "location": "global",
+      "dependsOn": [
+        "[resourceId('Microsoft.Network/privateDnsZones', variables('keyVaultPrivateDnsZoneName'))]",
+        "[resourceId('Microsoft.Network/virtualNetworks', variables('vnetName'))]"
+      ],
+      "properties": {
+        "registrationEnabled": false,
+        "virtualNetwork": { "id": "[resourceId('Microsoft.Network/virtualNetworks', variables('vnetName'))]" }
+      }
+    },
+    {
+      "type": "Microsoft.Network/privateEndpoints",
+      "apiVersion": "2023-11-01",
+      "name": "[format('mdt-{0}-storage-pe', parameters('environmentName'))]",
+      "location": "[parameters('location')]",
+      "tags": {
+        "project": "medical-device-training",
+        "environment": "[parameters('environmentName')]"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.Network/virtualNetworks', variables('vnetName'))]"
+      ],
+      "properties": {
+        "subnet": {
+          "id": "[resourceId('Microsoft.Network/virtualNetworks/subnets', variables('vnetName'), variables('privateEndpointSubnetName'))]"
+        },
+        "privateLinkServiceConnections": [
+          {
+            "name": "blob",
+            "properties": {
+              "privateLinkServiceId": "[resourceId('Microsoft.Storage/storageAccounts', parameters('storageAccountName'))]",
+              "groupIds": [ "blob" ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "type": "Microsoft.Network/privateEndpoints/privateDnsZoneGroups",
+      "apiVersion": "2023-11-01",
+      "name": "[format('mdt-{0}-storage-pe/default', parameters('environmentName'))]",
+      "dependsOn": [
+        "[resourceId('Microsoft.Network/privateEndpoints', format('mdt-{0}-storage-pe', parameters('environmentName')))]",
+        "[resourceId('Microsoft.Network/privateDnsZones', variables('blobPrivateDnsZoneName'))]",
+        "[resourceId('Microsoft.Network/privateDnsZones/virtualNetworkLinks', variables('blobPrivateDnsZoneName'), variables('vnetName'))]"
+      ],
+      "properties": {
+        "privateDnsZoneConfigs": [
+          {
+            "name": "blob",
+            "properties": {
+              "privateDnsZoneId": "[resourceId('Microsoft.Network/privateDnsZones', variables('blobPrivateDnsZoneName'))]"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "type": "Microsoft.KeyVault/vaults",
+      "apiVersion": "2023-07-01",
+      "name": "[variables('keyVaultName')]",
+      "location": "[parameters('location')]",
+      "tags": {
+        "project": "medical-device-training",
+        "environment": "[parameters('environmentName')]"
+      },
+      "properties": {
+        "tenantId": "[subscription().tenantId]",
+        "sku": { "family": "A", "name": "standard" },
+        "enableRbacAuthorization": true,
+        "publicNetworkAccess": "Disabled",
+        "softDeleteRetentionInDays": 7
+      }
+    },
+    {
+      "type": "Microsoft.Network/privateEndpoints",
+      "apiVersion": "2023-11-01",
+      "name": "[format('mdt-{0}-kv-pe', parameters('environmentName'))]",
+      "location": "[parameters('location')]",
+      "tags": {
+        "project": "medical-device-training",
+        "environment": "[parameters('environmentName')]"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.Network/virtualNetworks', variables('vnetName'))]",
+        "[resourceId('Microsoft.KeyVault/vaults', variables('keyVaultName'))]"
+      ],
+      "properties": {
+        "subnet": {
+          "id": "[resourceId('Microsoft.Network/virtualNetworks/subnets', variables('vnetName'), variables('privateEndpointSubnetName'))]"
+        },
+        "privateLinkServiceConnections": [
+          {
+            "name": "vault",
+            "properties": {
+              "privateLinkServiceId": "[resourceId('Microsoft.KeyVault/vaults', variables('keyVaultName'))]",
+              "groupIds": [ "vault" ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "type": "Microsoft.Network/privateEndpoints/privateDnsZoneGroups",
+      "apiVersion": "2023-11-01",
+      "name": "[format('mdt-{0}-kv-pe/default', parameters('environmentName'))]",
+      "dependsOn": [
+        "[resourceId('Microsoft.Network/privateEndpoints', format('mdt-{0}-kv-pe', parameters('environmentName')))]",
+        "[resourceId('Microsoft.Network/privateDnsZones', variables('keyVaultPrivateDnsZoneName'))]",
+        "[resourceId('Microsoft.Network/privateDnsZones/virtualNetworkLinks', variables('keyVaultPrivateDnsZoneName'), variables('vnetName'))]"
+      ],
+      "properties": {
+        "privateDnsZoneConfigs": [
+          {
+            "name": "vault",
+            "properties": {
+              "privateDnsZoneId": "[resourceId('Microsoft.Network/privateDnsZones', variables('keyVaultPrivateDnsZoneName'))]"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "type": "Microsoft.DBforPostgreSQL/flexibleServers",
+      "apiVersion": "2024-08-01",
+      "name": "[variables('postgresServerName')]",
+      "location": "[parameters('location')]",
+      "tags": {
+        "project": "medical-device-training",
+        "environment": "[parameters('environmentName')]"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.Network/virtualNetworks', variables('vnetName'))]",
+        "[resourceId('Microsoft.Network/privateDnsZones/virtualNetworkLinks', variables('postgresPrivateDnsZoneName'), variables('vnetName'))]"
+      ],
+      "sku": {
+        "name": "Standard_B1ms",
+        "tier": "Burstable"
+      },
+      "properties": {
+        "administratorLogin": "[parameters('postgresAdminLogin')]",
+        "administratorLoginPassword": "[parameters('postgresAdminPassword')]",
+        "version": "16",
+        "storage": {
+          "storageSizeGB": 32,
+          "autoGrow": "Disabled"
+        },
+        "backup": {
+          "backupRetentionDays": 7,
+          "geoRedundantBackup": "Disabled"
+        },
+        "highAvailability": { "mode": "Disabled" },
+        "network": {
+          "delegatedSubnetResourceId": "[resourceId('Microsoft.Network/virtualNetworks/subnets', variables('vnetName'), variables('postgresSubnetName'))]",
+          "privateDnsZoneArmResourceId": "[resourceId('Microsoft.Network/privateDnsZones', variables('postgresPrivateDnsZoneName'))]",
+          "publicNetworkAccess": "Disabled"
+        }
+      }
+    },
+    {
+      "type": "Microsoft.DBforPostgreSQL/flexibleServers/databases",
+      "apiVersion": "2024-08-01",
+      "name": "[format('{0}/{1}', variables('postgresServerName'), parameters('postgresDatabaseName'))]",
+      "dependsOn": [
+        "[resourceId('Microsoft.DBforPostgreSQL/flexibleServers', variables('postgresServerName'))]"
+      ],
+      "properties": {}
+    },
+    {
+      "type": "Microsoft.KeyVault/vaults/secrets",
+      "apiVersion": "2023-07-01",
+      "name": "[format('{0}/postgres-admin-password', variables('keyVaultName'))]",
+      "dependsOn": [
+        "[resourceId('Microsoft.KeyVault/vaults', variables('keyVaultName'))]",
+        "[resourceId('Microsoft.DBforPostgreSQL/flexibleServers', variables('postgresServerName'))]"
+      ],
+      "properties": {
+        "value": "[parameters('postgresAdminPassword')]"
+      }
+    },
+    {
+      "type": "Microsoft.KeyVault/vaults/secrets",
+      "apiVersion": "2023-07-01",
+      "name": "[format('{0}/postgres-runtime-password', variables('keyVaultName'))]",
+      "dependsOn": [
+        "[resourceId('Microsoft.KeyVault/vaults', variables('keyVaultName'))]",
+        "[resourceId('Microsoft.DBforPostgreSQL/flexibleServers', variables('postgresServerName'))]"
+      ],
+      "properties": {
+        "value": "[parameters('postgresRuntimePassword')]"
+      }
+    },
+    {
+      "type": "Microsoft.KeyVault/vaults/secrets",
+      "apiVersion": "2023-07-01",
+      "name": "[format('{0}/service-bus-signing-secret', variables('keyVaultName'))]",
+      "dependsOn": [
+        "[resourceId('Microsoft.KeyVault/vaults', variables('keyVaultName'))]"
+      ],
+      "properties": {
+        "value": "[parameters('serviceBusSigningSecret')]"
+      }
+    },
+    {
+      "type": "Microsoft.Authorization/roleAssignments",
+      "apiVersion": "2022-04-01",
+      "name": "[guid(resourceId('Microsoft.KeyVault/vaults', variables('keyVaultName')), resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', parameters('workerIdentityName')), 'key-vault-secrets-user')]",
+      "scope": "[resourceId('Microsoft.KeyVault/vaults', variables('keyVaultName'))]",
+      "dependsOn": [
+        "[resourceId('Microsoft.KeyVault/vaults', variables('keyVaultName'))]"
+      ],
+      "properties": {
+        "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '4633458b-17de-408a-b874-0445c86b69e6')]",
+        "principalId": "[reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', parameters('workerIdentityName')), '2023-01-31').principalId]",
+        "principalType": "ServicePrincipal"
+      }
+    },
+    {
+      "type": "Microsoft.App/managedEnvironments",
+      "apiVersion": "2024-03-01",
+      "name": "[variables('acaEnvironmentName')]",
+      "location": "[parameters('location')]",
+      "tags": {
+        "project": "medical-device-training",
+        "environment": "[parameters('environmentName')]"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.Network/virtualNetworks', variables('vnetName'))]"
+      ],
+      "properties": {
+        "vnetConfiguration": {
+          "infrastructureSubnetId": "[resourceId('Microsoft.Network/virtualNetworks/subnets', variables('vnetName'), variables('acaSubnetName'))]",
+          "internal": false
+        },
+        "appLogsConfiguration": {
+          "destination": "log-analytics",
+          "logAnalyticsConfiguration": {
+            "customerId": "[reference(resourceId('Microsoft.OperationalInsights/workspaces', parameters('logAnalyticsWorkspaceName')), '2023-09-01').customerId]",
+            "sharedKey": "[listKeys(resourceId('Microsoft.OperationalInsights/workspaces', parameters('logAnalyticsWorkspaceName')), '2023-09-01').primarySharedKey]"
+          }
+        }
+      }
+    }
+  ],
+  "outputs": {
+    "vnetName": { "type": "string", "value": "[variables('vnetName')]" },
+    "storagePrivateEndpointName": { "type": "string", "value": "[format('mdt-{0}-storage-pe', parameters('environmentName'))]" },
+    "postgresServerName": { "type": "string", "value": "[variables('postgresServerName')]" },
+    "postgresDatabaseName": { "type": "string", "value": "[parameters('postgresDatabaseName')]" },
+    "keyVaultName": { "type": "string", "value": "[variables('keyVaultName')]" },
+    "managedEnvironmentName": { "type": "string", "value": "[variables('acaEnvironmentName')]" }
+  }
+}

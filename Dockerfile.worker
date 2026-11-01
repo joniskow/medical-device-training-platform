@@ -1,0 +1,59 @@
+FROM node:24-trixie-slim AS openmvs
+ARG OPENMVS_URL=https://github.com/cdcseacave/openMVS/releases/download/v2.4.0/OpenMVS_Ubuntu_x64.zip
+ARG OPENMVS_SHA256=7104AE1DDD6CA38FBCA9E0E4A70B20AF59E21E0B497EB7181C864FBF38CA8D00
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends ca-certificates curl unzip \
+ && rm -rf /var/lib/apt/lists/* \
+ && curl -fsSL "$OPENMVS_URL" -o /tmp/openmvs.zip \
+ && echo "$OPENMVS_SHA256  /tmp/openmvs.zip" | sha256sum -c - \
+ && mkdir -p /opt/openmvs \
+ && unzip -q /tmp/openmvs.zip -d /opt/openmvs \
+ && chmod 0555 /opt/openmvs/* \
+ && rm /tmp/openmvs.zip
+
+FROM node:24-trixie-slim AS build
+WORKDIR /workspace
+RUN corepack enable
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.base.json tsconfig.json ./
+COPY apps/worker/package.json apps/worker/tsconfig.json ./apps/worker/
+COPY packages/simulation-schema/package.json packages/simulation-schema/tsconfig.json ./packages/simulation-schema/
+COPY packages/contracts/package.json packages/contracts/tsconfig.json ./packages/contracts/
+COPY packages/db/package.json packages/db/tsconfig.json ./packages/db/
+COPY packages/model-runtime/package.json packages/model-runtime/tsconfig.json ./packages/model-runtime/
+COPY packages/storage/package.json packages/storage/tsconfig.json ./packages/storage/
+COPY apps/worker ./apps/worker
+COPY packages/simulation-schema ./packages/simulation-schema
+COPY packages/contracts ./packages/contracts
+COPY packages/db ./packages/db
+COPY packages/model-runtime ./packages/model-runtime
+COPY packages/storage ./packages/storage
+COPY tools/reconstruction ./tools/reconstruction
+RUN pnpm install --frozen-lockfile
+RUN pnpm --filter @medical-device/contracts build && pnpm --filter @medical-device/simulation-schema build && pnpm --filter @medical-device/model-runtime build && pnpm --filter @medical-device/db build && pnpm --filter @medical-device/storage build && pnpm --filter @medical-device/worker build && pnpm deploy --legacy --filter @medical-device/worker --prod /out
+
+FROM node:24-trixie-slim AS runtime
+WORKDIR /app
+ENV NODE_ENV=production
+COPY --from=build /workspace/tools/reconstruction/requirements.txt /tmp/reconstruction-requirements.txt
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends \
+      python3 python3-venv ffmpeg poppler-utils tesseract-ocr \
+      libgomp1 libgl1 libglib2.0-0 libsm6 libxext6 libxrender1 \
+ && python3 -m venv /opt/pdf \
+ && /opt/pdf/bin/pip install --no-cache-dir pypdf==5.9.0 \
+ && python3 -m venv /opt/reconstruction-runtime \
+ && /opt/reconstruction-runtime/bin/pip install --no-cache-dir -r /tmp/reconstruction-requirements.txt \
+ && rm -rf /var/lib/apt/lists/*
+ENV PDF_PYTHON=/opt/pdf/bin/python
+ENV RECONSTRUCTION_PYTHON=/opt/reconstruction-runtime/bin/python
+ENV PHOTOGRAMMETRY_PYTHON=/opt/reconstruction-runtime/bin/python
+ENV RECONSTRUCTION_SCRIPTS_DIR=/opt/reconstruction-scripts
+ENV PHOTOGRAMMETRY_OPENMVS_DIR=/opt/openmvs
+ENV RECONSTRUCTION_WORK_DIR=/tmp/reconstruction
+RUN groupadd --system app && useradd --system --gid app app
+COPY --from=build /out ./
+COPY --from=build /workspace/tools/reconstruction /opt/reconstruction-scripts
+COPY --from=openmvs /opt/openmvs /opt/openmvs
+RUN mkdir -p /tmp/reconstruction && chown -R app:app /tmp/reconstruction
+USER app
+CMD ["node", "dist/entrypoint.js"]

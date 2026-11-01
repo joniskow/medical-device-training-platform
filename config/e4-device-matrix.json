@@ -1,0 +1,64 @@
+{
+  "schemaVersion": "e4-device-matrix.v1",
+  "acceptanceStatus": "pending-physical-device-validation",
+  "policyNote": "Local foreground runs verify host-browser behavior and mobile viewport emulation. They do not replace exact physical iOS Safari, Android Chrome, or Firefox acceptance evidence.",
+  "browserBaseline": [
+    { "browser": "Chrome", "versionPolicy": "latest-two", "verification": "local-exact-host-version-plus-pending-mobile" },
+    { "browser": "Edge", "versionPolicy": "latest-two", "verification": "local-exact-host-version-plus-pending-mobile" },
+    { "browser": "Safari", "versionPolicy": "latest-two", "verification": "pending-physical-ios-device" },
+    { "browser": "Firefox", "versionPolicy": "latest-two", "verification": "pending-firefox-executable-and-device" }
+  ],
+  "localEvidence": [
+    { "browser": "Chrome", "version": "155.0.8059.86", "os": "Windows host", "verification": "foreground-CDP-emulation" },
+    { "browser": "Edge", "version": "156.0.4314.42", "os": "Windows host", "verification": "foreground-CDP-emulation" }
+  ],
+  "profiles": [
+    { "id": "desktop-webgl2", "class": "desktop", "browser": "Chrome/Edge (exact local versions in localEvidence)", "os": "Windows host", "deviceModel": "Desktop host with viewport emulation", "verification": "local-foreground-emulation", "viewport": [1280, 800], "targetFps": 30, "interactiveWithinMs": 5000, "maxMemoryMb": 128 },
+    { "id": "ios-webgl2", "class": "mobile", "browser": "Safari (exact version pending)", "os": "iOS (exact version pending)", "deviceModel": "Physical device model pending", "verification": "pending-physical-device", "viewport": [390, 844], "targetFps": 30, "interactiveWithinMs": 5000, "maxMemoryMb": 96 },
+    { "id": "android-webgl2", "class": "mobile", "browser": "Chrome (exact version pending)", "os": "Android (exact version pending)", "deviceModel": "Physical device model pending", "verification": "pending-physical-device", "viewport": [412, 915], "targetFps": 30, "interactiveWithinMs": 5000, "maxMemoryMb": 96 }
+  ],
+  "testNetwork": { "name": "pilot-baseline", "latencyMs": 100, "downloadBytesPerSecond": 1500000, "uploadBytesPerSecond": 750000 },
+  "sceneBudgets": { "maxTriangles": 100000, "maxTextures": 8, "maxTextureBytes": 33554432 }
+  ,"physicalAcceptance": {
+    "schemaVersion": "e4-physical-evidence.v1",
+    "required": true,
+    "status": "pending-device-runs",
+    "profiles": [
+      {
+        "id": "ios-safari-webgl2",
+        "browser": "Safari",
+        "os": "iOS/iPadOS",
+        "execution": "physical-device",
+        "checks": ["performance", "accessibility", "context-loss", "interactive-within-5000ms", "minimum-30-fps"]
+      },
+      {
+        "id": "android-chrome-webgl2",
+        "browser": "Chrome",
+        "os": "Android",
+        "execution": "physical-device",
+        "checks": ["performance", "accessibility", "context-loss", "interactive-within-5000ms", "minimum-30-fps"]
+      },
+      {
+        "id": "firefox-webgl2",
+        "browser": "Firefox",
+        "os": "named-physical-device",
+        "execution": "physical-device",
+        "checks": ["performance", "accessibility", "context-loss", "interactive-within-5000ms", "minimum-30-fps"]
+      }
+    ],
+    "requiredArtifacts": [
+      "device.json",
+      "performance.json",
+      "accessibility.json",
+      "context-loss.json",
+      "screenshots/ready.png",
+      "screenshots/reduced-or-equivalent.png"
+    ],
+    "acceptance": {
+      "interactiveWithinMs": 5000,
+      "minimumFps": 30,
+      "contextLoss": "restore-or-equivalent-path",
+      "accessibility": "wcag-2.2-aa-non3d-and-equivalent-path"
+    }
+  }
+}

@@ -1,0 +1,12 @@
+import assert from 'node:assert/strict';
+import {readReconstructionEngine} from '../apps/worker/dist/reconstruction-engine-configuration.js';
+assert.equal(readReconstructionEngine({}),undefined);
+const paths={RECONSTRUCTION_SCRIPTS_DIR:'fixture-scripts',PHOTOGRAMMETRY_OPENMVS_DIR:'fixture-openmvs',PHOTOGRAMMETRY_PYTHON:'fixture-python'};
+assert.deepEqual(readReconstructionEngine(paths).modes,['multi-view']);
+assert.deepEqual(readReconstructionEngine({...paths,PHOTOGRAMMETRY_FFMPEG:'fixture-ffmpeg',PHOTOGRAMMETRY_FFPROBE:'fixture-ffprobe'}).modes,['multi-view','video']);
+assert.deepEqual(readReconstructionEngine({RECONSTRUCTION_ASSETS_DIR:'fixture-assets',RECONSTRUCTION_SCRIPTS_DIR:'fixture-scripts'}).modes,['single-image']);
+assert.deepEqual(readReconstructionEngine({...paths,RECONSTRUCTION_ASSETS_DIR:'fixture-assets',PHOTOGRAMMETRY_FFMPEG:'fixture-ffmpeg',PHOTOGRAMMETRY_FFPROBE:'fixture-ffprobe'}).modes,['single-image','multi-view','video']);
+assert.throws(()=>readReconstructionEngine({...paths,PHOTOGRAMMETRY_PYTHON:''}),/CONFIGURATION_MISSING/);
+assert.throws(()=>readReconstructionEngine({...paths,PHOTOGRAMMETRY_FFMPEG:'fixture-ffmpeg'}),/VIDEO_TOOLS_INCOMPLETE/);
+await assert.rejects(()=>readReconstructionEngine(paths).generate({job:{payload:{mode:'single-image'}},sources:[]}),/ENGINE_UNAVAILABLE/);
+console.log('Reconstruction runtime configuration passed: disabled default, separate single/photo/video capabilities, paired video tools and unsupported-mode denial.');

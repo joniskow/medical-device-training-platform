@@ -1,0 +1,31 @@
+import {readFile,writeFile,mkdtemp,rm} from 'node:fs/promises';
+import {createHash} from 'node:crypto';
+import {createServer} from 'node:http';
+import {spawn} from 'node:child_process';
+import {tmpdir} from 'node:os';
+import {resolve} from 'node:path';
+import {createRequire} from 'node:module';
+const {build}=createRequire(new URL('../../apps/web/package.json',import.meta.url))('esbuild');
+const run=resolve(process.argv[2]??'output/aurora-reconstruction-01'),report=JSON.parse(await readFile(resolve(run,'quality.json'),'utf8'));
+const bytes=await readFile(resolve(run,report.candidate.file));if(createHash('sha256').update(bytes).digest('hex')!==report.candidate.sha256)throw Error('CANDIDATE_HASH_MISMATCH');
+const source=`import {Engine,Scene,SceneLoader,ArcRotateCamera,HemisphericLight,Vector3,Color4} from '@babylonjs/core';import '@babylonjs/loaders/glTF';
+const engine=new Engine(document.querySelector('canvas'),true,{preserveDrawingBuffer:true}),scene=new Scene(engine);scene.useRightHandedSystem=true;scene.clearColor=new Color4(.035,.09,.11,1);new HemisphericLight('light',new Vector3(0,1,0),scene).intensity=1;
+const imported=await SceneLoader.ImportMeshAsync(null,'','/candidate.glb',scene);const meshes=imported.meshes.filter(m=>m.getTotalVertices()>0);let min=new Vector3(Infinity,Infinity,Infinity),max=new Vector3(-Infinity,-Infinity,-Infinity);for(const m of meshes){m.computeWorldMatrix(true);min=Vector3.Minimize(min,m.getBoundingInfo().boundingBox.minimumWorld);max=Vector3.Maximize(max,m.getBoundingInfo().boundingBox.maximumWorld);}
+const center=min.add(max).scale(.5),radius=Vector3.Distance(min,max)/2;const camera=new ArcRotateCamera('camera',-.8,1.15,radius*2.7,center,scene);camera.minZ=radius/100;camera.attachControl(document.querySelector('canvas'),true);camera.lowerRadiusLimit=radius*1.1;
+// Upstream TripoSR uses Z-up; this changes viewing orientation, never geometry.
+if(${report.adapter?.engine==='TripoSR'})camera.upVector=new Vector3(0,0,1);
+await scene.whenReadyAsync();engine.runRenderLoop(()=>scene.render());window.snapshot={meshes:meshes.length,triangles:meshes.reduce((s,m)=>s+m.getTotalIndices()/3,0),materials:scene.materials.length,dimensions:max.subtract(min).asArray()};window.view=async(angle)=>{camera.alpha=angle;scene.render();await new Promise(r=>requestAnimationFrame(r));scene.render();};window.ready=true;`;
+const built=await build({stdin:{contents:source,resolveDir:resolve('apps/web'),sourcefile:'candidate-preview.js'},bundle:true,platform:'browser',format:'esm',write:false});
+const server=createServer((req,res)=>{if(req.url==='/candidate.glb'){res.setHeader('content-type','model/gltf-binary');res.end(bytes);}else if(req.url==='/app.js'){res.setHeader('content-type','text/javascript');res.end(built.outputFiles[0].contents);}else{res.setHeader('content-type','text/html');res.end(`<!doctype html><html lang="en"><meta charset="utf-8"><title>Reconstructed Aurora candidate</title><style>body{margin:0;background:#102a32;color:#e5f3ee;font:16px system-ui}header{padding:20px 30px}h1{font-size:26px;margin:0}p{color:#9bbab8}canvas{display:block;width:100%;height:700px;touch-action:none}</style><header><h1>Aurora / Reconstructed surface</h1><p>${report.inputImages.length} ${report.sourceVideo?'video frames':'image views'} · ${report.candidate.triangles.toLocaleString()} triangles · Scale and component mapping awaiting review</p></header><canvas aria-label="Reconstructed Aurora surface candidate"></canvas><script type="module" src="/app.js"></script></html>`);}});
+await new Promise(r=>server.listen(0,'127.0.0.1',r));const profile=await mkdtemp(resolve(tmpdir(),'candidate-preview-'));
+const browser=spawn('C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',['--headless=new','--no-first-run','--no-default-browser-check','--use-angle=swiftshader','--enable-unsafe-swiftshader','--remote-debugging-port=0',`--user-data-dir=${profile}`,'--window-size=1100,1000',`http://127.0.0.1:${server.address().port}`],{windowsHide:true,stdio:'ignore'});
+let socket,id=0;const pending=new Map(),errors=[];
+function command(method,params={}){return new Promise((resolve,reject)=>{const key=++id;pending.set(key,{resolve,reject});socket.send(JSON.stringify({id:key,method,params}));});}
+async function evaluate(expression){const r=await command('Runtime.evaluate',{expression,returnByValue:true,awaitPromise:true});if(r.exceptionDetails)throw Error(JSON.stringify(r.exceptionDetails));return r.result.value;}
+try{
+ let port;for(let i=0;i<100;i++){try{port=(await readFile(resolve(profile,'DevToolsActivePort'),'utf8')).split('\n')[0];break;}catch{await new Promise(r=>setTimeout(r,100));}}if(!port)throw Error('CHROME_NOT_STARTED');
+ const page=(await (await fetch(`http://127.0.0.1:${port}/json`)).json()).find(p=>p.type==='page');socket=new WebSocket(page.webSocketDebuggerUrl);socket.onmessage=e=>{const m=JSON.parse(String(e.data));if(m.method==='Runtime.exceptionThrown')errors.push(m.params.exceptionDetails);const p=pending.get(m.id);if(p){pending.delete(m.id);m.error?p.reject(Error(m.error.message)):p.resolve(m.result);}};await new Promise((r,j)=>{socket.onopen=r;socket.onerror=j;});await command('Runtime.enable');
+ let ready=false;for(let i=0;i<200;i++){if(await evaluate('Boolean(window.ready)')){ready=true;break;}await new Promise(r=>setTimeout(r,100));}if(!ready)throw Error('CANDIDATE_RENDER_FAILED '+JSON.stringify(errors));
+ for(const [name,angle] of [['front',-.8],['back',Math.PI-.8],...Array.from({length:4},(_,index)=>['orbit-'+index,index*Math.PI/2])]){await evaluate(`window.view(${angle})`);const s=await command('Page.captureScreenshot',{format:'png'});await writeFile(resolve(run,`preview-${name}.png`),Buffer.from(s.data,'base64'));}
+ const snapshot=await evaluate('window.snapshot');if(snapshot.triangles!==report.candidate.triangles||errors.length)throw Error('RENDER_GEOMETRY_MISMATCH');await writeFile(resolve(run,'browser-evidence.json'),JSON.stringify({snapshot,errors,sourceSha256:report.candidate.sha256},null,2));console.log('Reconstructed candidate rendered in Chrome: '+JSON.stringify(snapshot));
+}finally{socket?.close();browser.kill();if(browser.exitCode===null)await new Promise(r=>browser.once('close',r));server.closeAllConnections();await new Promise(r=>server.close(r));await rm(profile,{recursive:true,force:true});}

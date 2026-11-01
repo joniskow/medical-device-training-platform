@@ -1,0 +1,4 @@
+{
+  "variant": "low-quality-reconstruction",
+  "expectedFailure": "mesh quality below pilot threshold; retain existing GLB fallback"
+}

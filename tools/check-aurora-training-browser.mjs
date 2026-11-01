@@ -1,0 +1,47 @@
+import assert from 'node:assert/strict';
+import {readFile,mkdir,mkdtemp,writeFile,rm} from 'node:fs/promises';
+import {createServer} from 'node:http';
+import {spawn} from 'node:child_process';
+import {tmpdir} from 'node:os';
+import {resolve} from 'node:path';
+import {createRequire} from 'node:module';
+const {build}=createRequire(new URL('../apps/web/package.json',import.meta.url))('esbuild');
+const manifest=JSON.parse(await readFile('fixtures/aurora-training/model-manifest.json','utf8'));
+// Preview-only identifiers satisfy the production renderer's binding contract.
+manifest.modelVersionId='preview:aurora-v2';manifest.releaseBindingId='preview:aurora-v2';
+const code=`import {createBabylonModelRuntime} from './src/babylon-model-runtime.ts';
+import {EngineStore} from '@babylonjs/core';
+const manifest=${JSON.stringify(manifest)};
+const runtime=await createBabylonModelRuntime({canvas:document.querySelector('canvas'),manifest,modelUrl:'/model.glb'});
+const scene=EngineStore.LastCreatedScene;
+const snapshot=()=>scene.meshes.filter(m=>m.getTotalVertices()>0).map(m=>{m.computeWorldMatrix(true);return {name:m.name,material:m.material.name,overlay:m.renderOverlay,component:m.metadata?.componentId,local:m.position.asArray(),world:m.getBoundingInfo().boundingBox.centerWorld.asArray()};});
+window.evidence={closed:snapshot(),state:runtime.getState(),camera:{position:scene.activeCamera.position.asArray(),target:scene.activeCamera.target.asArray(),radius:scene.activeCamera.radius,minZ:scene.activeCamera.minZ},errors:[]};
+window.openCover=()=>{const transforms=Object.fromEntries(manifest.components.map(c=>[c.componentId,{rotationY:c.componentId==='AIC-C02'?Math.PI/2:0,translationX:0}]));runtime.applyAuthoritativeState({modelVersionId:manifest.modelVersionId,releaseBindingId:manifest.releaseBindingId,sequence:1,nextSequence:2,transforms,selectedComponentId:'AIC-C02',procedureState:'IN_PROGRESS',scorePoints:0,completed:false,allowedActions:[]});scene.render();window.evidence.open=snapshot();window.evidence.state=runtime.getState();};
+window.highlightSensor=()=>{runtime.selectComponent('AIC-C03');scene.render();window.evidence.selected=snapshot();};
+window.ready=true;`;
+const result=await build({stdin:{contents:code,resolveDir:resolve('apps/web'),sourcefile:'aurora-check.ts'},bundle:true,format:'esm',platform:'browser',write:false});
+const server=createServer(async(req,res)=>{try{if(req.url==='/model.glb'){res.setHeader('content-type','model/gltf-binary');res.end(await readFile('fixtures/aurora-training/aurora-training.glb'));}else if(req.url==='/app.js'){res.setHeader('content-type','text/javascript');res.end(result.outputFiles[0].contents);}else if(req.url==='/favicon.ico')res.writeHead(204).end();else{res.setHeader('content-type','text/html');res.end(`<!doctype html><html lang="en"><meta charset="utf-8"><title>Aurora training model</title><style>body{margin:0;background:#102a32;color:#e5f3ee;font:16px system-ui}header{padding:24px 36px}h1{margin:0;font-size:28px}p{color:#9bbab8}canvas{width:100%;height:680px;display:block;touch-action:none}footer{padding:10px 36px;color:#9bbab8}</style><header><h1>Aurora / Training controller</h1><p>Control panel · Hinged safety cover · Line sensor</p></header><canvas aria-label="Synthetic Aurora controller 3D preview"></canvas><footer>Authored synthetic device · 1,228 triangles · Meter scale · Review required</footer><script type="module" src="/app.js"></script></html>`);}}catch(e){res.writeHead(500).end(String(e));}});
+await new Promise(r=>server.listen(0,'127.0.0.1',r));
+const profile=await mkdtemp(resolve(tmpdir(),'aurora-model-'));
+// Chrome picks an unused debug port in this dedicated temporary profile.
+const browser=spawn('C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',['--headless=new','--no-first-run','--no-default-browser-check','--use-angle=swiftshader','--enable-unsafe-swiftshader','--remote-debugging-port=0',`--user-data-dir=${profile}`,'--window-size=1100,900',`http://127.0.0.1:${server.address().port}`],{windowsHide:true,stdio:'ignore'});
+let socket;const pending=new Map();let id=0;const errors=[];
+function command(method,params={}){return new Promise((resolve,reject)=>{const key=++id;pending.set(key,{resolve,reject});socket.send(JSON.stringify({id:key,method,params}));});}
+async function evaluate(expression){const r=await command('Runtime.evaluate',{expression,awaitPromise:true,returnByValue:true});if(r.exceptionDetails)throw Error(JSON.stringify(r.exceptionDetails));return r.result.value;}
+try{
+ let port;for(let i=0;i<100;i++){try{port=(await readFile(resolve(profile,'DevToolsActivePort'),'utf8')).split('\n')[0];break;}catch{await new Promise(r=>setTimeout(r,100));}}assert(port,'Chrome did not start');
+ const pages=await (await fetch(`http://127.0.0.1:${port}/json`)).json();const page=pages.find(p=>p.type==='page');socket=new WebSocket(page.webSocketDebuggerUrl);socket.onmessage=e=>{const m=JSON.parse(String(e.data));if(m.method==='Runtime.exceptionThrown')errors.push(m.params.exceptionDetails);const p=pending.get(m.id);if(p){pending.delete(m.id);m.error?p.reject(Error(m.error.message)):p.resolve(m.result);}};await new Promise((r,j)=>{socket.onopen=r;socket.onerror=j;});await command('Runtime.enable');
+ for(let i=0;i<200;i++){if(await evaluate('Boolean(window.ready)'))break;await new Promise(r=>setTimeout(r,50));}assert(await evaluate('Boolean(window.ready)'),JSON.stringify(errors));
+ await mkdir('output/aurora-training',{recursive:true});
+ async function screenshot(name){await new Promise(r=>setTimeout(r,200));const s=await command('Page.captureScreenshot',{format:'png'});await writeFile(`output/aurora-training/${name}.png`,Buffer.from(s.data,'base64'));}
+ await screenshot('closed');
+ await evaluate('window.openCover();true');await screenshot('open');
+ await evaluate('window.highlightSensor();true');
+ const evidence=await evaluate('window.evidence');await writeFile('output/aurora-training/browser-evidence.json',JSON.stringify({manifest,evidence,errors},null,2));assert(evidence.camera.minZ<evidence.camera.radius/10,'Meter-scale model must not be clipped');assert.equal(evidence.closed.length,manifest.meshCount);assert.equal(new Set(evidence.closed.map(m=>m.material)).size,manifest.materialCount);
+ const closed=new Map(evidence.closed.map(m=>[m.name,m]));
+ for(const m of evidence.open){const prior=closed.get(m.name);assert.equal(m.material,prior.material);assert.deepEqual(m.local,prior.local);if(m.component!=='AIC-C02')assert.deepEqual(m.world,prior.world);}
+ assert(evidence.open.some(m=>m.component==='AIC-C02'&&JSON.stringify(m.world)!==JSON.stringify(closed.get(m.name).world)),'Cover must move around its hinge');
+ assert.equal(evidence.state.transforms['AIC-C02'].rotationY,Math.PI/2);
+ assert(evidence.selected.filter(m=>m.component==='AIC-C03').every(m=>m.overlay));assert(evidence.selected.filter(m=>m.component==='AIC-C02').every(m=>!m.overlay));assert.equal(errors.length,0);
+ await writeFile('output/aurora-training/browser-evidence.json',JSON.stringify({manifest,evidence,errors},null,2));console.log('Aurora Chrome passed: 52 meshes, original materials, grouped hinge movement, stationary housing/sensor, child selection highlight and clean console.');
+}finally{socket?.close();browser.kill();if(browser.exitCode===null)await new Promise(r=>browser.once('close',r));server.closeAllConnections();await new Promise(r=>server.close(r));await rm(profile,{recursive:true,force:true});}

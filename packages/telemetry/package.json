@@ -1,0 +1,6 @@
+{
+  "name": "@medical-device/telemetry",
+  "private": true,
+  "type": "module",
+  "scripts": {}
+}

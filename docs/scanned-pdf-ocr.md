@@ -1,0 +1,9 @@
+# Scanned PDF extraction
+
+PDF extraction v2 keeps native text when available and uses local Poppler rendering plus Tesseract English OCR for pages with no extractable text. Documents stay within the worker; no external OCR service receives their contents. OCR produces the same page-linked text chunks and character offsets used by retrieval and draft generation. Recognition confidence and page warnings are retained in the private extraction artifact and job result. OCR output remains REVIEW_REQUIRED.
+
+Limits: 32 MiB input, 200 document pages, ten OCR pages, 2400-pixel maximum rendered dimension, 15 seconds per rendering/recognition subprocess, a 60-second OCR deadline, two million extracted characters and the existing 90-second parent-process timeout. Low confidence, missing tools, timeout and unreadable pages produce warnings or failure. Recognition is English-only; language detection is not implemented. Mixed documents can yield partial text with explicit page warnings; all-empty documents fail. An existing text layer prevents OCR on that page, so incomplete text layers and complex layout/table reconstruction remain limitations.
+
+Validation: the real worker image, run without networking and with 768 MiB/two CPU limits, extracted a two-page rasterized reference manual. `tools/check-pdf-ocr.py` checks recognized content, page citations, offsets, repeatable chunks/IDs, review warnings and the ten-page limit. Native extraction and the PostgreSQL PDF-to-course pipeline also pass. This is container acceptance, not a deployed user-upload test.
+
+Engine command references: [Tesseract CLI documentation](https://tesseract-ocr.github.io/tessdoc/Command-Line-Usage.html) and [Alpine English language package](https://pkgs.alpinelinux.org/package/v3.21/community/aarch64/tesseract-ocr-data-eng).
