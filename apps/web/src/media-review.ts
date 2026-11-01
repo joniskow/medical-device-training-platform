@@ -2,22 +2,22 @@ import {authenticatedFetch,getOrganizationHeaders,getSessionIdentity} from './au
 import {renderSourceReview} from './source-review-editor.js';
 
 export function createMediaReview(host:HTMLElement,api:<T>(path:string,init?:RequestInit)=>Promise<T>){
- const section=document.createElement('section');section.dataset.advancedTool='';const heading=document.createElement('h2'),load=document.createElement('button'),list=document.createElement('div'),panel=document.createElement('div'),status=document.createElement('p');
- heading.textContent='Image and video review';load.type='button';load.textContent='Show uploaded media';status.setAttribute('role','status');section.append(heading,load,list,panel,status);host.append(section);
+ const section=document.createElement('section');section.dataset.photoReviewStep='';const heading=document.createElement('h2'),load=document.createElement('button'),list=document.createElement('div'),panel=document.createElement('div'),status=document.createElement('p');
+ heading.textContent='2. Check your photos';load.type='button';load.dataset.photoReviewLoad='';load.textContent='Review uploaded photos';status.setAttribute('role','status');section.append(heading,load,list,panel,status);host.append(section);
  let cursor:string|undefined,epoch=0,identity=getSessionIdentity(),objectUrl:string|undefined,abort:AbortController|undefined;
  const galleryUrls=new Set<string>();
  function dispose(){epoch++;abort?.abort();panel.querySelector('video')?.pause();panel.replaceChildren();if(objectUrl)URL.revokeObjectURL(objectUrl);objectUrl=undefined;for(const url of galleryUrls)URL.revokeObjectURL(url);galleryUrls.clear();}
  load.onclick=async()=>{
   const session=getSessionIdentity();load.disabled=true;
   try{const result=await api<{items:Array<{assetVersionId:string;fileName:string;state:string}>;nextCursor?:string}>('/api/v1/media-review'+(cursor?'?after='+encodeURIComponent(cursor):''));if(session!==getSessionIdentity())return;
-   if(!cursor)list.replaceChildren();for(const item of result.items){const button=document.createElement('button');button.type='button';button.textContent=`Review ${item.fileName} — ${item.state.toLowerCase().replaceAll('_',' ')}`;button.onclick=()=>void open(item.assetVersionId);list.append(button);}cursor=result.nextCursor;load.textContent=cursor?'More media':'Refresh media';status.textContent=result.items.length?'Choose an image or video to review.':'No media is ready for review.';
-  }catch{status.textContent='Media could not be listed. Check your content-role access.';}finally{load.disabled=false;}
+   if(!cursor)list.replaceChildren();for(const item of result.items){const button=document.createElement('button');button.type='button';button.textContent=`Review ${item.fileName} — ${item.state.toLowerCase().replaceAll('_',' ')}`;button.onclick=()=>void open(item.assetVersionId);list.append(button);}cursor=result.nextCursor;load.textContent=cursor?'More media':'Refresh media';status.textContent=result.items.length?'Review each photo and approve the ones that clearly show the device.':'No media is ready for review.';
+   }catch{status.textContent='Your photos could not be loaded. Try again.';}finally{load.disabled=false;}
  };
  async function open(id:string){
   dispose();abort=new AbortController();identity=getSessionIdentity();const generation=epoch,session=identity,active=()=>generation===epoch&&session===getSessionIdentity();status.textContent='Loading media inspection…';
   try{
    const item=await api<{fileName:string;state:string;sourceType:string;sourceHash:string;contentType:string;contentUrl:string;width:number;height:number;durationSeconds:number;frames?:Array<{index:number;timestampSeconds:number;contentUrl:string}>;uniqueFrameCount?:number;duplicateFrameCount?:number}>(`/api/v1/media-review/${encodeURIComponent(id)}`);if(!active())return;
-   const title=document.createElement('h3'),summary=document.createElement('p');title.textContent=item.fileName;summary.textContent=`${item.width} × ${item.height}${item.sourceType==='video'?`, ${item.durationSeconds} seconds`:''}. Decoding passed. Inspect content, rights and suitability; provide alternative text or a transcript when adding it to a course.`;panel.append(title,summary);
+   const title=document.createElement('h3'),summary=document.createElement('p');title.textContent=item.fileName;summary.textContent=`${item.width} × ${item.height}${item.sourceType==='video'?`, ${item.durationSeconds} seconds`:''}. Check that this photo clearly shows the device and is suitable for the model.`;panel.append(title,summary);
    const preview=document.createElement('button');preview.type='button';preview.textContent='Load private media preview';panel.append(preview);
    const viewer=document.createElement('div'),decision=document.createElement('div'),close=document.createElement('button');close.type='button';close.textContent='Close media review';close.onclick=dispose;panel.append(viewer,decision,close);
    if(item.frames?.length){

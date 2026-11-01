@@ -744,8 +744,8 @@ function render(value: JobStatus) {
   currentJobId = value.jobId;
   jobIdInput.value = value.jobId;
   details.classList.remove("hidden");
-  document.querySelector("#state")!.textContent = value.state;
-  document.querySelector("#next-action")!.textContent = value.nextAction;
+  document.querySelector("#state")!.textContent = friendlyState(value.state);
+  document.querySelector("#next-action")!.textContent = friendlyNextAction(value.nextAction);
   document.querySelector("#attempt")!.textContent = `${value.attempt} / ${value.maxAttempts}`;
   const failure = document.querySelector("#failure")!;
   failure.textContent = value.lastFailure ? `${value.lastFailure.code ?? "Failure"}: ${value.lastFailure.message ?? ""}` : "";
@@ -753,12 +753,25 @@ function render(value: JobStatus) {
   warnings.replaceChildren(...(value.outcome?.warnings ?? []).map((item) => {
     const element = document.createElement("div");
     element.className = "warning";
-    element.textContent = `${item.code ?? "Warning"}: ${item.message ?? ""}`;
+    element.textContent = friendlyWarning(item.code, item.message);
     return element;
   }));
   retryButton.classList.toggle("hidden", !value.canRetry);
   retryForm.classList.add("hidden");
   retryReasonInput.value = "";
+}
+
+function friendlyState(value: string): string {
+  return ({ SUCCEEDED: "Photos processed", RUNNING: "Processing photos", QUEUED: "Waiting to process", FAILED: "Processing failed", DEAD_LETTERED: "Needs attention" } as Record<string, string>)[value] ?? value.replaceAll("_", " ").toLowerCase();
+}
+
+function friendlyNextAction(value: string): string {
+  return ({ REVIEW: "Check your photos", RETRY: "Retry processing", BUILD: "Build the 3D model" } as Record<string, string>)[value] ?? value.replaceAll("_", " ").toLowerCase();
+}
+
+function friendlyWarning(code?: string, message?: string): string {
+  if (code === "MEDIA_REVIEW_REQUIRED") return "Photo check required: review and approve the uploaded photos. The 3D build starts after approval.";
+  return `${code ?? "Warning"}: ${message ?? ""}`;
 }
 
 async function apiJson<T>(path: string, init: RequestInit = {}): Promise<T> {
@@ -1021,6 +1034,9 @@ photoUploadForm.addEventListener("submit", async (event) => {
       jobIdInput.value = currentJobId;
       await load();
     }
+    const photoReview = document.querySelector<HTMLElement>("[data-photo-review-step]");
+    photoReview?.removeAttribute("hidden");
+    photoReview?.querySelector<HTMLButtonElement>("[data-photo-review-load]")?.click();
     document.querySelector<HTMLElement>("[data-reconstruction-panel]")?.removeAttribute("hidden");
     photoUploadStatus.textContent = "Photos uploaded. We’re checking them now. When they are ready, use the next step below to build your model.";
   } catch (error) {
