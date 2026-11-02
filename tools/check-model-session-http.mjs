@@ -24,6 +24,11 @@ try {
   assert.equal(actionBody.state.activeStepTitle, "Select the panel");
   const invalidAction = await fetch(`http://127.0.0.1:${port}/api/v1/model-sessions/session-1/actions`, { method: "POST", headers: { authorization: "Bearer learner", "content-type": "application/json", "idempotency-key": "invalid-action" }, body: JSON.stringify({ clientActionId: "invalid-action", releaseBindingId: "binding-1", modelVersionId: "model-1", expectedSequence: 1, type: "transform_component", componentId: "", transform: {} }) });
   assert.equal(invalidAction.status, 422, "malformed semantic actions must be rejected at the HTTP boundary");
+  const targetAction = await fetch(`http://127.0.0.1:${port}/api/v1/model-sessions/session-1/actions`, { method: "POST", headers: { authorization: "Bearer learner", "content-type": "application/json", "idempotency-key": "target-1" }, body: JSON.stringify({ clientActionId: "target-1", releaseBindingId: "binding-1", modelVersionId: "model-1", expectedSequence: 1, type: "activate_target", componentId: "AIC-C01", targetId: "AIC-C01-PRIME" }) });
+  assert.equal(targetAction.status, 200, "declared interaction targets must be accepted by the HTTP boundary");
+  assert.equal(calls.at(-1).action.targetId, "AIC-C01-PRIME");
+  const missingTarget = await fetch(`http://127.0.0.1:${port}/api/v1/model-sessions/session-1/actions`, { method: "POST", headers: { authorization: "Bearer learner", "content-type": "application/json", "idempotency-key": "missing-target" }, body: JSON.stringify({ clientActionId: "missing-target", releaseBindingId: "binding-1", modelVersionId: "model-1", expectedSequence: 1, type: "activate_target", componentId: "AIC-C01" }) });
+  assert.equal(missingTarget.status, 422, "target activation without a target ID must be rejected at the HTTP boundary");
   for(const type of ['open_component','inspect_component','complete_step','acknowledge_fault','diagnose_fault','resolve_fault','request_hint']){
     const body={clientActionId:'semantic-'+type,releaseBindingId:'binding-1',modelVersionId:'model-1',expectedSequence:1,type,value:'checked',stepId:'step-1'};
     const send=payload=>fetch(`http://127.0.0.1:${port}/api/v1/model-sessions/session-1/actions`,{method:'POST',headers:{authorization:'Bearer learner','content-type':'application/json','idempotency-key':body.clientActionId},body:JSON.stringify(payload)});

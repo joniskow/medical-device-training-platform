@@ -20,7 +20,7 @@ assert.match(html, /id="action-log"[^>]+role="status"/, "semantic action feedbac
 assert.match(html, /id="score"/, "authoritative score must have a visible projection");
 assert.match(html, /id="completion"/, "authoritative completion must have a visible projection");
 assert.match(html, /src="\/learner\/model-player\.js"/, "the model route must explicitly load the 3D feature");
-assert.doesNotMatch(textOnlyHtml, /model-player|babylon|model-manifest|model-canvas/, "text-only routes must not load the 3D feature");
+assert.doesNotMatch(textOnlyHtml, /model-player|babylon|model-manifest|id=["']model-canvas["']/, "text-only routes must not load the 3D feature");
 
 assert.match(source, /onSemanticAction:/, "canvas interaction must emit semantic actions");
 assert.match(source, /action\.type === "select_component"/, "selection must be handled as a semantic action");

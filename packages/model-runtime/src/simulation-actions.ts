@@ -31,7 +31,13 @@ export function validateSimulationModelActions(definition:unknown,binding:unknow
  for(const [index,step] of (Array.isArray(definition.steps)?definition.steps:[]).entries())if(record(step))actions.push({path:`simulation.steps[${index}].action`,action:step.action});
  for(const [index,fault] of (Array.isArray(definition.faults)?definition.faults:[]).entries())if(record(fault))for(const key of ['diagnosis','resolution'])actions.push({path:`simulation.faults[${index}].${key}`,action:fault[key]});
  for(const {path,action} of actions){
-  if(!record(action)||action.transform===undefined)continue;
+  if(!record(action))continue;
+  if(action.type==='activate_target'){
+   const component=typeof action.componentId==='string'?components.get(action.componentId):undefined;
+   const targets=Array.isArray(component?.interactionTargets)?component.interactionTargets:[];
+   if(!component||typeof action.targetId!=='string'||!targets.some(target=>target.targetId===action.targetId))fail('MODEL_ACTION_TARGET_INVALID',path,'An activate_target action needs a target declared by the approved component.');
+  }
+  if(action.transform===undefined)continue;
   const component=typeof action.componentId==='string'?components.get(action.componentId):undefined;
   if(!component||!record(action.transform)||!Object.keys(action.transform).length||Object.entries(action.transform).some(([key,value])=>!['rotationY','translationX'].includes(key)||typeof value!=='number'||!Number.isFinite(value))){fail('MODEL_ACTION_TRANSFORM_INVALID',path,'A transform needs a known component and finite supported axes.');continue;}
   // Do not normalize against malformed rules: the manifest findings already block execution.

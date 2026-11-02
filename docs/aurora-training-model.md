@@ -6,6 +6,13 @@ The established AIC-C01 (control panel), AIC-C02 (safety cover) and AIC-C03 (lin
 
 Production Babylon rendering now resolves a unique component node and its descendant geometry, applies authoritative transforms to that root and highlights child meshes without replacing the source materials. Ambiguous or overlapping component assemblies fail. The camera near/far planes and zoom limits scale to the model bounds; previously the default one-meter near plane hid small devices.
 
+The three control keys carry stable interaction-target metadata and bounded
+4 mm local press depth. The Blender authoring scene includes short
+press/release clips for visual review; the browser runtime handles pointer
+capture, release, cancellation, and local feedback while semantic scoring stays
+server-authoritative. The Chrome evidence exercises Prime, Ready, and Stop
+independently.
+
 Build: `pnpm aurora-model:build`. Verify: `pnpm aurora-model:validate` (requires local Chrome and permission to launch an isolated browser). Structural verification checks every triangle's indices, winding, nonzero area and normal length, bounds, component IDs, embedded buffers and manifest hash. Chrome loads the actual GLB through the production adapter, captures closed/open views, checks original material retention, whole-cover movement, stationary surrounding geometry, selection and console errors. Evidence is in `output/aurora-training/`.
 
 Upload this as a new GLB through the existing private author workflow. Configure and review its imported interaction limits, then bind the approved model to the draft course. The generated manifest is local preview/authoring metadata, not an approved release. No live upload, approval, publication or clinical fidelity acceptance has been performed for this model.

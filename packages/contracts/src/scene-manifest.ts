@@ -22,6 +22,7 @@ export interface TrainingSceneCamera {
   projection: 'perspective';
   focalLengthPixels: number;
   principalPointPixels: [number, number];
+  orbit?: { alpha: number; beta: number; radius: number; target: [number, number, number] };
   distortion?: {
     radial: [number, number, number];
     tangential: [number, number];
@@ -34,6 +35,30 @@ export interface TrainingSceneRenderPolicy {
   castShadows: boolean;
 }
 
+export interface TrainingSceneInteractionCue {
+  startSeconds: number;
+  endSeconds: number;
+  componentId?: string;
+  targetId?: string;
+  allowedActions: string[];
+  label: string;
+}
+
+export interface TrainingSceneInteraction {
+  mode: 'PASSIVE' | 'INTERACTIVE_OVERLAY' | 'INTERACTIVE_SPLIT';
+  equivalentPath: 'TEXT_KEYBOARD';
+  cues: TrainingSceneInteractionCue[];
+}
+
+export interface TrainingSceneProduction {
+  pipeline: 'OPENMONTAGE' | 'MANUAL' | 'OTHER';
+  sourceRefs: string[];
+  promptHash?: string;
+  rightsReview: 'APPROVED';
+  reviewerId?: string;
+  reviewRef?: string;
+}
+
 export interface TrainingSceneManifest {
   schemaVersion: 'training-scene.v1';
   sceneId: string;
@@ -41,6 +66,8 @@ export interface TrainingSceneManifest {
   model: TrainingSceneModel;
   camera: TrainingSceneCamera;
   render: TrainingSceneRenderPolicy;
+  interaction?: TrainingSceneInteraction;
+  production?: TrainingSceneProduction;
 }
 
 const fail = (message: string): never => { throw new Error(`TRAINING_SCENE_MANIFEST_INVALID:${message}`); };
@@ -77,14 +104,18 @@ function parseModel(value: unknown): TrainingSceneModel {
 }
 
 function parseCamera(value: unknown): TrainingSceneCamera {
-  const camera = record(value); exactKeys(camera, ['projection', 'focalLengthPixels', 'principalPointPixels', 'distortion']);
+  const camera = record(value); exactKeys(camera, ['projection', 'focalLengthPixels', 'principalPointPixels', 'orbit', 'distortion']);
   if (camera.projection !== 'perspective') fail('PROJECTION_INVALID');
   const principal = vector2(camera.principalPointPixels, 0, 1_000_000);
+  const orbit = camera.orbit === undefined ? undefined : (() => {
+    const item = record(camera.orbit); exactKeys(item, ['alpha', 'beta', 'radius', 'target']);
+    return { alpha: finite(item.alpha, -1000, 1000), beta: finite(item.beta, 0.001, Math.PI - 0.001), radius: finite(item.radius, 0.001, 1000), target: vector(item.target, -1000, 1000) };
+  })();
   const distortion = camera.distortion === undefined ? undefined : (() => {
     const item = record(camera.distortion); exactKeys(item, ['radial', 'tangential']);
     return { radial: vector(item.radial, -100, 100), tangential: vector2(item.tangential, -100, 100) };
   })();
-  return { projection: 'perspective', focalLengthPixels: finite(camera.focalLengthPixels, 1, 1_000_000), principalPointPixels: principal, ...(distortion ? { distortion } : {}) };
+  return { projection: 'perspective', focalLengthPixels: finite(camera.focalLengthPixels, 1, 1_000_000), principalPointPixels: principal, ...(orbit ? { orbit } : {}), ...(distortion ? { distortion } : {}) };
 }
 
 function parseRender(value: unknown): TrainingSceneRenderPolicy {
@@ -92,10 +123,43 @@ function parseRender(value: unknown): TrainingSceneRenderPolicy {
   return { opacity: finite(render.opacity, 0, 1), receiveShadows: boolean(render.receiveShadows), castShadows: boolean(render.castShadows) };
 }
 
+function parseInteraction(value: unknown, durationSeconds: number): TrainingSceneInteraction {
+  const interaction = record(value); exactKeys(interaction, ['mode', 'equivalentPath', 'cues']);
+  const mode = interaction.mode === 'PASSIVE' || interaction.mode === 'INTERACTIVE_OVERLAY' || interaction.mode === 'INTERACTIVE_SPLIT' ? interaction.mode : fail('INTERACTION_MODE_INVALID');
+  if (interaction.equivalentPath !== 'TEXT_KEYBOARD') fail('EQUIVALENT_PATH_INVALID');
+  if (!Array.isArray(interaction.cues) || interaction.cues.length > 100) fail('INTERACTION_CUES_INVALID');
+  const cues = (interaction.cues as unknown[]).map((value: unknown) => {
+    const cue = record(value); exactKeys(cue, ['startSeconds', 'endSeconds', 'componentId', 'targetId', 'allowedActions', 'label']);
+    const startSeconds = finite(cue.startSeconds, 0, durationSeconds); const endSeconds = finite(cue.endSeconds, 0, durationSeconds);
+    if (endSeconds <= startSeconds) fail('INTERACTION_CUE_RANGE_INVALID');
+    const componentId = cue.componentId === undefined ? undefined : text(cue.componentId, 200);
+    const targetId = cue.targetId === undefined ? undefined : text(cue.targetId, 200);
+    if (!componentId && !targetId) fail('INTERACTION_CUE_TARGET_REQUIRED');
+    if (!Array.isArray(cue.allowedActions) || cue.allowedActions.length === 0 || cue.allowedActions.length > 16 || !cue.allowedActions.every((action) => typeof action === 'string' && action.length > 0 && action.length <= 100)) fail('INTERACTION_CUE_ACTIONS_INVALID');
+    return { startSeconds, endSeconds, ...(componentId ? { componentId } : {}), ...(targetId ? { targetId } : {}), allowedActions: cue.allowedActions as string[], label: text(cue.label, 200) };
+  });
+  return { mode, equivalentPath: 'TEXT_KEYBOARD', cues };
+}
+
+function parseProduction(value: unknown): TrainingSceneProduction {
+  const production = record(value); exactKeys(production, ['pipeline', 'sourceRefs', 'promptHash', 'rightsReview', 'reviewerId', 'reviewRef']);
+  const pipeline = production.pipeline === 'OPENMONTAGE' || production.pipeline === 'MANUAL' || production.pipeline === 'OTHER' ? production.pipeline : fail('PRODUCTION_PIPELINE_INVALID');
+  if (!Array.isArray(production.sourceRefs) || production.sourceRefs.length === 0 || production.sourceRefs.length > 32) fail('PRODUCTION_SOURCES_INVALID');
+  const sourceRefs = (production.sourceRefs as unknown[]).map((source: unknown) => text(source, 500));
+  const promptHash = production.promptHash === undefined ? undefined : hash(production.promptHash);
+  if (production.rightsReview !== 'APPROVED') fail('PRODUCTION_RIGHTS_REVIEW_REQUIRED');
+  const reviewerId = production.reviewerId === undefined ? undefined : text(production.reviewerId, 200);
+  const reviewRef = production.reviewRef === undefined ? undefined : text(production.reviewRef, 500);
+  if (pipeline === 'OPENMONTAGE' && (!reviewerId || !reviewRef)) fail('PRODUCTION_REVIEW_EVIDENCE_REQUIRED');
+  return { pipeline, sourceRefs, ...(promptHash ? { promptHash } : {}), rightsReview: 'APPROVED', ...(reviewerId ? { reviewerId } : {}), ...(reviewRef ? { reviewRef } : {}) };
+}
+
 export function validateTrainingSceneManifest(value: unknown): TrainingSceneManifest {
-  const root = record(value); exactKeys(root, ['schemaVersion', 'sceneId', 'video', 'model', 'camera', 'render']);
+  const root = record(value); exactKeys(root, ['schemaVersion', 'sceneId', 'video', 'model', 'camera', 'render', 'interaction', 'production']);
   if (root.schemaVersion !== 'training-scene.v1') fail('SCHEMA_VERSION_UNSUPPORTED');
   const video = parseVideo(root.video); const camera = parseCamera(root.camera);
   if (camera.principalPointPixels[0] > video.width || camera.principalPointPixels[1] > video.height) fail('PRINCIPAL_POINT_OUT_OF_BOUNDS');
-  return { schemaVersion: 'training-scene.v1', sceneId: text(root.sceneId, 200), video, model: parseModel(root.model), camera, render: parseRender(root.render) };
+  const interaction = root.interaction === undefined ? undefined : parseInteraction(root.interaction, video.durationSeconds);
+  const production = root.production === undefined ? undefined : parseProduction(root.production);
+  return { schemaVersion: 'training-scene.v1', sceneId: text(root.sceneId, 200), video, model: parseModel(root.model), camera, render: parseRender(root.render), ...(interaction ? { interaction } : {}), ...(production ? { production } : {}) };
 }

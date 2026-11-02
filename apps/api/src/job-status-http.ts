@@ -32,6 +32,7 @@ import type { createMemberService } from './member-service.js';
 import type { createInvitationService } from './invitation-service.js';
 import type { createCourseChangeService } from './course-change-service.js';
 import type { createAttemptInvalidationService } from './attempt-invalidation.js';
+import type { OpenMontageSceneService } from './openmontage-scene-service.js';
 
 export interface SourceGroundedDraftService {
   generate(tenant: TenantContext, request: { sourceArtifactIds: string[]; mediaAssetVersionIds?: string[]; userInstruction?: string; outputSchemaVersion?: string; tokenBudget?: number }): Promise<unknown>;
@@ -102,6 +103,7 @@ export interface JobStatusHttpOptions {
   memberService?:ReturnType<typeof createMemberService>;
   invitationService?:ReturnType<typeof createInvitationService>;
   attemptInvalidationService?: ReturnType<typeof createAttemptInvalidationService>;
+  openMontageSceneService?: OpenMontageSceneService;
   staticRoot?: string;
 }
 
@@ -186,7 +188,9 @@ const staticFiles: Record<string, { file: string; contentType: string; binary?: 
   "/model-manifest.json": { file: "model-manifest.json", contentType: "application/json; charset=utf-8" },
   "/model/aurora-infusion-controller.glb": { file: "model/aurora-infusion-controller.glb", contentType: "model/gltf-binary", binary: true },
   "/model/aurora-training-manifest.json": { file: "model/aurora-training-manifest.json", contentType: "application/json; charset=utf-8" },
+  "/model/aurora-training-scene-manifest.json": { file: "model/aurora-training-scene-manifest.json", contentType: "application/json; charset=utf-8" },
   "/model/aurora-training.glb": { file: "model/aurora-training.glb", contentType: "model/gltf-binary", binary: true },
+  "/demo-assets/aic-priming-demo.mp4": { file: "demo-assets/aic-priming-demo.mp4", contentType: "video/mp4", binary: true },
   "/demo-assets/nxstage-system-one-preview.png": { file: "demo-assets/nxstage-system-one-preview.png", contentType: "image/png", binary: true },
   ...Object.fromEntries(Array.from({ length: 8 }, (_, index) => { const id = String(index).padStart(3, "0"); return [`/demo-assets/view-${id}.png`, { file: `demo-assets/view-${id}.png`, contentType: "image/png", binary: true }]; })),
   "/author/assignments": { file: "assignments.html", contentType: "text/html; charset=utf-8" },
@@ -320,6 +324,30 @@ function uploadSessionActionPath(pathname: string, action: "complete" | "cancel"
   return decodeURIComponent(parts[3]);
 }
 
+function openMontagePath(pathname: string): { collection: 'briefs' | 'artifacts' | 'scenes'; id?: string; action?: 'approve' | 'video' } | null {
+  const parts = pathParts(pathname);
+  if (!parts || parts[2] !== 'openmontage') return null;
+  if (parts.length === 4 && parts[3] === 'briefs') return { collection: 'briefs' };
+  if (parts.length === 4 && parts[3] === 'artifacts') return { collection: 'artifacts' };
+  if (parts.length === 5 && parts[3] === 'artifacts') {
+    const id = decodePathSegment(parts[4]);
+    return id ? { collection: 'artifacts', id } : null;
+  }
+  if (parts.length === 6 && parts[3] === 'artifacts' && parts[5] === 'approve') {
+    const id = decodePathSegment(parts[4]);
+    return id ? { collection: 'artifacts', id, action: 'approve' } : null;
+  }
+  if (parts.length === 5 && parts[3] === 'scenes') {
+    const id = decodePathSegment(parts[4]);
+    return id ? { collection: 'scenes', id } : null;
+  }
+  if (parts.length === 6 && parts[3] === 'scenes' && parts[5] === 'video') {
+    const id = decodePathSegment(parts[4]);
+    return id ? { collection: 'scenes', id, action: 'video' } : null;
+  }
+  return null;
+}
+
 function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
@@ -379,11 +407,13 @@ function validModelActionBody(value: unknown): boolean {
   if (!isObject(value) || typeof value.clientActionId !== "string" || !/^[A-Za-z0-9._:-]{1,200}$/.test(value.clientActionId)) return false;
   if (typeof value.releaseBindingId !== "string" || !/^[A-Za-z0-9._:-]{1,200}$/.test(value.releaseBindingId) || typeof value.modelVersionId !== "string" || !/^[A-Za-z0-9._:-]{1,200}$/.test(value.modelVersionId) || typeof value.expectedSequence !== "number" || !Number.isSafeInteger(value.expectedSequence) || value.expectedSequence < 1) return false;
   const type = String(value.type);
-  if (!['select_component','transform_component','reset_component','request_hint','open_component','inspect_component','complete_step','acknowledge_fault','diagnose_fault','resolve_fault'].includes(type)) return false;
-  if(Object.keys(value).some(k=>!['clientActionId','releaseBindingId','modelVersionId','expectedSequence','type','componentId','source','transform','value','stepId'].includes(k)))return false;
+  if (!['select_component','activate_target','transform_component','reset_component','request_hint','open_component','inspect_component','complete_step','acknowledge_fault','diagnose_fault','resolve_fault'].includes(type)) return false;
+  if(Object.keys(value).some(k=>!['clientActionId','releaseBindingId','modelVersionId','expectedSequence','type','componentId','targetId','source','transform','value','stepId'].includes(k)))return false;
   for(const key of ['value','stepId'])if(value[key]!==undefined&&(typeof value[key]!=='string'||!(value[key] as string).trim()||(value[key] as string).length>2000))return false;
   if(value.componentId!==undefined&&(typeof value.componentId!=='string'||!value.componentId.trim()||value.componentId.length>200))return false;
-  if(['select_component','transform_component','reset_component'].includes(type)&&value.componentId===undefined)return false;
+  if(value.targetId!==undefined&&(typeof value.targetId!=='string'||!value.targetId.trim()||value.targetId.length>200))return false;
+  if(['select_component','activate_target','transform_component','reset_component'].includes(type)&&value.componentId===undefined)return false;
+  if(type==='activate_target'&&value.targetId===undefined)return false;
   if(value.source!==undefined&&!['CANVAS','COMPONENT_LIST','KEYBOARD'].includes(String(value.source)))return false;
   if(type==='select_component'&&value.source===undefined)return false;
   if(type==='reset_component')return value.transform===undefined&&value.value===undefined&&value.stepId===undefined;
@@ -525,6 +555,7 @@ export function createJobStatusHttpServer(options: JobStatusHttpOptions): Server
       const uploadCreateOrganizationId = request.method === "POST" ? organizationUploadCreatePath(url.pathname) : null;
       const uploadCompleteId = request.method === "POST" ? uploadSessionActionPath(url.pathname, "complete") : null;
       const uploadContentId = request.method === "PUT" ? uploadSessionActionPath(url.pathname, "content") : null;
+      const openMontageRoute = openMontagePath(url.pathname);
       const uploadCancelId = request.method === "DELETE" ? uploadSessionActionPath(url.pathname, "cancel") : null;
       const draftCourseVersionId = request.method === "POST" ? courseDraftPath(url.pathname) : null;
       const modelPreviewId=courseReviewPath(url.pathname,'model-preview');
@@ -583,7 +614,7 @@ export function createJobStatusHttpServer(options: JobStatusHttpOptions): Server
       const isGet = request.method === "GET";
       const isRetry = request.method === "POST";
       const jobId = isGet ? jobIdFromPath(url.pathname) : jobIdFromPath(url.pathname, "retry");
-      if (!reconstructionMatch && !mediaReviewMatch && !modelImportMatch && !isInspection && !isApprovedMedia && !isMedia && !isStory && !modelPreviewId && !createSimulationId && !bindModelId && !replaceModelId && !draftHistoryId && !isApprovedModels && !personalSharingMatch && !isPersonalWallet && !isCandidateLearningList && !isCandidateEnrollment && !courseOfferingMatch && !isPersonalAccount && !isOrganizationProfile && !isInvitation && !isMember && !isOrganizationContext && !isCourseChangeJob && !isCourseChange && !isNotification && !isAttemptInvalidation && !isAttemptReview && !jobId && !isUploadRoute && !isDraftRoute && !isReviewRoute && !isModelAssetRoute && !isModelSessionRoute && !isCourseCollection && !isSourceCollection && !sourceDetailId && !isAssessmentRoute && !isEnrollmentRoute && !isCredentialCollection && !isCredentialIssue && !isCredentialLifecycle && !isCredentialSharing) {
+      if (!openMontageRoute && !reconstructionMatch && !mediaReviewMatch && !modelImportMatch && !isInspection && !isApprovedMedia && !isMedia && !isStory && !modelPreviewId && !createSimulationId && !bindModelId && !replaceModelId && !draftHistoryId && !isApprovedModels && !personalSharingMatch && !isPersonalWallet && !isCandidateLearningList && !isCandidateEnrollment && !courseOfferingMatch && !isPersonalAccount && !isOrganizationProfile && !isInvitation && !isMember && !isOrganizationContext && !isCourseChangeJob && !isCourseChange && !isNotification && !isAttemptInvalidation && !isAttemptReview && !jobId && !isUploadRoute && !isDraftRoute && !isReviewRoute && !isModelAssetRoute && !isModelSessionRoute && !isCourseCollection && !isSourceCollection && !sourceDetailId && !isAssessmentRoute && !isEnrollmentRoute && !isCredentialCollection && !isCredentialIssue && !isCredentialLifecycle && !isCredentialSharing) {
         writeJson(response, 404, errorBody("NOT_FOUND", "The requested resource was not found."), origin);
         return;
       }
@@ -722,6 +753,75 @@ export function createJobStatusHttpServer(options: JobStatusHttpOptions): Server
         principal={...principal,roles:[...roles,...(principal.roles.includes('operator')?['operator']:[])]};
       }else if(organizations.length>1){writeJson(response,503,errorBody('ORGANIZATION_ROLES_UNAVAILABLE','Scoped authorization is unavailable.'),origin);return;}
       const tenant=tenantFor(request,principal,organizationId);
+      if (openMontageRoute) {
+        if (!options.openMontageSceneService) { writeJson(response, 503, errorBody('OPENMONTAGE_UNAVAILABLE', 'OpenMontage scene handoff is unavailable.'), origin); return; }
+        const service = options.openMontageSceneService;
+        const contentType = request.headers['content-type']?.split(';', 1)[0]?.trim().toLowerCase();
+        try {
+          if (openMontageRoute.collection === 'briefs') {
+            if (request.method !== 'POST') { writeJson(response, 405, errorBody('METHOD_NOT_ALLOWED', 'Use POST to create an OpenMontage brief.'), origin); return; }
+            if (!canUpload(principal)) { writeJson(response, 403, errorBody('AUTHOR_ROLE_REQUIRED', 'An author role is required.'), origin); return; }
+            if (contentType !== 'application/json') throw Error('OPENMONTAGE_REQUEST_INVALID');
+            const key = idempotencyKey(request); const raw = await readJsonBody(request, Math.max(maxBodyBytes, 64 * 1024));
+            if (!key || !isObject(raw) || Object.keys(raw).some(field => !['sceneManifest', 'prompt', 'promptHash'].includes(field)) || !raw.sceneManifest || typeof raw.prompt !== 'string' || !raw.prompt.trim() || raw.prompt.length > 4000 || (raw.promptHash !== undefined && typeof raw.promptHash !== 'string')) throw Error('OPENMONTAGE_REQUEST_INVALID');
+            writeJson(response, 201, await service.createBrief(tenant, { sceneManifest: raw.sceneManifest, prompt: raw.prompt, promptHash: raw.promptHash as string | undefined, idempotencyKey: key, requestHash: createHash('sha256').update(JSON.stringify(raw)).digest('hex') }), origin);
+            return;
+          }
+          if (openMontageRoute.collection === 'artifacts' && openMontageRoute.id && openMontageRoute.action === 'approve') {
+            if (request.method !== 'POST') { writeJson(response, 405, errorBody('METHOD_NOT_ALLOWED', 'Use POST to approve an OpenMontage render.'), origin); return; }
+            if (!canReview(principal)) { writeJson(response, 403, errorBody('REVIEWER_ROLE_REQUIRED', 'A reviewer role is required.'), origin); return; }
+            if (contentType !== 'application/json') throw Error('OPENMONTAGE_REQUEST_INVALID');
+            const key = idempotencyKey(request); const raw = await readJsonBody(request, maxBodyBytes);
+            if (!key || !isObject(raw) || Object.keys(raw).some(field => field !== 'reviewRef') || typeof raw.reviewRef !== 'string' || !raw.reviewRef.trim() || raw.reviewRef.length > 500) throw Error('OPENMONTAGE_REVIEW_INVALID');
+            const reviewerId = principal.subject;
+            writeJson(response, 200, await service.approveRender(tenant, { artifactId: openMontageRoute.id, reviewerId, reviewRef: raw.reviewRef, idempotencyKey: key, requestHash: createHash('sha256').update(JSON.stringify(raw)).digest('hex') }), origin);
+            return;
+          }
+          if (openMontageRoute.collection === 'artifacts' && (openMontageRoute.id || request.method === 'POST')) {
+            if (request.method === 'GET') {
+              if (!openMontageRoute.id) { writeJson(response, 405, errorBody('METHOD_NOT_ALLOWED', 'Use an artifact id to load an OpenMontage render.'), origin); return; }
+              const artifactId = openMontageRoute.id;
+              const result = await service.getArtifact(tenant, artifactId);
+              writeJson(response, result ? 200 : 404, result ?? errorBody('OPENMONTAGE_ARTIFACT_NOT_FOUND', 'The OpenMontage render artifact was not found.'), origin); return;
+            }
+            if (request.method !== 'POST') { writeJson(response, 405, errorBody('METHOD_NOT_ALLOWED', 'Use POST to ingest an OpenMontage render.'), origin); return; }
+            if (!canUpload(principal)) { writeJson(response, 403, errorBody('AUTHOR_ROLE_REQUIRED', 'An author role is required.'), origin); return; }
+            if (contentType !== 'application/json') throw Error('OPENMONTAGE_REQUEST_INVALID');
+            const key = idempotencyKey(request); const raw = await readJsonBody(request, maxBodyBytes);
+            if (!key || !isObject(raw) || Object.keys(raw).some(field => !['sceneId', 'briefId', 'video'].includes(field)) || typeof raw.sceneId !== 'string' || typeof raw.briefId !== 'string' || !isObject(raw.video)) throw Error('OPENMONTAGE_REQUEST_INVALID');
+            const videoKeys = ['assetVersionId', 'sourceHash', 'contentType', 'width', 'height', 'frameRate', 'durationSeconds', 'byteLength'];
+            const video = raw.video;
+            if (Object.keys(video).some(field => !videoKeys.includes(field)) || typeof video.assetVersionId !== 'string' || typeof video.sourceHash !== 'string' || !['video/mp4', 'video/webm'].includes(String(video.contentType)) || ![video.width, video.height, video.frameRate, video.durationSeconds, video.byteLength].every(value => typeof value === 'number' && Number.isFinite(value))) throw Error('OPENMONTAGE_REQUEST_INVALID');
+            writeJson(response, 201, await service.ingestRender(tenant, { sceneId: raw.sceneId, briefId: raw.briefId, video: video as any, idempotencyKey: key, requestHash: createHash('sha256').update(JSON.stringify(raw)).digest('hex') }), origin);
+            return;
+          }
+          if (openMontageRoute.collection === 'scenes' && openMontageRoute.id && openMontageRoute.action === 'video') {
+            if (request.method !== 'GET') { writeJson(response, 405, errorBody('METHOD_NOT_ALLOWED', 'Use GET to load the approved OpenMontage video.'), origin); return; }
+            if (!canUpload(principal) && !canReview(principal) && !canPublish(principal)) { writeJson(response, 403, errorBody('CONTENT_ROLE_REQUIRED', 'A content role is required.'), origin); return; }
+            const content = await service.video(tenant, openMontageRoute.id);
+            if (!content) { writeJson(response, 404, errorBody('OPENMONTAGE_SCENE_NOT_FOUND', 'The approved OpenMontage scene was not found.'), origin); return; }
+            response.setHeader('Content-Type', content.contentType); response.setHeader('Cache-Control', 'no-store'); response.setHeader('X-Content-Type-Options', 'nosniff'); response.setHeader('Content-Length', content.bytes.byteLength); if (origin) response.setHeader('Access-Control-Allow-Origin', origin); response.end(Buffer.from(content.bytes)); return;
+          }
+          if (openMontageRoute.collection === 'scenes' && openMontageRoute.id) {
+            if (request.method !== 'GET') { writeJson(response, 405, errorBody('METHOD_NOT_ALLOWED', 'Use GET to load an approved OpenMontage scene.'), origin); return; }
+            if (!canUpload(principal) && !canReview(principal) && !canPublish(principal)) { writeJson(response, 403, errorBody('CONTENT_ROLE_REQUIRED', 'A content role is required.'), origin); return; }
+            const result = await service.getApprovedScene(tenant, openMontageRoute.id);
+            writeJson(response, result ? 200 : 404, result ?? errorBody('OPENMONTAGE_SCENE_NOT_FOUND', 'The approved OpenMontage scene was not found.'), origin);
+            return;
+          }
+          if (openMontageRoute.collection === 'artifacts' && !openMontageRoute.id) {
+            writeJson(response, 405, errorBody('METHOD_NOT_ALLOWED', 'Use a render artifact resource.'), origin); return;
+          }
+          writeJson(response, 404, errorBody('NOT_FOUND', 'The OpenMontage resource was not found.'), origin);
+        } catch (error) {
+          const code = error instanceof Error ? error.message : 'OPENMONTAGE_OPERATION_FAILED';
+          const notFound = ['OPENMONTAGE_BRIEF_NOT_FOUND', 'OPENMONTAGE_ARTIFACT_NOT_FOUND', 'OPENMONTAGE_SOURCE_VIDEO_UNAVAILABLE', 'OPENMONTAGE_MODEL_UNAVAILABLE'].includes(code);
+          const conflict = ['IDEMPOTENCY_KEY_REUSED', 'OPENMONTAGE_PROMPT_HASH_MISMATCH', 'OPENMONTAGE_RENDER_ASSET_MISMATCH', 'OPENMONTAGE_RENDER_PROFILE_MISMATCH', 'OPENMONTAGE_ARTIFACT_ALREADY_APPROVED', 'OPENMONTAGE_RENDER_CONTENT_MISMATCH'].includes(code);
+          const invalid = ['OPENMONTAGE_REQUEST_INVALID', 'OPENMONTAGE_REVIEW_INVALID', 'IDEMPOTENCY_KEY_INVALID', 'SCENE_ID_INVALID', 'BRIEF_ID_INVALID', 'ARTIFACT_ID_INVALID', 'REVIEWER_ID_INVALID', 'VIDEO_ASSET_VERSION_ID_INVALID', 'VIDEO_SOURCE_HASH_INVALID'].includes(code);
+          writeJson(response, notFound ? 404 : conflict ? 409 : invalid || error instanceof SyntaxError ? 422 : 500, errorBody(code, 'The OpenMontage scene handoff could not be completed.'), origin);
+        }
+        return;
+      }
       if(courseOfferingMatch){
         if(!['GET','POST'].includes(request.method??'')){writeJson(response,405,errorBody('METHOD_NOT_ALLOWED','Use GET or POST.'),origin);return;}
         if(!options.courseOfferingStore){writeJson(response,503,errorBody('COURSE_OFFERING_UNAVAILABLE','Course availability settings are unavailable.'),origin);return;}

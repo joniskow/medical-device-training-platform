@@ -1,7 +1,7 @@
 {
   "schemaVersion": "model-manifest.v1",
   "format": "glb",
-  "sourceHash": "e7ede3f020c890da59697873e37a334d2cb5165859a1ceef979011461e6198e2",
+  "sourceHash": "6493273784dccac04e51ebf9ea0aa90f34d208eaa6b9ad0b7ff9a387e52eb079",
   "unitSystem": "meter",
   "scaleMeters": 1,
   "upAxis": "Y",
@@ -57,6 +57,18 @@
     }
   ],
   "textures": [],
+  "fidelity": {
+    "status": "SEMANTIC_FIXTURE",
+    "sourceType": "PROCEDURAL_SYNTHETIC",
+    "scaleStatus": "UNMEASURED",
+    "hiddenSurfaceUncertainty": "UNKNOWN",
+    "summary": "Detailed authored training geometry for interaction rehearsal; not a real-device reconstruction or dimensional/manufacturing model.",
+    "evidenceRefs": [
+      "fixtures/reference/images/aic-overview.png",
+      "fixtures/reference/images/aic-control-panel.png",
+      "fixtures/reference/images/aic-safety-cover.png"
+    ]
+  },
   "components": [
     {
       "componentId": "AIC-C01",
@@ -64,7 +76,43 @@
       "displayName": "Control Panel",
       "aliases": [],
       "interactionCapabilities": [
-        "select"
+        "select",
+        "press"
+      ],
+      "interactionTargets": [
+        {
+          "targetId": "AIC-C01-PRIME",
+          "nodePath": "Aurora Training Controller/Control Panel/Prime key",
+          "displayName": "Prime button",
+          "pressDepthMeters": 0.004,
+          "pressAxis": [
+            0,
+            0,
+            1
+          ]
+        },
+        {
+          "targetId": "AIC-C01-READY",
+          "nodePath": "Aurora Training Controller/Control Panel/Ready key",
+          "displayName": "Ready button",
+          "pressDepthMeters": 0.004,
+          "pressAxis": [
+            0,
+            0,
+            1
+          ]
+        },
+        {
+          "targetId": "AIC-C01-STOP",
+          "nodePath": "Aurora Training Controller/Control Panel/Stop key",
+          "displayName": "Stop button",
+          "pressDepthMeters": 0.004,
+          "pressAxis": [
+            0,
+            0,
+            1
+          ]
+        }
       ]
     },
     {

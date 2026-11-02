@@ -6,7 +6,7 @@ const outboxPublisherRole = "medical_device_outbox_publisher";
 const runtimeTables = [
   "processing_jobs", "processing_job_outbox", "processing_job_audit", "role_assignments",
   "products", "product_versions", "assets", "asset_versions", "upload_sessions",
-  "asset_rights_attestations", "knowledge_chunks", "model_versions", "model_components",
+  "asset_rights_attestations", "openmontage_scene_briefs", "openmontage_render_artifacts", "knowledge_chunks", "model_versions", "model_components",
   "simulation_definitions", "simulation_sessions", "simulation_actions", "courses",
   "course_versions", "course_review_decisions", "release_manifests", "release_model_bindings", "modules", "activities", "assessments", "certification_policies",
   "enrollments", "simulation_attempts", "progress_events", "assessment_attempts", "assessment_sessions", "credentials", "credential_events",

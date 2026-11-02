@@ -22,6 +22,8 @@ await copyFile(resolve(root, "src/model/optimization-report.json"), resolve(root
 await copyFile(resolve(root, "../../fixtures/reference/model/aurora-infusion-controller.glb"), resolve(root, "dist/model/aurora-infusion-controller.glb"));
 await copyFile(resolve(root, "../../fixtures/aurora-training/aurora-training.glb"), resolve(root, "dist/model/aurora-training.glb"));
 await copyFile(resolve(root, "src/model/aurora-training-manifest.json"), resolve(root, "dist/model/aurora-training-manifest.json"));
+await copyFile(resolve(root, "../../fixtures/nxstage-system-one/nxstage-system-one.glb"), resolve(root, "dist/model/nxstage-system-one.glb"));
+await copyFile(resolve(root, "../../fixtures/nxstage-system-one/model-manifest.json"), resolve(root, "dist/model/nxstage-system-one-manifest.json"));
 await copyFile(resolve(root, "src/model/aurora-training-scene-manifest.json"), resolve(root, "dist/model/aurora-training-scene-manifest.json"));
 await copyFile(resolve(root, "src/model/aurora-infusion-controller.mobile.glb"), resolve(root, "dist/model/aurora-infusion-controller.mobile.glb"));
 await copyFile(resolve(root, "src/model/aurora-infusion-controller.reduced.glb"), resolve(root, "dist/model/aurora-infusion-controller.reduced.glb"));

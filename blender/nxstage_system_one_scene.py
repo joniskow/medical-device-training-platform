@@ -17,6 +17,11 @@ import bpy
 from mathutils import Vector
 
 
+# Reset before module-level materials are created; resetting later would delete
+# the material datablocks that the generated geometry references.
+bpy.ops.wm.read_factory_settings(use_empty=True)
+REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+
 # Approximate normalized dimensions, derived from the 20-photo set.
 HEAD_W, HEAD_D, HEAD_H = 4.45, 2.55, 4.75
 TRAY_W, TRAY_D = 5.55, 3.95
@@ -125,6 +130,44 @@ def text(name, body, loc, size, mat, c, rotation=(math.pi / 2, 0, 0)):
     return o
 
 
+def add_press_action(o, depth=0.004, axis=(0.0, 1.0, 0.0)):
+    """Author a short tactile press/release clip for Blender review/export."""
+    origin = o.location.copy()
+    action = bpy.data.actions.new(f"{o.name} | press-release")
+    o.animation_data_create()
+    o.animation_data.action = action
+    for frame, offset in ((1, 0.0), (3, depth), (7, 0.0)):
+        o.location = origin + Vector(axis) * offset
+        o.keyframe_insert(data_path="location", frame=frame, group="Tactile press")
+    o.location = origin
+    o["interaction_animation_action"] = action.name
+    return action
+
+
+def mark_interaction(o, target_id, component_id, action, display_name,
+                     press_depth_meters=0.004, press_axis=(0.0, 1.0, 0.0)):
+    """Keep Blender-authored interaction intent attached to the exact mesh.
+
+    These properties are deliberately simple and export-friendly: the browser
+    importer can map them to a manifest later without guessing from names.
+    """
+    o["component_id"] = component_id
+    o["interactionTargetOwner"] = component_id
+    o["interaction_target_id"] = target_id
+    o["interactionTargetId"] = target_id
+    o["interaction_action"] = action
+    o["interaction"] = action
+    o["interaction_display_name"] = display_name
+    o["interactionTargetDisplayName"] = display_name
+    if action == "press":
+        o["press_depth_meters"] = press_depth_meters
+        o["pressDepthMeters"] = press_depth_meters
+        o["press_axis"] = press_axis
+        o["pressAxis"] = press_axis
+        add_press_action(o, press_depth_meters, press_axis)
+    return o
+
+
 def trapezoid(name, center, width, height, mat, c, y=-1.36, z=None):
     """Flat trapezoid used for the three distinctive control bands."""
     x, cz = center if z is None else (center, z)
@@ -144,6 +187,9 @@ def face_panel(c, front_y):
     panel = new_collection("01 Front control fascia", c)
     base = cube("System One control fascia", (0, front_y, 5.05), (3.92, 0.15, 1.55), PANEL, panel, .15, rotation=(math.radians(-6), 0, 0))
     base["component_id"] = "control-fascia"
+    base["componentId"] = "nxstage-control-panel"
+    base["interaction"] = "select"
+    base["displayName"] = "NxStage control panel"
 
     # Three dark status windows across the top.
     for x, col in zip((-1.02, 0.0, 1.02), (BLACK, BLACK, MAROON)):
@@ -160,10 +206,14 @@ def face_panel(c, front_y):
     # Primary icon/control shapes around the bands.
     cube("Left icon tile", (-1.64, front_y - .14, 5.08), (.46, .035, .54), CREAM_HI, panel, .07)
     cube("Left narrow icon tile", (-1.30, front_y - .15, 4.68), (.23, .035, .55), CREAM_HI, panel, .05)
-    cylinder("Green kidney control", (-1.64, front_y - .17, 4.48), .21, .045, GREEN, panel, rotation=(math.pi / 2, 0, 0), vertices=24)
-    cylinder("Green L per hour control", (1.53, front_y - .18, 5.18), .22, .045, GREEN, panel, rotation=(math.pi / 2, 0, 0), vertices=24)
-    cylinder("Red stop control", (1.63, front_y - .18, 4.83), .23, .07, CORAL, panel, rotation=(math.pi / 2, 0, 0), vertices=8)
-    cube("Yellow mute control", (1.63, front_y - .17, 4.46), (.42, .045, .42), YELLOW, panel, .06)
+    flow = cylinder("Green kidney control", (-1.64, front_y - .17, 4.48), .21, .045, GREEN, panel, rotation=(math.pi / 2, 0, 0), vertices=24)
+    mark_interaction(flow, "NX-C01-FLOW", "nxstage-control-panel", "press", "Flow control")
+    rate = cylinder("Green L per hour control", (1.53, front_y - .18, 5.18), .22, .045, GREEN, panel, rotation=(math.pi / 2, 0, 0), vertices=24)
+    mark_interaction(rate, "NX-C01-RATE", "nxstage-control-panel", "press", "L/hr control")
+    stop = cylinder("Red stop control", (1.63, front_y - .18, 4.83), .23, .07, CORAL, panel, rotation=(math.pi / 2, 0, 0), vertices=8)
+    mark_interaction(stop, "NX-C01-STOP", "nxstage-control-panel", "press", "Stop control", .006)
+    mute = cube("Yellow mute control", (1.63, front_y - .17, 4.46), (.42, .045, .42), YELLOW, panel, .06)
+    mark_interaction(mute, "NX-C01-MUTE", "nxstage-control-panel", "press", "Mute control")
     text("System One label", "System One", (-1.45, front_y - .21, 5.86), .10, TEXT, panel)
     text("NxStage label", "NxStage", (0.0, front_y - .22, 4.15), .15, TEXT, panel)
     text("Flow label", "L/hr", (1.53, front_y - .23, 5.18), .10, TEXT, panel)
@@ -198,6 +248,17 @@ def build_device():
     add_vent_grid(head, -1.38, 3.92, width=1.30, rows=2, cols=14)
     face_panel(root, -1.28)
 
+    # The black accessory case/platform is a major silhouette cue in the
+    # reference photographs and sits on the head rather than floating behind it.
+    accessory = new_collection("01A Upper accessory case", root)
+    cube("Upper accessory platform", (0, .05, 6.14), (3.78, 1.42, .18), BLACK, accessory, .12)
+    cube("Upper accessory soft case", (0, .06, 6.48), (3.52, 1.18, .56), BLACK_RUBBER, accessory, .14)
+    cube("Accessory front identification window", (0, -.55, 6.49), (1.85, .035, .24), GRAY, accessory, .035)
+    cube("Accessory front fabric strap left", (-1.18, -.61, 6.54), (.14, .05, .72), BLACK, accessory, .025)
+    cube("Accessory front fabric strap right", (1.18, -.61, 6.54), (.14, .05, .72), BLACK, accessory, .025)
+    for x in (-1.30, 1.30):
+        cylinder("Accessory captive fastener", (x, -.64, 6.49), .10, .05, METAL, accessory, rotation=(math.pi / 2, 0, 0), vertices=24)
+
     # The large vertical side rails and front cross bar are visually dominant.
     for x in (-2.25, 2.25):
         curve("Vertical black side rail", [(x, -1.10, 1.45), (x, -1.12, 3.15), (x, -1.04, 5.70)], .10, BLACK, rails)
@@ -207,6 +268,7 @@ def build_device():
     for x in (-2.34, 2.34):
         cube("Side pivot plate", (x, -.32, 3.05), (.20, .50, 1.45), BLACK, rails, .10, rotation=(0, math.radians(-22 if x < 0 else 22), 0))
         cylinder("Side pivot fastener", (x * 1.02, -.62, 3.18), .09, .04, METAL, rails, rotation=(0, math.pi / 2, 0))
+    curve("Left side carry handle", [(-2.48, -.72, 4.55), (-2.90, -.76, 4.30), (-2.92, -.78, 3.40), (-2.48, -.73, 3.18)], .13, BLACK, rails)
 
     # White shelf/tray under the head with molded rounded recesses.
     cube("Upper white shelf", (0, 0, 1.05), (TRAY_W, TRAY_D, .36), CREAM_HI, tray, .18)
@@ -216,16 +278,26 @@ def build_device():
 
     # Lower black pedestal/cart and wheels.
     cube("Lower black cart", (0, .10, -.35), (BASE_W, BASE_D, BASE_H), BLACK, base, .16)
-    cube("Lower front inset panel", (0, -1.70, .15), (2.40, .04, .86), BLACK_RUBBER, base, .05)
-    cube("Lower front LCD", (0, -1.74, .33), (1.25, .035, .30), LCD, base, .03)
-    for x, col in ((-.52, GREEN), (.52, CORAL)):
-        cylinder("Lower status button", (x, -1.78, -.02), .13, .06, col, base, rotation=(math.pi / 2, 0, 0), vertices=32)
-    for x in (-.82, -.52):
-        trapezoid("Lower blue arrow", x, .22, .22, BLUE, base, -1.78, z=.02)
+    # The photographed lower module is offset to the operator's right and is
+    # surrounded by a larger gray service panel; keeping that asymmetry makes
+    # the front read like the real cart instead of a centered dashboard.
+    cube("Lower gray service panel", (.62, -1.70, -.52), (2.18, .06, 1.40), GRAY, base, .07)
+    cube("Lower front inset panel", (.66, -1.76, .25), (1.48, .06, .78), BLACK_RUBBER, base, .05)
+    cube("Lower front LCD", (.66, -1.81, .36), (1.05, .035, .25), LCD, base, .03)
+    for x, col in ((.18, GREEN), (1.14, CORAL)):
+        cylinder("Lower status button", (x, -1.85, .03), .13, .06, col, base, rotation=(math.pi / 2, 0, 0), vertices=32)
+    for x in (.30, .58):
+        trapezoid("Lower blue arrow", x, .22, .22, BLUE, base, -1.85, z=.03)
+    cube("Lower left connector strip", (-1.24, -1.73, -.25), (.38, .08, 1.22), BLUE, base, .04)
+    for z, col in ((.18, YELLOW), (-.15, CORAL), (-.48, WHITE)):
+        cylinder("Lower connector detail", (-1.24, -1.82, z), .09, .05, col, base, rotation=(math.pi / 2, 0, 0), vertices=24)
+    cube("Lower warning label", (.66, -1.84, -.98), (.42, .03, .30), YELLOW, base, .02)
     for x in (-1.86, 1.86):
-        for y in (-1.20, 1.20):
+        for y in (-1.72, 1.72):
             cylinder("Caster wheel", (x, y, -1.62), .28, .16, BLACK_RUBBER, base, rotation=(math.pi / 2, 0, 0), vertices=32)
             cube("Caster fork", (x, y, -1.38), (.16, .16, .35), METAL, base, .04)
+            if y < 0:
+                cylinder("Front caster hub", (x, y - .10, -1.62), .17, .025, METAL, base, rotation=(math.pi / 2, 0, 0), vertices=32, bevel=.015)
 
     # Rear service side visible in the photographs.
     cube("Rear gray service cover", (0, 1.38, -.05), (3.60, .08, 1.85), GRAY, base, .06)
@@ -251,11 +323,26 @@ def build_device():
     root["device"] = "NxStage System One training/demonstration machine"
     root["scale_status"] = "relative photo-derived proportions; no measured scale reference"
     root["fidelity_status"] = "visual reconstruction; hidden geometry and exact dimensions remain unverified"
+    root["interaction_model"] = "press targets on front controls; cover/rail movement requires an authored animation rig"
+    root["interaction_targets"] = "NX-C01-FLOW, NX-C01-RATE, NX-C01-STOP, NX-C01-MUTE"
     return root
 
 
 def look_at(o, target):
     o.rotation_euler = (Vector(target) - o.location).to_track_quat('-Z', 'Y').to_euler()
+
+
+def set_eevee_engine(scene):
+    try:
+        scene.render.engine = 'BLENDER_EEVEE_NEXT'
+    except TypeError:
+        scene.render.engine = 'BLENDER_EEVEE'
+
+
+def ensure_world(scene, name):
+    if scene.world is None:
+        scene.world = bpy.data.worlds.new(name)
+    return scene.world
 
 
 def build_presentation():
@@ -280,30 +367,37 @@ def build_presentation():
         o.location = loc
         look_at(o, (0, 0, 2.1))
     cam_data = bpy.data.cameras.new("CAM_Hero")
-    cam_data.lens = 58
+    cam_data.lens = 52
     cam = bpy.data.objects.new("CAM_Hero", cam_data)
     c.objects.link(cam)
     cam.location = (9.8, -12.4, 8.0)
-    look_at(cam, (0, 0, 2.6))
+    look_at(cam, (0, 0, 2.9))
     bpy.context.scene.camera = cam
 
     scene = bpy.context.scene
-    scene.render.engine = 'BLENDER_EEVEE_NEXT'
+    set_eevee_engine(scene)
     scene.render.resolution_x = 900
     scene.render.resolution_y = 1100
     scene.render.resolution_percentage = 100
     scene.render.image_settings.file_format = 'PNG'
-    scene.render.filepath = "//nxstage_system_one_preview.png"
-    scene.world.color = (.008, .012, .016)
+    scene.render.filepath = os.path.join(REPO_ROOT, "fixtures", "nxstage-system-one", "nxstage-system-one-preview.png")
+    ensure_world(scene, "NxStage Studio World").color = (.008, .012, .016)
     scene.view_settings.look = 'AgX - Medium High Contrast'
     scene["preview_warning"] = "Preview is photo-grounded but not dimensionally validated."
 
 
 def main():
-    bpy.ops.wm.read_factory_settings(use_empty=True)
-    build_device()
+    os.makedirs(os.path.join(REPO_ROOT, "fixtures", "nxstage-system-one"), exist_ok=True)
+    device = build_device()
     build_presentation()
-    bpy.ops.wm.save_as_mainfile(filepath="//nxstage_system_one.blend")
+    bpy.ops.wm.save_as_mainfile(filepath=os.path.join(REPO_ROOT, "blender", "nxstage_system_one.blend"))
+    bpy.ops.object.select_all(action='DESELECT')
+    device_objects = list(device.all_objects)
+    for obj in device_objects:
+        obj.select_set(True)
+    if device_objects:
+        bpy.context.view_layer.objects.active = device_objects[0]
+    bpy.ops.export_scene.gltf(filepath=os.path.join(REPO_ROOT, "fixtures", "nxstage-system-one", "nxstage-system-one.glb"), export_format='GLB', export_apply=True, export_extras=True, use_selection=True)
     bpy.ops.render.render(write_still=True)
 
 

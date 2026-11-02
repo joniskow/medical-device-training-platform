@@ -5,10 +5,11 @@ export interface ModelSessionActionRequest {
   releaseBindingId: string;
   modelVersionId: string;
   expectedSequence: number;
-  type: "select_component" | "transform_component" | "reset_component" | "request_hint" | "open_component" | "inspect_component" | "complete_step" | "acknowledge_fault" | "diagnose_fault" | "resolve_fault";
+  type: "select_component" | "activate_target" | "transform_component" | "reset_component" | "request_hint" | "open_component" | "inspect_component" | "complete_step" | "acknowledge_fault" | "diagnose_fault" | "resolve_fault";
   value?: string;
   stepId?: string;
   componentId?: string;
+  targetId?: string;
   source?: "CANVAS" | "COMPONENT_LIST" | "KEYBOARD";
   transform?: { rotationY?: number; translationX?: number };
 }
@@ -69,4 +70,19 @@ export interface ModelSessionService {
   start(tenant: TenantContext, request: ModelSessionStartRequest, idempotencyKey: string): Promise<ModelSessionStartResult>;
   submit(tenant: TenantContext, sessionId: string, action: ModelSessionActionRequest, idempotencyKey: string): Promise<ModelSessionActionResult>;
   resume(tenant: TenantContext, sessionId: string, input: { releaseBindingId: string; modelVersionId: string; nextSequence: number }): Promise<ModelSessionActionResult | null>;
+}
+
+export function sameModelSessionAction(left: ModelSessionActionRequest, right: ModelSessionActionRequest): boolean {
+  return left.clientActionId === right.clientActionId
+    && left.releaseBindingId === right.releaseBindingId
+    && left.modelVersionId === right.modelVersionId
+    && left.expectedSequence === right.expectedSequence
+    && left.type === right.type
+    && left.componentId === right.componentId
+    && left.targetId === right.targetId
+    && left.value === right.value
+    && left.stepId === right.stepId
+    && left.source === right.source
+    && left.transform?.rotationY === right.transform?.rotationY
+    && left.transform?.translationX === right.transform?.translationX;
 }

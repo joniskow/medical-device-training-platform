@@ -7,7 +7,7 @@ const adminPool = new Pool({ connectionString: "postgresql://local_app:local_onl
 const runtimePool = new Pool({ connectionString: "postgresql://local_runtime:local_runtime_only_change_me@127.0.0.1:54329/medical_device" });
 const tenantTables = [
   "role_assignments", "products", "product_versions", "assets", "asset_versions", "upload_sessions",
-  "asset_rights_attestations", "knowledge_chunks", "model_versions", "model_components",
+  "asset_rights_attestations", "openmontage_scene_briefs", "openmontage_render_artifacts", "knowledge_chunks", "model_versions", "model_components",
   "simulation_definitions", "simulation_sessions", "simulation_actions", "courses", "course_versions",
   "course_review_decisions", "release_manifests", "release_model_bindings", "modules", "activities", "assessments", "certification_policies", "enrollments", "simulation_attempts", "progress_events",
   "assessment_attempts", "credentials", "credential_events", "notifications", "email_deliveries",

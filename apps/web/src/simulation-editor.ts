@@ -42,8 +42,9 @@ export function renderSimulationEditor(parent:HTMLElement,value:unknown,onChange
  }
  function actionEditor(host:HTMLElement,label:string,action:SimulationActionRequirement){
   const box=document.createElement('fieldset'),title=document.createElement('legend');title.textContent=label;box.append(title);host.append(box);
-  select(box,'Action',action.type,['select_component','transform_component','open_component','inspect_component','complete_step','acknowledge_fault','diagnose_fault','resolve_fault','request_hint'].map(x=>[x,x.replaceAll('_',' ')]),v=>{action.type=v as SimulationActionRequirement['type'];});
+  select(box,'Action',action.type,['select_component','activate_target','transform_component','open_component','inspect_component','complete_step','acknowledge_fault','diagnose_fault','resolve_fault','request_hint'].map(x=>[x,x.replaceAll('_',' ')]),v=>{action.type=v as SimulationActionRequirement['type'];});
   select(box,'Component',action.componentId??'',[['','No component'],...d.model.componentIds.map(id=>[id,id] as [string,string])],v=>{if(v)action.componentId=v;else delete action.componentId;});
+  if(action.type==='activate_target')field(box,'Interaction target ID',action.targetId??'',v=>{if(v.trim())action.targetId=v.trim();else delete action.targetId;});
   field(box,'Action value',action.value??'',v=>{if(v)action.value=v;else delete action.value;});
   select(box,'Action step reference',action.stepId??'',[['','No step reference'],...d.steps.map(s=>[s.stepId,s.title] as [string,string])],v=>{if(v)action.stepId=v;else delete action.stepId;});
   for(const key of ['rotationY','translationX'] as const)field(box,key==='rotationY'?'Required rotation Y (radians, optional)':'Required translation X (meters, optional)',action.transform?.[key]??'',v=>{if(v.trim())action.transform={...action.transform,[key]:Number(v)};else if(action.transform){delete action.transform[key];if(!Object.keys(action.transform).length)delete action.transform;}});

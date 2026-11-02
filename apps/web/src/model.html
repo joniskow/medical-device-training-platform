@@ -38,19 +38,19 @@
       <p><a href="/learner/courses">Return to my courses</a></p>
       <section class="shell" aria-labelledby="title">
         <h1 id="title">AIC-001 model activity</h1>
-        <p>Inspect the approved model, select each named component, and complete the permitted semantic actions. The browser renders only the server-authoritative state projection.</p>
+        <p>Inspect the approved model, select each named component, and complete the permitted semantic actions. Buttons with approved interaction metadata give bounded local press feedback; score and completion still come only from the server-authoritative state projection.</p>
         <p class="notice" role="note">Synthetic release-bound rehearsal: this fixture exercises the E4 runtime and action contract. Production delivery uses a private, short-lived URL issued only for an approved course release.</p>
         <div class="layout">
           <section aria-labelledby="viewer-title">
             <h2 id="viewer-title">Interactive model</h2>
-            <div class="stage"><canvas id="model-canvas" aria-label="Interactive AIC-001 model. Drag to rotate, use the wheel to zoom, and click a component to select it."></canvas></div>
+            <div class="stage"><canvas id="model-canvas" aria-label="Interactive AIC-001 model. Drag to rotate, use the wheel to zoom, click a component to select it, and press tagged controls."></canvas></div>
             <div class="controls"><button id="reset-view" type="button">Reset view</button><button id="fit-view" type="button">Fit model</button></div>
             <p id="model-status" class="status" role="status" aria-live="polite">Preparing model runtime…</p>
             <p id="fallback" class="fallback" role="alert" hidden></p>
           </section>
           <aside class="panel" aria-labelledby="component-title">
             <h2 id="component-title">Components</h2>
-            <p class="muted">Keyboard-accessible selection is the equivalent path for this preview.</p>
+            <p class="muted">Keyboard-accessible selection is the equivalent path for this preview. Visual fidelity status is shown in the release manifest and must not be read as clinical or manufacturing validation.</p>
             <p id="first-use-hint" class="notice" role="note">First use: select a component, then choose one of the permitted actions shown below.</p>
             <div id="component-list" class="component-list" role="list"></div>
             <div id="action-controls" class="controls" aria-label="Permitted component actions"></div>

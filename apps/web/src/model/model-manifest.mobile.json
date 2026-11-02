@@ -31,6 +31,18 @@
     }
   ],
   "textures": [],
+  "fidelity": {
+    "status": "SEMANTIC_FIXTURE",
+    "sourceType": "PROCEDURAL_SYNTHETIC",
+    "scaleStatus": "UNMEASURED",
+    "hiddenSurfaceUncertainty": "UNKNOWN",
+    "summary": "Semantic component fixture for runtime rehearsal; not a real-device reconstruction or dimensional/manufacturing model.",
+    "evidenceRefs": [
+      "fixtures/reference/images/aic-overview.png",
+      "fixtures/reference/images/aic-control-panel.png",
+      "fixtures/reference/images/aic-safety-cover.png"
+    ]
+  },
   "performanceBudget": {
     "minimumFps": 30,
     "interactiveWithinMs": 5000,

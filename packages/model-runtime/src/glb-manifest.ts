@@ -5,7 +5,25 @@ export interface ModelComponentManifest {
   aliases: string[];
   interactionCapabilities: string[];
   interactionVolume?: { min: [number, number, number]; max: [number, number, number] };
+  interactionTargets?: ModelInteractionTarget[];
   permittedTransforms?: { rotationY?: { min: number; max: number; step: number; snap?: number }; translationX?: { min: number; max: number; step: number; snap?: number } };
+}
+
+export interface ModelInteractionTarget {
+  targetId: string;
+  nodePath: string;
+  displayName: string;
+  pressDepthMeters?: number;
+  pressAxis?: [number, number, number];
+}
+
+export interface ModelFidelityEvidence {
+  status: "SEMANTIC_FIXTURE" | "VISUAL_RECONSTRUCTION" | "DIMENSIONALLY_VALIDATED";
+  sourceType: "PROCEDURAL_SYNTHETIC" | "REFERENCE_IMAGES" | "PHOTOGRAMMETRY" | "MEASURED_CAD";
+  scaleStatus: "UNMEASURED" | "REFERENCE_MEASURED" | "CALIBRATED";
+  hiddenSurfaceUncertainty: "UNKNOWN" | "BOUNDED" | "LOW";
+  summary: string;
+  evidenceRefs?: string[];
 }
 
 export interface ModelVariantManifest {
@@ -39,6 +57,7 @@ export interface ModelManifest {
   textures: Array<{ textureId: string; sha256: string; byteLength: number }>;
   preparation?:Record<string,unknown>;
   reconstructionLineage?:Record<string,unknown>;
+  fidelity?: ModelFidelityEvidence;
   performanceBudget?: { minimumFps: number; interactiveWithinMs: number; maxMemoryMb: number };
   variant?: ModelVariantManifest;
   variants?: Array<{ variantId: string; sourceHash: string; modelVersionId?: string; releaseBindingId?: string; modelBlobKey?: string; manifestBlobKey?: string; targetProfiles?: string[] }>;
@@ -58,14 +77,14 @@ export class GlbValidationError extends Error {
 type GlbDocument = {
   scene?: number;
   scenes?: Array<{ nodes?: number[] }>;
-  nodes?: Array<{ name?: string; mesh?: number; children?: number[]; extras?: { componentId?: string; interaction?: string;displayName?:string } }>;
+  nodes?: Array<{ name?: string; mesh?: number; children?: number[]; extras?: { componentId?: string; interaction?: string; displayName?: string; interactionTargetOwner?: string; interactionTargetId?: string; interactionTargetDisplayName?: string; pressDepthMeters?: number; pressAxis?: [number, number, number] } }>;
   meshes?: Array<{ primitives?: Array<{ indices?: number }> }>;
   materials?: unknown[];
   images?: Array<{bufferView?:number;uri?:string}>;
   textures?: Array<{source?:number}>;
   bufferViews?: Array<{buffer?:number;byteOffset?:number;byteLength:number}>;
   accessors?: Array<{ count?: number }>;
-  extras?: { scaleMeters?: number; upAxis?: string; handedness?: "right" | "left"; origin?: "bounding-box-center" | "scene-origin"; forwardAxis?: ModelManifest["forwardAxis"];preparation?:Record<string,unknown> };
+  extras?: { scaleMeters?: number; upAxis?: string; handedness?: "right" | "left"; origin?: "bounding-box-center" | "scene-origin"; forwardAxis?: ModelManifest["forwardAxis"]; preparation?: Record<string,unknown>; fidelity?: ModelFidelityEvidence; provenance?: string };
 };
 
 const readUint32 = (bytes: Uint8Array, offset: number): number => new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength).getUint32(offset, true);
@@ -125,7 +144,7 @@ export function createGlbModelManifest(bytes: Uint8Array, sourceHash?: string, t
   const document = readJsonChunk(bytes);
   const nodes = document.nodes ?? [];
   const paths = nodePaths(document);
-  const components = nodes.flatMap((node, index) => {
+  const components: ModelComponentManifest[] = nodes.flatMap((node, index) => {
     const componentId = node.extras?.componentId;
     if (!componentId) return [];
     const interaction = node.extras?.interaction;
@@ -137,6 +156,20 @@ export function createGlbModelManifest(bytes: Uint8Array, sourceHash?: string, t
       interactionCapabilities: interaction ? [interaction] : []
     }];
   });
+  for (const node of nodes) {
+    const extras = node.extras;
+    if (!extras?.interactionTargetOwner || !extras.interactionTargetId) continue;
+    const owner = components.find((component) => component.componentId === extras.interactionTargetOwner);
+    if (!owner) continue;
+    const target = {
+      targetId: extras.interactionTargetId,
+      nodePath: paths.get(nodes.indexOf(node)) ?? node.name ?? extras.interactionTargetId,
+      displayName: extras.interactionTargetDisplayName ?? node.name ?? extras.interactionTargetId,
+      ...(extras.pressDepthMeters !== undefined ? { pressDepthMeters: extras.pressDepthMeters } : {}),
+      ...(extras.pressAxis !== undefined ? { pressAxis: extras.pressAxis } : {})
+    } satisfies ModelInteractionTarget;
+    owner.interactionTargets = [...(owner.interactionTargets ?? []), target];
+  }
   const ids = new Set(components.map((component) => component.componentId));
   if (components.length === 0 || ids.size !== components.length) {
     throw new GlbValidationError("INVALID_COMPONENTS", "GLB must expose unique component IDs on reachable nodes");
@@ -176,6 +209,7 @@ export function createGlbModelManifest(bytes: Uint8Array, sourceHash?: string, t
     materials: (document.materials ?? []).map((_, index) => ({ materialId: `material-${index}`, name: `Material ${index + 1}` })),
     textures,
     ...(preparation?{preparation}:{}),
+    ...(document.extras?.fidelity ? { fidelity: document.extras.fidelity } : {}),
     components
   };
 }

@@ -1,0 +1,22 @@
+import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
+import { readFile } from "node:fs/promises";
+import { createGlbModelManifest, validateBrowserModelManifest } from "../packages/model-runtime/dist/index.js";
+
+const modelPath = "fixtures/nxstage-system-one/nxstage-system-one.glb";
+const manifestPath = "fixtures/nxstage-system-one/model-manifest.json";
+const bytes = await readFile(modelPath);
+const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
+const hash = createHash("sha256").update(bytes).digest("hex");
+assert.equal(manifest.sourceHash, hash, "NxStage manifest hash must bind the exported GLB");
+const validated = validateBrowserModelManifest(manifest);
+assert.equal(validated.fidelity?.status, "VISUAL_RECONSTRUCTION");
+assert.equal(validated.fidelity?.scaleStatus, "UNMEASURED");
+const panel = validated.components.find((component) => component.componentId === "nxstage-control-panel");
+assert.ok(panel, "NxStage control panel component must survive export");
+assert.deepEqual(panel.interactionTargets?.map((target) => target.targetId), ["NX-C01-FLOW", "NX-C01-RATE", "NX-C01-STOP", "NX-C01-MUTE"]);
+assert.ok(panel.interactionTargets?.every((target) => target.pressDepthMeters !== undefined && target.pressDepthMeters > 0 && target.pressDepthMeters <= 0.05));
+const structural = createGlbModelManifest(bytes, hash);
+assert.equal(structural.meshCount, validated.meshCount);
+assert.equal(structural.triangleCount, validated.triangleCount);
+console.log(`NxStage GLB passed: ${validated.meshCount} meshes, ${validated.triangleCount} triangles, four exported press targets, bound hash, and explicit visual-reconstruction uncertainty.`);

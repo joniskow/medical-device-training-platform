@@ -22,6 +22,14 @@
     { "materialId": "mat-line-sensor", "name": "Line sensor" }
   ],
   "textures": [],
+  "fidelity": {
+    "status": "SEMANTIC_FIXTURE",
+    "sourceType": "PROCEDURAL_SYNTHETIC",
+    "scaleStatus": "UNMEASURED",
+    "hiddenSurfaceUncertainty": "UNKNOWN",
+    "summary": "Semantic component fixture for runtime rehearsal; not a real-device reconstruction or dimensional/manufacturing model.",
+    "evidenceRefs": ["fixtures/reference/images/aic-overview.png", "fixtures/reference/images/aic-control-panel.png", "fixtures/reference/images/aic-safety-cover.png"]
+  },
   "performanceBudget": { "minimumFps": 30, "interactiveWithinMs": 5000, "maxMemoryMb": 96 },
   "variants": [
     { "variantId": "mobile", "sourceHash": "8b766e041d225b1a463c49f1a722212ea8d98b42cd59a20e22e93d83c0ff2795", "modelBlobKey": "model/aurora-infusion-controller.mobile.glb", "manifestBlobKey": "model/model-manifest.mobile.json", "targetProfiles": ["ios-webgl2", "android-webgl2"] },

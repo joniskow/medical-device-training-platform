@@ -1,0 +1,155 @@
+{
+  "schemaVersion": "model-manifest.v1",
+  "format": "glb",
+  "sourceHash": "48cb1050d5b386a45283bfe4dfbc8826148147ea13e3aa8606c085f8058e1063",
+  "unitSystem": "meter",
+  "scaleMeters": 1,
+  "upAxis": "Y",
+  "handedness": "right",
+  "origin": "bounding-box-center",
+  "forwardAxis": "-Z",
+  "normalizationStatus": "CANONICAL",
+  "sceneNodeCount": 232,
+  "meshCount": 232,
+  "materialCount": 15,
+  "textureCount": 0,
+  "triangleCount": 77730,
+  "materials": [
+    {
+      "materialId": "material-0",
+      "name": "Material 1"
+    },
+    {
+      "materialId": "material-1",
+      "name": "Material 2"
+    },
+    {
+      "materialId": "material-2",
+      "name": "Material 3"
+    },
+    {
+      "materialId": "material-3",
+      "name": "Material 4"
+    },
+    {
+      "materialId": "material-4",
+      "name": "Material 5"
+    },
+    {
+      "materialId": "material-5",
+      "name": "Material 6"
+    },
+    {
+      "materialId": "material-6",
+      "name": "Material 7"
+    },
+    {
+      "materialId": "material-7",
+      "name": "Material 8"
+    },
+    {
+      "materialId": "material-8",
+      "name": "Material 9"
+    },
+    {
+      "materialId": "material-9",
+      "name": "Material 10"
+    },
+    {
+      "materialId": "material-10",
+      "name": "Material 11"
+    },
+    {
+      "materialId": "material-11",
+      "name": "Material 12"
+    },
+    {
+      "materialId": "material-12",
+      "name": "Material 13"
+    },
+    {
+      "materialId": "material-13",
+      "name": "Material 14"
+    },
+    {
+      "materialId": "material-14",
+      "name": "Material 15"
+    }
+  ],
+  "textures": [],
+  "components": [
+    {
+      "componentId": "nxstage-control-panel",
+      "nodePath": "System One control fascia",
+      "displayName": "NxStage control panel",
+      "aliases": [],
+      "interactionCapabilities": [
+        "select",
+        "press"
+      ],
+      "interactionTargets": [
+        {
+          "targetId": "NX-C01-FLOW",
+          "nodePath": "Green kidney control",
+          "displayName": "Flow control",
+          "pressDepthMeters": 0.004,
+          "pressAxis": [
+            0,
+            1,
+            0
+          ]
+        },
+        {
+          "targetId": "NX-C01-RATE",
+          "nodePath": "Green L per hour control",
+          "displayName": "L/hr control",
+          "pressDepthMeters": 0.004,
+          "pressAxis": [
+            0,
+            1,
+            0
+          ]
+        },
+        {
+          "targetId": "NX-C01-STOP",
+          "nodePath": "Red stop control",
+          "displayName": "Stop control",
+          "pressDepthMeters": 0.006,
+          "pressAxis": [
+            0,
+            1,
+            0
+          ]
+        },
+        {
+          "targetId": "NX-C01-MUTE",
+          "nodePath": "Yellow mute control",
+          "displayName": "Mute control",
+          "pressDepthMeters": 0.004,
+          "pressAxis": [
+            0,
+            1,
+            0
+          ]
+        }
+      ]
+    }
+  ],
+  "modelVersionId": "preview:nxstage-system-one-v1",
+  "releaseBindingId": "preview:nxstage-system-one-v1",
+  "fidelity": {
+    "status": "VISUAL_RECONSTRUCTION",
+    "sourceType": "REFERENCE_IMAGES",
+    "scaleStatus": "UNMEASURED",
+    "hiddenSurfaceUncertainty": "UNKNOWN",
+    "summary": "Photo-grounded hard-surface reconstruction; proportions follow the supplied reference imagery, but no measured scale or hidden-surface evidence was supplied.",
+    "evidenceRefs": [
+      "fixtures/nxstage-system-one/nxstage-system-one-preview.png"
+    ]
+  },
+  "performanceBudget": {
+    "minimumFps": 30,
+    "interactiveWithinMs": 5000,
+    "maxMemoryMb": 128
+  }
+}

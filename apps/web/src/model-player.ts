@@ -58,6 +58,7 @@ function renderState(state: ModelRuntimeState) {
   if (state.fallbackReason) fallback.textContent = state.fallbackReason;
   for (const button of componentList.querySelectorAll<HTMLButtonElement>("button")) button.setAttribute("aria-current", button.dataset.componentId === state.selectedComponentId ? "true" : "false");
   if (state.phase === "LOADING") announce("Loading the approved AIC-001 model…");
+  if (state.pressedInteractionTargetId) announce(`Pressed ${state.pressedInteractionTargetId} with local tactile feedback. Use the activity controls for the scored action.`);
   if (state.phase === "READY" && !state.selectedComponentId) announce("Model ready. Select a component using the canvas or component list.");
   if (state.phase === "CONTEXT_LOST") announce("3D context lost. Use the equivalent text path or reload the preview.", true);
   if (state.phase === "REDUCED_COMPLEXITY") announce("Reduced-complexity equivalent path available.", true);
@@ -92,7 +93,7 @@ if (hasBoundSession && !previewMode) {
     assetLoadFailure = error instanceof Error ? error.message : "The release-bound model asset could not be loaded.";
   }
 }
-type ActivityManifest = { sourceHash: string; modelVersionId: string; releaseBindingId: string; components: Array<{ componentId: string; displayName: string; interactionCapabilities?: string[]; permittedTransforms?: { rotationY?: { min: number; max: number; step?: number; snap?: number }; translationX?: { min: number; max: number; step?: number; snap?: number } } }> };
+type ActivityManifest = { sourceHash: string; modelVersionId: string; releaseBindingId: string; components: Array<{ componentId: string; displayName: string; interactionCapabilities?: string[]; interactionTargets?: Array<{ targetId: string; displayName: string }>; permittedTransforms?: { rotationY?: { min: number; max: number; step?: number; snap?: number }; translationX?: { min: number; max: number; step?: number; snap?: number } } }> };
 const emptyManifest: ActivityManifest = { sourceHash: "", modelVersionId: "", releaseBindingId: "", components: [] };
 let manifest: ActivityManifest = emptyManifest;
 if (!assetLoadFailure) try {
@@ -175,6 +176,12 @@ if ((previewMode || (hasBoundSession && !assetLoadFailure && !manifestLoadFailur
         renderActions();
         void submit({ ...action, clientActionId: actionId(), expectedSequence: serverState.nextSequence });
       }
+    },
+    onInteractionTargetActivated: ({ targetId, componentId }) => {
+      const action: ModelSemanticAction = { type: "activate_target", componentId, targetId, clientActionId: actionId(), expectedSequence: serverState.nextSequence };
+      actionLog.textContent = `Semantic target action emitted: ${targetId}. Awaiting authoritative procedure state.`;
+      announce(`${targetId} activated. Confirming the action with the activity session.`);
+      void submit(action);
     }
   });
 } catch (error) {
@@ -260,6 +267,25 @@ function renderActions() {
   actionControls.replaceChildren();
   if(!previewMode&&!serverState.completed){
     const type=serverState.allowedActions[0] as ModelSemanticAction['type'];
+    if (type === "activate_target") {
+      const box = document.createElement("fieldset");
+      const legend = document.createElement("legend");
+      legend.textContent = "Procedure target";
+      box.append(legend);
+      const explanation = document.createElement("p");
+      explanation.textContent = "Choose a named control, or activate it directly in the 3D model.";
+      box.append(explanation);
+      for (const component of manifest.components) {
+        for (const target of component.interactionTargets ?? []) {
+          const button = document.createElement("button");
+          button.type = "button";
+          button.textContent = `${component.displayName}: ${target.displayName}`;
+          button.addEventListener("click", () => void submit({ type: "activate_target", componentId: component.componentId, targetId: target.targetId, clientActionId: actionId(), expectedSequence: serverState.nextSequence }));
+          box.append(button);
+        }
+      }
+      actionControls.append(box);
+    }
     if(['select_component','transform_component','request_hint','open_component','inspect_component','complete_step','acknowledge_fault','diagnose_fault','resolve_fault'].includes(type)){
       const box=document.createElement('fieldset'),legend=document.createElement('legend');legend.textContent=`Procedure action: ${type.replaceAll('_',' ')}`;box.append(legend);actionControls.append(box);
       const explanation=document.createElement('p');explanation.textContent='Use the procedure instructions to choose a component and enter any required value or step reference. Geometry changes require permitted transform values.';box.append(explanation);

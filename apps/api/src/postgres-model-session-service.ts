@@ -5,7 +5,7 @@ import type { TenantContext } from "@medical-device/contracts";
 import { withTenantTransaction } from "@medical-device/db";
 import { applyPermittedTransform, validateAuthoritativeModelState, validateBrowserModelManifest, type AuthoritativeModelState, type ModelComponentManifest } from "@medical-device/model-runtime";
 import { applySimulationAction, createInitialSimulationState, validateSimulationDefinition, type SimulationAction, type SimulationDefinition, type SimulationState } from "@medical-device/simulation-schema";
-import type { ModelSessionActionRequest, ModelSessionActionResult, ModelSessionService, ModelSessionStartRequest, ModelSessionStartResult } from "./model-session-service.js";
+import { sameModelSessionAction, type ModelSessionActionRequest, type ModelSessionActionResult, type ModelSessionService, type ModelSessionStartRequest, type ModelSessionStartResult } from "./model-session-service.js";
 import { issueCredentialInTransaction } from "./credential-service.js";
 
 type JsonObject = Record<string, unknown>;
@@ -140,19 +140,6 @@ function stateMatchesManifest(model: ModelState, value: unknown): boolean {
 
 function result(status: ModelSessionActionResult["status"], nextSequence: number, feedback: string, state?: ModelState, extras?: Partial<ModelSessionActionResult>): ModelSessionActionResult {
   return { status, nextSequence, feedback, ...(state ? { state: publicModelState(state) } : {}), ...extras };
-}
-
-function sameAction(left: ModelSessionActionRequest, right: ModelSessionActionRequest): boolean {
-  return left.clientActionId === right.clientActionId
-    && left.releaseBindingId === right.releaseBindingId
-    && left.modelVersionId === right.modelVersionId
-    && left.expectedSequence === right.expectedSequence
-    && left.type === right.type
-    && left.componentId === right.componentId
-    && left.value === right.value && left.stepId === right.stepId
-    && left.source === right.source
-    && left.transform?.rotationY === right.transform?.rotationY
-    && left.transform?.translationX === right.transform?.translationX;
 }
 
 function simulationCompleted(definition: SimulationDefinition, state: SimulationState): boolean {
@@ -392,7 +379,7 @@ export function createPostgresModelSessionService(input: { pool: Pool }): ModelS
         if(row?.learner_id===tenant.actorId&&row.status==='INVALIDATED'){
           const prior=await client.query<{payload:{request:ModelSessionActionRequest;result:ModelSessionActionResult}}>('SELECT payload FROM simulation_actions WHERE organization_id=$1 AND simulation_session_id=$2 AND nonce=$3',[tenant.organizationId,sessionId,action.clientActionId]);
           const stored=prior.rows[0]?.payload;
-          if(stored?.result.status==='expired_session'&&sameAction(stored.request,action)&&idempotencyKey===action.clientActionId)return stored.result;
+          if(stored?.result.status==='expired_session'&&sameModelSessionAction(stored.request,action)&&idempotencyKey===action.clientActionId)return stored.result;
         }
         if (!row || row.learner_id !== tenant.actorId || row.status !== "ACTIVE") return result("expired_session", row?.next_sequence ?? 1, "This model activity session is not available.", undefined, { clientActionId: action.clientActionId });
         if (!await sessionAccessActive(client,tenant,sessionId)) return result("expired_session",row.next_sequence,"Enrollment or attempt access is no longer active.",undefined,{clientActionId:action.clientActionId});
@@ -420,7 +407,7 @@ export function createPostgresModelSessionService(input: { pool: Pool }): ModelS
         );
         if (duplicate.rows[0]?.payload && typeof duplicate.rows[0].payload === "object") {
           const stored = duplicate.rows[0].payload as { request?: ModelSessionActionRequest; result?: ModelSessionActionResult };
-          if (stored.request && stored.result) return sameAction(stored.request, action)
+          if (stored.request && stored.result) return sameModelSessionAction(stored.request, action)
             ? stored.result
             : result("invalid_precondition", row.next_sequence, "This action ID was already used for a different action.", model, { clientActionId: action.clientActionId });
           return duplicate.rows[0].payload as ModelSessionActionResult;
@@ -439,7 +426,11 @@ export function createPostgresModelSessionService(input: { pool: Pool }): ModelS
         const components = object(modelRow.rows[0]?.manifest)?.components;
         const componentId = action.componentId;
         const component = Array.isArray(components) ? components.map(object).find((item) => item?.componentId === componentId) : undefined;
-        if ((componentId && !component) || (["select_component","transform_component","reset_component"].includes(action.type) && !componentId)) return result("unknown_component", row.next_sequence, "That component is not part of the approved model.", model, { clientActionId: action.clientActionId });
+        if ((componentId && !component) || (["select_component","activate_target","transform_component","reset_component"].includes(action.type) && !componentId)) return result("unknown_component", row.next_sequence, "That component is not part of the approved model.", model, { clientActionId: action.clientActionId });
+        if (action.type === "activate_target") {
+          const targets = Array.isArray(component?.interactionTargets) ? component.interactionTargets.map(object) : [];
+          if (!action.targetId || !targets.some((target) => target?.targetId === action.targetId)) return result("invalid_precondition", row.next_sequence, "That interaction target is not part of the approved model component.", model, { clientActionId: action.clientActionId });
+        }
         const definition = await client.query<{ definition: unknown }>(
           `SELECT definition FROM simulation_definitions
            WHERE organization_id = $1 AND simulation_definition_id = $2 AND status = 'PUBLISHED'`,
@@ -501,6 +492,7 @@ export function createPostgresModelSessionService(input: { pool: Pool }): ModelS
             type: simulationActionType,
             payload: {
               ...(componentId ? { componentId } : {}),
+              ...(action.targetId!==undefined?{targetId:action.targetId}:{}),
               ...(action.value!==undefined?{value:action.value}:{}),...(action.stepId!==undefined?{stepId:action.stepId}:{}),
               ...(action.transform ? { transform: action.transform } : {})
             }

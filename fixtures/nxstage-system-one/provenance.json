@@ -1,0 +1,69 @@
+{
+  "schemaVersion": "authored-model.v1",
+  "source": "blender/nxstage_system_one_scene.py",
+  "blenderVersion": "5.2.3 LTS",
+  "sha256": "48cb1050d5b386a45283bfe4dfbc8826148147ea13e3aa8606c085f8058e1063",
+  "bytes": 4391552,
+  "reviewStatus": "REVIEW_REQUIRED",
+  "fidelity": {
+    "status": "VISUAL_RECONSTRUCTION",
+    "sourceType": "REFERENCE_IMAGES",
+    "scaleStatus": "UNMEASURED",
+    "hiddenSurfaceUncertainty": "UNKNOWN",
+    "summary": "Photo-grounded hard-surface reconstruction; proportions follow the supplied reference imagery, but no measured scale or hidden-surface evidence was supplied.",
+    "evidenceRefs": [
+      "fixtures/nxstage-system-one/nxstage-system-one-preview.png"
+    ]
+  },
+  "interactionTargets": [
+    {
+      "targetId": "NX-C01-FLOW",
+      "nodePath": "Green kidney control",
+      "displayName": "Flow control",
+      "pressDepthMeters": 0.004,
+      "pressAxis": [
+        0,
+        1,
+        0
+      ]
+    },
+    {
+      "targetId": "NX-C01-RATE",
+      "nodePath": "Green L per hour control",
+      "displayName": "L/hr control",
+      "pressDepthMeters": 0.004,
+      "pressAxis": [
+        0,
+        1,
+        0
+      ]
+    },
+    {
+      "targetId": "NX-C01-STOP",
+      "nodePath": "Red stop control",
+      "displayName": "Stop control",
+      "pressDepthMeters": 0.006,
+      "pressAxis": [
+        0,
+        1,
+        0
+      ]
+    },
+    {
+      "targetId": "NX-C01-MUTE",
+      "nodePath": "Yellow mute control",
+      "displayName": "Mute control",
+      "pressDepthMeters": 0.004,
+      "pressAxis": [
+        0,
+        1,
+        0
+      ]
+    }
+  ],
+  "limitations": [
+    "No measured scale reference",
+    "Hidden geometry remains unverified",
+    "Not a clinical, regulatory, service, or manufacturing model"
+  ]
+}

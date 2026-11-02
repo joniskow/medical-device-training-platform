@@ -98,6 +98,18 @@ export function validateBrowserModelManifest(value: unknown): ModelManifest {
   if (!Array.isArray(manifest.materials) || manifest.materials.length !== manifest.materialCount || !manifest.materials.every((item) => item && typeof item === "object" && typeof (item as { materialId?: unknown }).materialId === "string" && typeof (item as { name?: unknown }).name === "string") || !Array.isArray(manifest.textures) || manifest.textures.length !== manifest.textureCount || !manifest.textures.every((item) => item && typeof item === "object" && typeof (item as { textureId?: unknown }).textureId === "string" && typeof (item as { sha256?: unknown }).sha256 === "string" && /^[a-f0-9]{64}$/i.test(String((item as { sha256?: unknown }).sha256)) && Number.isSafeInteger((item as { byteLength?: unknown }).byteLength) && Number((item as { byteLength: number }).byteLength) >= 0)) throw new Error("MODEL_MATERIALS_INVALID");
   if (!Array.isArray(manifest.components) || manifest.components.length === 0 || !manifest.components.every((component) => component && typeof component === "object")) throw new Error("MODEL_COMPONENTS_REQUIRED");
   if (manifest.performanceBudget && (!Number.isFinite(manifest.performanceBudget.minimumFps) || manifest.performanceBudget.minimumFps < 1 || !Number.isFinite(manifest.performanceBudget.interactiveWithinMs) || manifest.performanceBudget.interactiveWithinMs < 1 || !Number.isFinite(manifest.performanceBudget.maxMemoryMb) || manifest.performanceBudget.maxMemoryMb < 1)) throw new Error("MODEL_PERFORMANCE_BUDGET_INVALID");
+  if (manifest.fidelity) {
+    const fidelity = manifest.fidelity;
+    const invalid = !["SEMANTIC_FIXTURE", "VISUAL_RECONSTRUCTION", "DIMENSIONALLY_VALIDATED"].includes(fidelity.status)
+      || !["PROCEDURAL_SYNTHETIC", "REFERENCE_IMAGES", "PHOTOGRAMMETRY", "MEASURED_CAD"].includes(fidelity.sourceType)
+      || !["UNMEASURED", "REFERENCE_MEASURED", "CALIBRATED"].includes(fidelity.scaleStatus)
+      || !["UNKNOWN", "BOUNDED", "LOW"].includes(fidelity.hiddenSurfaceUncertainty)
+      || typeof fidelity.summary !== "string"
+      || !fidelity.summary.trim()
+      || (fidelity.evidenceRefs !== undefined && (!Array.isArray(fidelity.evidenceRefs) || !fidelity.evidenceRefs.every((ref) => typeof ref === "string" && ref.trim())))
+      || (fidelity.status === "DIMENSIONALLY_VALIDATED" && (fidelity.scaleStatus === "UNMEASURED" || fidelity.hiddenSurfaceUncertainty === "UNKNOWN"));
+    if (invalid) throw new Error("MODEL_FIDELITY_INVALID");
+  }
   const ids = manifest.components.map((component) => component.componentId);
   if (ids.some((id) => typeof id !== "string" || id.length === 0) || new Set(ids).size !== ids.length) throw new Error("MODEL_COMPONENTS_INVALID");
   const nodePaths = manifest.components.map((component) => component.nodePath);
@@ -106,6 +118,14 @@ export function validateBrowserModelManifest(value: unknown): ModelManifest {
     if (typeof component.nodePath !== "string" || !component.nodePath || typeof component.displayName !== "string" || !component.displayName || !Array.isArray(component.aliases) || !component.aliases.every((alias) => typeof alias === "string") || !Array.isArray(component.interactionCapabilities) || !component.interactionCapabilities.every((capability) => typeof capability === "string")) throw new Error("MODEL_COMPONENTS_INVALID");
     const volume = component.interactionVolume;
     if (volume && (!Array.isArray(volume.min) || !Array.isArray(volume.max) || volume.min.length !== 3 || volume.max.length !== 3 || volume.min.some((item) => typeof item !== "number" || !Number.isFinite(item)) || volume.max.some((item) => typeof item !== "number" || !Number.isFinite(item)) || volume.min.some((item, index) => item > volume.max[index]!))) throw new Error("MODEL_INTERACTION_VOLUME_INVALID");
+    if (component.interactionTargets !== undefined) {
+      if (!Array.isArray(component.interactionTargets) || component.interactionTargets.length === 0 || new Set(component.interactionTargets.map((target) => target.targetId)).size !== component.interactionTargets.length || new Set(component.interactionTargets.map((target) => target.nodePath)).size !== component.interactionTargets.length) throw new Error("MODEL_INTERACTION_TARGETS_INVALID");
+      for (const target of component.interactionTargets) {
+        if (!target || typeof target.targetId !== "string" || !target.targetId.trim() || typeof target.nodePath !== "string" || !target.nodePath.trim() || typeof target.displayName !== "string" || !target.displayName.trim()) throw new Error("MODEL_INTERACTION_TARGETS_INVALID");
+        if (target.pressDepthMeters !== undefined && (!Number.isFinite(target.pressDepthMeters) || target.pressDepthMeters <= 0 || target.pressDepthMeters > 0.05)) throw new Error("MODEL_PRESS_DEPTH_INVALID");
+        if (target.pressAxis !== undefined && (!Array.isArray(target.pressAxis) || target.pressAxis.length !== 3 || target.pressAxis.some((value) => typeof value !== "number" || !Number.isFinite(value)) || Math.hypot(...target.pressAxis) < 1e-6)) throw new Error("MODEL_PRESS_AXIS_INVALID");
+      }
+    }
     for (const rule of [component.permittedTransforms?.rotationY, component.permittedTransforms?.translationX]) {
       if (rule && (typeof rule.min !== "number" || typeof rule.max !== "number" || !Number.isFinite(rule.min) || !Number.isFinite(rule.max) || rule.min > rule.max || typeof rule.step !== "number" || !Number.isFinite(rule.step) || rule.step <= 0 || (rule.snap !== undefined && (typeof rule.snap !== "number" || !Number.isFinite(rule.snap) || rule.snap <= 0)))) throw new Error("MODEL_TRANSFORM_RULE_INVALID");
     }

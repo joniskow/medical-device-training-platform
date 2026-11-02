@@ -1,5 +1,6 @@
 export type SemanticActionType =
   | "select_component"
+  | "activate_target"
   | "transform_component"
   | "open_component"
   | "inspect_component"
@@ -15,6 +16,7 @@ export {previewSimulationPaths,type SimulationPathReport,type SimulationPathCase
 export interface SimulationActionRequirement {
   type: SemanticActionType;
   componentId?: string;
+  targetId?: string;
   value?: string;
   stepId?: string;
   transform?: { rotationY?: number; translationX?: number };
@@ -215,15 +217,17 @@ function actionValid(action: unknown, path: string, modelComponents: Set<string>
     finding(findings, "ACTION_INVALID", path, "An action requirement must be an object.");
     return false;
   }
-  if (!text(action.type) || !["select_component", "transform_component", "open_component", "inspect_component", "complete_step", "acknowledge_fault", "diagnose_fault", "resolve_fault", "request_hint"].includes(action.type)) {
+  if (!text(action.type) || !["select_component", "activate_target", "transform_component", "open_component", "inspect_component", "complete_step", "acknowledge_fault", "diagnose_fault", "resolve_fault", "request_hint"].includes(action.type)) {
     finding(findings, "ACTION_TYPE_INVALID", `${path}.type`, "The action type is not supported.");
   }
   if (action.componentId !== undefined && (!text(action.componentId) || action.componentId.length>200 || !modelComponents.has(action.componentId))) {
     finding(findings, "MODEL_COMPONENT_UNKNOWN", `${path}.componentId`, "The action references a component that is not in the bound model manifest.");
   }
+  if (action.targetId !== undefined && (!text(action.targetId) || action.targetId.length > 200)) finding(findings, "ACTION_TARGET_INVALID", `${path}.targetId`, "Interaction target references must be non-empty strings of at most 200 characters.");
   if (action.value !== undefined && (!text(action.value)||action.value.length>2000)) finding(findings, "ACTION_VALUE_INVALID", `${path}.value`, "Action values must be non-empty strings of at most 2000 characters.");
   if (action.stepId !== undefined && (!text(action.stepId)||action.stepId.length>2000)) finding(findings, "ACTION_STEP_INVALID", `${path}.stepId`, "Action step references must be non-empty strings of at most 2000 characters.");
   if((['select_component','transform_component'].includes(String(action.type))||action.transform!==undefined)&&!text(action.componentId))finding(findings,'ACTION_COMPONENT_REQUIRED',`${path}.componentId`,'Selection and transform actions require a component.');
+  if(action.type==='activate_target'&&(!text(action.componentId)||!text(action.targetId)))finding(findings,'ACTION_TARGET_REQUIRED',path,'Target actions require a component and interaction target.');
   if(action.type==='transform_component'&&(!isRecord(action.transform)||Object.keys(action.transform).length===0))finding(findings,'ACTION_TRANSFORM_REQUIRED',`${path}.transform`,'Transform actions require at least one transform value.');
   if (action.transform !== undefined && (!isRecord(action.transform) || Object.keys(action.transform).length===0 || Object.entries(action.transform).some(([key, value]) => !["rotationY", "translationX"].includes(key) || !number(value)))) finding(findings, "ACTION_TRANSFORM_INVALID", `${path}.transform`, "Action transforms must contain only finite rotationY or translationX numbers.");
   return true;
@@ -406,7 +410,7 @@ export function createInitialSimulationState(definition: SimulationDefinition): 
 
 function actionMatches(expected: SimulationActionRequirement, action: SimulationAction): boolean {
   if (expected.type !== action.type) return false;
-  for (const key of ["componentId", "value", "stepId"] as const) {
+  for (const key of ["componentId", "targetId", "value", "stepId"] as const) {
     if (expected[key] !== undefined && action.payload[key] !== expected[key]) return false;
   }
   if (expected.transform !== undefined) {
@@ -428,7 +432,7 @@ function successor(definition:SimulationDefinition,step:SimulationStepDefinition
 }
 
 function actionFailure(state: SimulationState, action: SimulationAction, expected: SimulationActionRequirement | undefined): SimulationTransition {
-  if(!isRecord(action.payload)||!['select_component','transform_component','open_component','inspect_component','complete_step','acknowledge_fault','diagnose_fault','resolve_fault','request_hint'].includes(action.type))return rejected(state,'ACTION_INVALID','The semantic action is invalid.');
+  if(!isRecord(action.payload)||!['select_component','activate_target','transform_component','open_component','inspect_component','complete_step','acknowledge_fault','diagnose_fault','resolve_fault','request_hint'].includes(action.type))return rejected(state,'ACTION_INVALID','The semantic action is invalid.');
   if (!text(action.actionId) || !text(action.nonce) || !Number.isInteger(action.sequence) || action.sequence < 1) return rejected(state, "ACTION_INVALID", "The action envelope is invalid.");
   if (state.acceptedActionIds.includes(action.actionId) || state.acceptedNonces.includes(action.nonce)) return rejected(state, "ACTION_REPLAYED", "The action has already been accepted.");
   if (action.sequence !== state.nextSequence) return rejected(state, "ACTION_SEQUENCE_INVALID", "The action sequence is stale or out of order.");

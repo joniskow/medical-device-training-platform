@@ -27,6 +27,12 @@ const valid = {
     distortion: { radial: [0.01, -0.002, 0], tangential: [0, 0] },
   },
   render: { opacity: 1, receiveShadows: true, castShadows: true },
+  interaction: {
+    mode: 'INTERACTIVE_OVERLAY',
+    equivalentPath: 'TEXT_KEYBOARD',
+    cues: [{ startSeconds: 1, endSeconds: 5, componentId: 'AIC-C01', targetId: 'AIC-C01-PRIME', allowedActions: ['activate_target'], label: 'Press Prime' }],
+  },
+  production: { pipeline: 'MANUAL', sourceRefs: ['assetv:fixture:aic-priming-demo:v1'], rightsReview: 'APPROVED' },
 };
 
 assert.deepEqual(validateTrainingSceneManifest(valid), valid);
@@ -36,6 +42,8 @@ for (const [name, mutate] of [
   ['rejects an invalid hash', (value) => { value.model.sourceHash = 'not-a-hash'; }],
   ['rejects an impossible principal point', (value) => { value.camera.principalPointPixels = [2000, 540]; }],
   ['rejects a non-positive scale', (value) => { value.model.scale = 0; }],
+  ['rejects an interaction cue outside the video', (value) => { value.interaction.cues[0].endSeconds = 13; }],
+  ['rejects unapproved production rights', (value) => { value.production.rightsReview = 'PENDING'; }],
 ]) {
   const candidate = structuredClone(valid);
   mutate(candidate);

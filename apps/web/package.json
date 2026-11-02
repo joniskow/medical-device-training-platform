@@ -10,6 +10,7 @@
     "@azure/msal-browser": "5.27.0",
     "@babylonjs/core": "9.32.0",
     "@babylonjs/loaders": "9.32.0",
+    "@medical-device/contracts": "workspace:*",
     "@medical-device/model-runtime": "workspace:*",
     "@medical-device/simulation-schema": "workspace:*",
     "qrcode": "1.5.4"

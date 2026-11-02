@@ -12,6 +12,8 @@ The earlier Aurora scene was based on the wrong synthetic fixture and should not
 - Rear gray service cover, vent grids, central pole socket, electrical ports, labels, and cable/tube routing.
 - Upper black accessory platform/case and stainless IV pole/hanger assembly visible in the photos.
 - Distinctive side pivot plates and large black side handles.
+- Upper black accessory case/platform with front window and captive fasteners.
+- Asymmetric lower service face: offset secondary control module, connector strip, gray service cover, and warning label.
 
 ## Accuracy expectations
 
@@ -34,6 +36,22 @@ Blender is the correct authoring tool for this asset: it is much better suited t
 blender -b --python blender\nxstage_system_one_scene.py
 ```
 
-The generated files are `blender/nxstage_system_one.blend` and `blender/nxstage_system_one_preview.png`.
+The generated authoring/render files are `blender/nxstage_system_one.blend` and
+`fixtures/nxstage-system-one/nxstage-system-one-preview.png`. The runtime export is
+`fixtures/nxstage-system-one/nxstage-system-one.glb`, paired with
+`fixtures/nxstage-system-one/model-manifest.json` and provenance metadata. The
+presentation floor, lights, and cameras are excluded from the GLB selection so the
+browser loads only the device geometry.
+
+The scene was exported and rendered with Blender 5.2.3. The generated GLB contains
+232 meshes, 77,730 triangles, 15 materials, and the four named interaction targets;
+the browser check loads that exact hash rather than a separately approximated copy.
+
+The current scene also carries export-friendly interaction metadata on the four
+front controls (`NX-C01-FLOW`, `NX-C01-RATE`, `NX-C01-STOP`, and
+`NX-C01-MUTE`). The metadata describes bounded local press depth; it is an
+authoring contract, not clinical control behavior. Browser-side pointer capture
+keeps a pressed control latched until release or cancellation, including when a
+drag leaves the mesh.
 
 This is a visual training reconstruction, not a clinical, regulatory, service, or manufacturing model.

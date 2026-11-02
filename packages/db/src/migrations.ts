@@ -278,6 +278,43 @@ CREATE TABLE IF NOT EXISTS asset_rights_attestations (
   updated_at timestamptz NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS openmontage_scene_briefs (
+  brief_id text PRIMARY KEY,
+  organization_id text NOT NULL,
+  scene_id text NOT NULL,
+  scene_manifest jsonb NOT NULL,
+  brief jsonb NOT NULL,
+  idempotency_key text NOT NULL,
+  request_hash text NOT NULL,
+  created_by text NOT NULL,
+  created_at timestamptz NOT NULL,
+  UNIQUE (organization_id, idempotency_key)
+);
+
+CREATE INDEX IF NOT EXISTS openmontage_scene_briefs_scene_idx
+  ON openmontage_scene_briefs (organization_id, scene_id, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS openmontage_render_artifacts (
+  artifact_id text PRIMARY KEY,
+  organization_id text NOT NULL,
+  scene_id text NOT NULL,
+  brief_id text NOT NULL REFERENCES openmontage_scene_briefs(brief_id),
+  artifact jsonb NOT NULL,
+  status text NOT NULL CHECK (status IN ('REVIEW_REQUIRED', 'APPROVED')),
+  scene_manifest jsonb,
+  reviewer_id text,
+  review_ref text,
+  request_hash text NOT NULL,
+  idempotency_key text NOT NULL,
+  created_by text NOT NULL,
+  created_at timestamptz NOT NULL,
+  updated_at timestamptz NOT NULL,
+  UNIQUE (organization_id, idempotency_key)
+);
+
+CREATE INDEX IF NOT EXISTS openmontage_render_artifacts_scene_idx
+  ON openmontage_render_artifacts (organization_id, scene_id, updated_at DESC);
+
 CREATE TABLE IF NOT EXISTS knowledge_chunks (
   chunk_id text PRIMARY KEY,
   organization_id text NOT NULL,
@@ -783,7 +820,7 @@ DECLARE
 BEGIN
   FOREACH table_name IN ARRAY ARRAY[
     'role_assignments', 'products', 'product_versions', 'assets', 'asset_versions',
-    'upload_sessions', 'asset_rights_attestations', 'knowledge_chunks', 'model_versions',
+    'upload_sessions', 'asset_rights_attestations', 'openmontage_scene_briefs', 'openmontage_render_artifacts', 'knowledge_chunks', 'model_versions',
     'model_components', 'simulation_definitions', 'simulation_sessions', 'simulation_actions',
     'courses', 'course_versions', 'course_review_decisions', 'release_manifests', 'release_model_bindings', 'modules', 'activities', 'assessments',
     'certification_policies', 'enrollments', 'simulation_attempts', 'progress_events', 'assessment_attempts',

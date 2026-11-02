@@ -60,6 +60,9 @@ importers:
       '@babylonjs/loaders':
         specifier: 9.32.0
         version: 9.32.0(@babylonjs/core@9.32.0)(babylonjs-gltf2interface@9.32.0)
+      '@medical-device/contracts':
+        specifier: workspace:*
+        version: link:../../packages/contracts
       '@medical-device/model-runtime':
         specifier: workspace:*
         version: link:../../packages/model-runtime

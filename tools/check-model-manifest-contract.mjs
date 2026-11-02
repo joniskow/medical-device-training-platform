@@ -64,6 +64,15 @@ const invalidVolume = structuredClone(source);
 invalidVolume.components[0].interactionVolume.max[0] = -1;
 assert.throws(() => validateBrowserModelManifest(invalidVolume), /MODEL_INTERACTION_VOLUME_INVALID/);
 
+const invalidFidelity = structuredClone(source);
+invalidFidelity.fidelity.status = "DIMENSIONALLY_VALIDATED";
+invalidFidelity.fidelity.scaleStatus = "UNMEASURED";
+assert.throws(() => validateBrowserModelManifest(invalidFidelity), /MODEL_FIDELITY_INVALID/, "dimensionally validated models need measured scale and bounded hidden-surface evidence");
+invalidFidelity.fidelity.status = "VISUAL_RECONSTRUCTION";
+assert.doesNotThrow(() => validateBrowserModelManifest(invalidFidelity), "visual reconstructions may retain explicit uncertainty");
+invalidFidelity.fidelity.summary = "";
+assert.throws(() => validateBrowserModelManifest(invalidFidelity), /MODEL_FIDELITY_INVALID/);
+
 const invalidCounts = structuredClone(source);
 invalidCounts.meshCount = -1;
 assert.throws(() => validateBrowserModelManifest(invalidCounts), /MODEL_COUNTS_INVALID/);

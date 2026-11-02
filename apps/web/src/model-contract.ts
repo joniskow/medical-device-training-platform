@@ -11,6 +11,7 @@ export interface ModelComponentManifest {
   aliases: string[];
   interactionCapabilities: string[];
   interactionVolume?: { min: [number, number, number]; max: [number, number, number] };
+  interactionTargets?: Array<{ targetId: string; nodePath: string; displayName: string; pressDepthMeters?: number; pressAxis?: [number, number, number] }>;
   permittedTransforms?: { rotationY?: { min: number; max: number; step: number; snap?: number }; translationX?: { min: number; max: number; step: number; snap?: number } };
 }
 
@@ -38,8 +39,8 @@ export interface ApprovedModelManifest {
 }
 
 export interface ModelSemanticAction {
- type: 'select_component'|'transform_component'|'reset_component'|'request_hint'|'open_component'|'inspect_component'|'complete_step'|'acknowledge_fault'|'diagnose_fault'|'resolve_fault';
- componentId?:string;source?:ModelSelectionSource;transform?:Partial<ComponentTransform>;value?:string;stepId?:string;clientActionId?:string;expectedSequence?:number;
+ type: 'select_component'|'activate_target'|'transform_component'|'reset_component'|'request_hint'|'open_component'|'inspect_component'|'complete_step'|'acknowledge_fault'|'diagnose_fault'|'resolve_fault';
+ componentId?:string;targetId?:string;source?:ModelSelectionSource;transform?:Partial<ComponentTransform>;value?:string;stepId?:string;clientActionId?:string;expectedSequence?:number;
 }
 
 export interface AuthoritativeModelState {
@@ -71,6 +72,7 @@ export interface AuthoritativeActionResult {
 export interface ModelRuntimeState {
   phase: ModelRuntimePhase;
   selectedComponentId?: string;
+  pressedInteractionTargetId?: string;
   componentIds: string[];
   transforms: Record<string, ComponentTransform>;
   authoritative?: AuthoritativeModelState;

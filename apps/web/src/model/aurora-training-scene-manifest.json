@@ -5,22 +5,23 @@
     "assetVersionId": "assetv:fixture:aic-priming-demo:v1",
     "sourceHash": "e2bab1ac38ec047021110fedeec1928827f30a63cdbdb1bb1afbee86e7874b76",
     "contentType": "video/mp4",
-    "width": 1920,
-    "height": 1080,
+    "width": 960,
+    "height": 540,
     "frameRate": 30,
-    "durationSeconds": 6
+    "durationSeconds": 3
   },
   "model": {
     "modelVersionId": "modelv_aurora_training_photogrammetry_demo_v1",
-    "sourceHash": "e7ede3f020c890da59697873e37a334d2cb5165859a1ceef979011461e6198e2",
+    "sourceHash": "6493273784dccac04e51ebf9ea0aa90f34d208eaa6b9ad0b7ff9a387e52eb079",
     "translationMeters": [0, 0, 0],
     "rotationRadians": [0, 0, 0],
     "scale": 1
   },
   "camera": {
     "projection": "perspective",
-    "focalLengthPixels": 1277.2201068211198,
-    "principalPointPixels": [960, 540],
+    "focalLengthPixels": 638.6100534105599,
+    "principalPointPixels": [480, 270],
+    "orbit": { "alpha": -0.8, "beta": 1.121997376282069, "radius": 0.78, "target": [0, 0, 0] },
     "distortion": {
       "radial": [0, 0, 0],
       "tangential": [0, 0]
@@ -30,5 +31,24 @@
     "opacity": 1,
     "receiveShadows": true,
     "castShadows": true
+  },
+  "interaction": {
+    "mode": "INTERACTIVE_OVERLAY",
+    "equivalentPath": "TEXT_KEYBOARD",
+    "cues": [
+      {
+        "startSeconds": 0.5,
+        "endSeconds": 2.5,
+        "componentId": "AIC-C01",
+        "targetId": "AIC-C01-PRIME",
+        "allowedActions": ["activate_target"],
+        "label": "Press Prime"
+      }
+    ]
+  },
+  "production": {
+    "pipeline": "MANUAL",
+    "sourceRefs": ["assetv:fixture:aic-priming-demo:v1"],
+    "rightsReview": "APPROVED"
   }
 }

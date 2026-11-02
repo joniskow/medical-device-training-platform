@@ -16,6 +16,10 @@ import math
 from mathutils import Vector
 
 
+# Reset before module-level materials are created; resetting later would delete
+# the material datablocks that the generated geometry references.
+bpy.ops.wm.read_factory_settings(use_empty=True)
+
 # ---------------------------------------------------------------------------
 # Parameters (meters; the source fixture does not provide physical dimensions)
 # ---------------------------------------------------------------------------
@@ -90,6 +94,24 @@ def bevel(obj, amount=0.08, segments=3):
     mod.segments = segments
     mod.limit_method = 'ANGLE'
     return obj
+
+
+def add_press_action(obj, depth=0.004, axis=(0.0, 1.0, 0.0)):
+    """Author a short press/release clip for Blender review and GLB export.
+
+    The browser still owns semantic actions; this clip is the authoring-side
+    visual affordance and keeps the press motion inspectable in Blender.
+    """
+    origin = obj.location.copy()
+    action = bpy.data.actions.new(f"{obj.name} | press-release")
+    obj.animation_data_create()
+    obj.animation_data.action = action
+    for frame, offset in ((1, 0.0), (3, depth), (7, 0.0)):
+        obj.location = origin + Vector(axis) * offset
+        obj.keyframe_insert(data_path="location", frame=frame, group="Tactile press")
+    obj.location = origin
+    obj["interaction_animation_action"] = action.name
+    return action
 
 
 def cube(name, loc, scale, material, coll, bevel_amount=0.0, rotation=None):
@@ -200,14 +222,22 @@ def build_device():
     cube("Control panel inner plate", (0, front_y - 0.065, 3.52), (3.12, 0.035, 1.16), BLACK, controls, 0.04)
     controls_data = [(-1.02, MINT, "PRIME"), (0.0, YELLOW, "READY"), (1.02, RED, "STOP")]
     for x, material, label in controls_data:
-        cyl(f"{label} button", (x, front_y - 0.13, 3.56), 0.30, 0.14, material, controls, rotation=(math.pi / 2, 0, 0), bevel_amount=0.035)
+        button = cyl(f"{label} button", (x, front_y - 0.13, 3.56), 0.30, 0.14, material, controls, rotation=(math.pi / 2, 0, 0), bevel_amount=0.035)
+        button["interaction_target_id"] = f"AIC-C01-{label}"
+        button["interaction_target_display_name"] = f"{label.title()} button"
+        button["press_depth_meters"] = 0.004
+        button["press_axis"] = (0.0, 1.0, 0.0)
+        button["interaction_action"] = "press"
+        add_press_action(button)
         cyl(f"{label} button bezel", (x, front_y - 0.08, 3.56), 0.36, 0.06, BLACK, controls, rotation=(math.pi / 2, 0, 0), bevel_amount=0.018)
         # The colored cap sits slightly forward of its dark bezel.
-        cyl(f"{label} colored cap", (x, front_y - 0.145, 3.56), 0.255, 0.07, material, controls, rotation=(math.pi / 2, 0, 0), bevel_amount=0.03)
+        cap = cyl(f"{label} colored cap", (x, front_y - 0.145, 3.56), 0.255, 0.07, material, controls, rotation=(math.pi / 2, 0, 0), bevel_amount=0.03)
+        add_press_action(cap)
         text_label(f"{label} label", label, (x, front_y - 0.205, 3.02), 0.15, BODY_EDGE, controls, rotation=(math.pi / 2, 0, 0))
 
     controls["component_id"] = "AIC-C01"
-    controls["interaction"] = "select"
+    controls["interaction"] = "select,press"
+    controls["interaction_note"] = "Buttons use local bounded press feedback; certification actions remain server-authoritative."
 
     # Safety cover: a hinged transparent amber shield over the control area.
     pivot = bpy.data.objects.new("Safety cover hinge pivot", None)
@@ -252,6 +282,11 @@ def build_device():
     root["fixture_id"] = "AIC-001"
     root["provenance"] = "synthetic training fixture"
     root["source_assets"] = "fixtures/reference/images/aic-overview.png; aic-control-panel.png; aic-safety-cover.png; output reconstruction previews"
+    root["fidelity_status"] = "SEMANTIC_FIXTURE"
+    root["fidelity_source_type"] = "PROCEDURAL_SYNTHETIC"
+    root["scale_status"] = "UNMEASURED"
+    root["hidden_surface_uncertainty"] = "UNKNOWN"
+    root["fidelity_summary"] = "Detailed authored training geometry for interaction rehearsal; not a real-device reconstruction or dimensional/manufacturing model."
     return root
 
 
@@ -260,6 +295,19 @@ def build_device():
 # ---------------------------------------------------------------------------
 def look_at(obj, target):
     obj.rotation_euler = (Vector(target) - obj.location).to_track_quat('-Z', 'Y').to_euler()
+
+
+def set_eevee_engine(scene):
+    try:
+        scene.render.engine = 'BLENDER_EEVEE_NEXT'
+    except TypeError:
+        scene.render.engine = 'BLENDER_EEVEE'
+
+
+def ensure_world(scene, name):
+    if scene.world is None:
+        scene.world = bpy.data.worlds.new(name)
+    return scene.world
 
 
 def add_camera(name, loc, target, lens, coll):
@@ -302,21 +350,20 @@ def build_presentation():
 
     scene = bpy.context.scene
     scene.camera = camera
-    scene.render.engine = 'BLENDER_EEVEE_NEXT'
+    set_eevee_engine(scene)
     scene.render.resolution_x = 900
     scene.render.resolution_y = 900
     scene.render.resolution_percentage = 100
     scene.render.image_settings.file_format = 'PNG'
     scene.render.filepath = "//aurora_hero.png"
     scene.render.film_transparent = False
-    scene.world.color = (0.005, 0.012, 0.016)
+    ensure_world(scene, "Aurora Studio World").color = (0.005, 0.012, 0.016)
     scene.view_settings.look = 'AgX - Medium High Contrast'
     scene["scene_purpose"] = "Detailed visual training model derived from synthetic schematic references"
     scene["measurement_status"] = "unscaled; source fixture provides no physical dimensions"
 
 
 def main():
-    bpy.ops.wm.read_factory_settings(use_empty=True)
     build_device()
     build_presentation()
     # Select the top-level collection's objects for a useful first open state.
