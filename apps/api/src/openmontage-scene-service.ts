@@ -5,6 +5,7 @@ import {
   createOpenMontageRenderArtifact,
   createOpenMontageSceneBrief,
   createOpenMontageSceneManifest,
+  composeImageGenerationPrompt,
   type OpenMontageRenderArtifact,
   type OpenMontageSceneBrief,
   type TrainingSceneManifest,
@@ -91,13 +92,14 @@ function rowArtifact(row: any): { artifactId: string; artifact: OpenMontageRende
   return { artifactId: row.artifact_id, artifact: validateOpenMontageRenderArtifact(row.artifact) };
 }
 
-export function createOpenMontageSceneService(pool: Pool, storage: Pick<PrivateObjectStoragePort, 'readObject'>): OpenMontageSceneService {
+export function createOpenMontageSceneService(pool: Pool, storage: Pick<PrivateObjectStoragePort, 'readObject'>, options: { baseInstructions?: string } = {}): OpenMontageSceneService {
   return {
     async createBrief(tenant, input) {
       const scene = validateTrainingSceneManifest(input.sceneManifest);
-      const promptHash = digestPrompt(input.prompt);
+      const prompt = composeImageGenerationPrompt(options.baseInstructions, input.prompt);
+      const promptHash = digestPrompt(prompt);
       if (input.promptHash !== undefined && requireHash(input.promptHash, 'OPENMONTAGE_PROMPT_HASH') !== promptHash) throw new Error('OPENMONTAGE_PROMPT_HASH_MISMATCH');
-      const brief = createOpenMontageSceneBrief(scene, input.prompt, promptHash);
+      const brief = createOpenMontageSceneBrief(scene, prompt, promptHash);
       requireId(input.idempotencyKey, 'IDEMPOTENCY_KEY');
       return withTenantTransaction(pool, tenant, async client => {
         const existing = (await client.query('SELECT brief_id,brief FROM openmontage_scene_briefs WHERE organization_id=$1 AND idempotency_key=$2 FOR SHARE', [tenant.organizationId, input.idempotencyKey])).rows[0];

@@ -12,6 +12,14 @@ Generate a bounded brief from the approved scene rather than asking a video mode
 pnpm openmontage:brief --scene-manifest apps/web/src/model/aurora-training-scene-manifest.json --prompt "Create a calm clinical training-room background with soft neutral light. Keep the device foreground unobstructed and do not add another device." --output output/openmontage-aurora-brief.json
 ```
 
+Every brief automatically receives built-in instructions requiring photorealistic materials, maximum realism, and a first-person viewpoint from the user’s standpoint. Additional deployment-wide image-generation guidance can be applied with either `IMAGE_GENERATION_BASE_INSTRUCTIONS` or `IMAGE_GENERATION_BASE_INSTRUCTIONS_FILE`. Use only one. The scene-specific request is appended after the base guidance, and the combined prompt is what the brief stores and hashes for provenance. The CLI also accepts `--base-instructions` or `--base-instructions-file` for local runs.
+
+For example:
+
+```text
+pnpm openmontage:brief --scene-manifest apps/web/src/model/aurora-training-scene-manifest.json --base-instructions-file config/image-generation-instructions.txt --prompt "Create a calm clinical training-room background." --output output/openmontage-aurora-brief.json
+```
+
 The brief locks the foreground model version, GLB hash, camera composition, duration, frame rate, and output dimensions. It tells the production pipeline to avoid occlusion and device replacement, and it carries source references plus the prompt hash for provenance. OpenMontage can then generate or assemble only the background layer; the approved device remains the browser-rendered foreground and continues to receive semantic interactions.
 
 The handoff has three explicit stages:

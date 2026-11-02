@@ -38,6 +38,7 @@ import {readInvitationConfiguration} from './invitation-configuration.js';
 import { createCourseChangeService } from './course-change-service.js';
 import { createAttemptInvalidationService } from './attempt-invalidation.js';
 import { createOpenMontageSceneService } from './openmontage-scene-service.js';
+import { readImageGenerationBaseInstructions } from './image-generation-configuration.js';
 
 function required(name: string): string {
   const value = process.env[name]?.trim();
@@ -134,7 +135,7 @@ const server = createJobStatusHttpServer({
   memberService:createMemberService(pool),
   invitationService:createInvitationService(pool,readInvitationConfiguration(process.env)),
   attemptInvalidationService: createAttemptInvalidationService(pool),
-  openMontageSceneService: createOpenMontageSceneService(pool, storage),
+  openMontageSceneService: createOpenMontageSceneService(pool, storage, { baseInstructions: readImageGenerationBaseInstructions() }),
   learnerSimulationService: createLearnerSimulationService(pool,modelSessionService),
   credentialService: createPostgresCredentialService(pool),
   publicVerificationService:createPublicVerificationService(pool,{perAddress:Number(process.env.VERIFICATION_PER_ADDRESS_PER_MINUTE??60),perCredential:Number(process.env.VERIFICATION_PER_CREDENTIAL_PER_MINUTE??30)}),

@@ -71,6 +71,7 @@
     "openmontage:ingest": "pnpm --filter @medical-device/contracts build && node tools/ingest-openmontage-render.mjs",
     "openmontage:approve": "pnpm --filter @medical-device/contracts build && node tools/approve-openmontage-render.mjs",
     "openmontage:api:validate": "pnpm --filter @medical-device/contracts build && pnpm --filter @medical-device/db build && pnpm --filter @medical-device/api build && pnpm --filter @medical-device/web build && node tools/check-openmontage-http.mjs",
+    "image-generation:validate": "pnpm --filter @medical-device/contracts build && pnpm --filter @medical-device/api build && node tools/check-image-generation-instructions.mjs",
     "demo:pipeline:validate": "node tools/check-demo-pipeline.mjs",
     "build": "pnpm --recursive --if-present run build",
     "db:validate": "pnpm --filter @medical-device/db build && node tools/check-postgres-job-store.mjs",
