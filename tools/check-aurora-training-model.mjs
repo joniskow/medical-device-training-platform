@@ -4,9 +4,11 @@ import {createHash} from 'node:crypto';
 import {createGlbModelManifest} from '../packages/model-runtime/dist/glb-manifest.js';
 const path='fixtures/aurora-training/',bytes=await readFile(path+'aurora-training.glb'),manifest=JSON.parse(await readFile(path+'model-manifest.json','utf8'));
 const hash=createHash('sha256').update(bytes).digest('hex'),actual=createGlbModelManifest(bytes,hash);
-assert.equal(hash,manifest.sourceHash);assert.equal(actual.normalizationStatus,'CANONICAL');assert.deepEqual(actual.components.map(c=>c.componentId),['AIC-C01','AIC-C03','AIC-C02']);assert(actual.triangleCount>1000);assert(bytes.length<256*1024);
+assert.equal(hash,manifest.sourceHash);assert.equal(actual.normalizationStatus,'CANONICAL');assert.deepEqual(actual.components.map(c=>c.componentId),['AIC-C01','AIC-C04','AIC-C03','AIC-C02']);assert(actual.triangleCount>1000);assert(bytes.length<256*1024);
 assert.equal(manifest.fidelity?.status,'SEMANTIC_FIXTURE');assert.equal(manifest.fidelity?.scaleStatus,'UNMEASURED');assert.equal(manifest.fidelity?.hiddenSurfaceUncertainty,'UNKNOWN');
 const panel=manifest.components.find(c=>c.componentId==='AIC-C01');assert.deepEqual(panel?.interactionCapabilities,['select','press']);assert.deepEqual(panel?.interactionTargets?.map(target=>target.targetId),['AIC-C01-PRIME','AIC-C01-READY','AIC-C01-STOP']);assert(panel?.interactionTargets?.every(target=>target.pressDepthMeters===0.004));
+const dial=manifest.components.find(c=>c.componentId==='AIC-C04');assert.deepEqual(dial?.interactionCapabilities,['select','turn']);assert.equal(dial?.interactionTargets?.[0]?.interactionType,'turn');assert.equal(dial?.interactionTargets?.[0]?.turnSensitivity,.012);assert.equal(dial?.permittedTransforms?.rotationY?.max,Math.PI);
+const cover=manifest.components.find(c=>c.componentId==='AIC-C02');assert.equal(cover?.interactionTargets?.[0]?.interactionType,'open');assert.equal(cover?.interactionTargets?.[0]?.openRotationRadians,Math.PI/2);
 const jsonSize=bytes.readUInt32LE(12),doc=JSON.parse(bytes.subarray(20,20+jsonSize)),binary=bytes.subarray(28+jsonSize);
 assert.equal(doc.images,undefined);assert(doc.buffers.every(b=>!b.uri),'Model must be self contained');
 function values(index){const a=doc.accessors[index],v=doc.bufferViews[a.bufferView],size=a.type==='VEC3'?3:1;return Array.from({length:a.count*size},(_,i)=>a.componentType===5126?binary.readFloatLE((v.byteOffset??0)+(a.byteOffset??0)+i*4):binary.readUInt16LE((v.byteOffset??0)+(a.byteOffset??0)+i*2));}

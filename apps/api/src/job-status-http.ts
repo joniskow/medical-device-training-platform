@@ -33,9 +33,10 @@ import type { createInvitationService } from './invitation-service.js';
 import type { createCourseChangeService } from './course-change-service.js';
 import type { createAttemptInvalidationService } from './attempt-invalidation.js';
 import type { OpenMontageSceneService } from './openmontage-scene-service.js';
+import type { OpenMontageGenerationService } from '@medical-device/contracts';
 
 export interface SourceGroundedDraftService {
-  generate(tenant: TenantContext, request: { sourceArtifactIds: string[]; mediaAssetVersionIds?: string[]; userInstruction?: string; outputSchemaVersion?: string; tokenBudget?: number }): Promise<unknown>;
+  generate(tenant: TenantContext, request: { sourceArtifactIds: string[]; mediaAssetVersionIds?: string[]; userInstruction?: string; outputSchemaVersion?: string; tokenBudget?: number; videoLesson?: boolean }): Promise<unknown>;
 }
 
 export interface AuthenticatedPrincipal {
@@ -104,6 +105,7 @@ export interface JobStatusHttpOptions {
   invitationService?:ReturnType<typeof createInvitationService>;
   attemptInvalidationService?: ReturnType<typeof createAttemptInvalidationService>;
   openMontageSceneService?: OpenMontageSceneService;
+  openMontageGenerationService?: OpenMontageGenerationService & { preview(tenant: TenantContext, generationId: string): Promise<{ bytes: Uint8Array; contentType: string } | null> };
   staticRoot?: string;
 }
 
@@ -190,7 +192,20 @@ const staticFiles: Record<string, { file: string; contentType: string; binary?: 
   "/model/aurora-training-manifest.json": { file: "model/aurora-training-manifest.json", contentType: "application/json; charset=utf-8" },
   "/model/aurora-training-scene-manifest.json": { file: "model/aurora-training-scene-manifest.json", contentType: "application/json; charset=utf-8" },
   "/model/aurora-training.glb": { file: "model/aurora-training.glb", contentType: "model/gltf-binary", binary: true },
+  "/model/nxstage-system-one.glb": { file: "model/nxstage-system-one.glb", contentType: "model/gltf-binary", binary: true },
+  "/model/nxstage-system-one-manifest.json": { file: "model/nxstage-system-one-manifest.json", contentType: "application/json; charset=utf-8" },
+  "/model/nxstage-training-scene-manifest.json": { file: "model/nxstage-training-scene-manifest.json", contentType: "application/json; charset=utf-8" },
+  "/model/nxstage-cinematic-source.glb": { file: "model/nxstage-cinematic-source.glb", contentType: "model/gltf-binary", binary: true },
+  "/model/nxstage-cinematic-source-manifest.json": { file: "model/nxstage-cinematic-source-manifest.json", contentType: "application/json; charset=utf-8" },
+  "/model/nxstage-cinematic-scene-manifest.json": { file: "model/nxstage-cinematic-scene-manifest.json", contentType: "application/json; charset=utf-8" },
   "/demo-assets/aic-priming-demo.mp4": { file: "demo-assets/aic-priming-demo.mp4", contentType: "video/mp4", binary: true },
+  "/demo-assets/nxstage-office-background-openmontage.mp4": { file: "demo-assets/nxstage-office-background-openmontage.mp4", contentType: "video/mp4", binary: true },
+  "/demo-assets/nxstage-office-background-photo-openmontage.mp4": { file: "demo-assets/nxstage-office-background-photo-openmontage.mp4", contentType: "video/mp4", binary: true },
+  "/demo-assets/nxstage-hallway-to-room-background-openmontage.mp4": { file: "demo-assets/nxstage-hallway-to-room-background-openmontage.mp4", contentType: "video/mp4", binary: true },
+  "/demo-assets/nxstage-hallway-to-room-composite.mp4": { file: "demo-assets/nxstage-hallway-to-room-composite.mp4", contentType: "video/mp4", binary: true },
+  "/demo-assets/nxstage-clinical-photo-v2.png": { file: "demo-assets/nxstage-clinical-photo-v2.png", contentType: "image/png", binary: true },
+  "/demo-assets/nxstage-clinical-photo-v4.png": { file: "demo-assets/nxstage-clinical-photo-v4.png", contentType: "image/png", binary: true },
+  "/demo-assets/nxstage-photo-video-composite-review.png": { file: "demo-assets/nxstage-photo-video-composite-review.png", contentType: "image/png", binary: true },
   "/demo-assets/nxstage-system-one-preview.png": { file: "demo-assets/nxstage-system-one-preview.png", contentType: "image/png", binary: true },
   ...Object.fromEntries(Array.from({ length: 8 }, (_, index) => { const id = String(index).padStart(3, "0"); return [`/demo-assets/view-${id}.png`, { file: `demo-assets/view-${id}.png`, contentType: "image/png", binary: true }]; })),
   "/author/assignments": { file: "assignments.html", contentType: "text/html; charset=utf-8" },
@@ -324,7 +339,7 @@ function uploadSessionActionPath(pathname: string, action: "complete" | "cancel"
   return decodeURIComponent(parts[3]);
 }
 
-function openMontagePath(pathname: string): { collection: 'briefs' | 'artifacts' | 'scenes'; id?: string; action?: 'approve' | 'video' } | null {
+function openMontagePath(pathname: string): { collection: 'briefs' | 'artifacts' | 'scenes' | 'generations'; id?: string; action?: 'approve' | 'video' | 'preview' | 'narration' } | null {
   const parts = pathParts(pathname);
   if (!parts || parts[2] !== 'openmontage') return null;
   if (parts.length === 4 && parts[3] === 'briefs') return { collection: 'briefs' };
@@ -340,6 +355,19 @@ function openMontagePath(pathname: string): { collection: 'briefs' | 'artifacts'
   if (parts.length === 5 && parts[3] === 'scenes') {
     const id = decodePathSegment(parts[4]);
     return id ? { collection: 'scenes', id } : null;
+  }
+  if (parts.length === 4 && parts[3] === 'generations') return { collection: 'generations' };
+  if (parts.length === 5 && parts[3] === 'generations') {
+    const id = decodePathSegment(parts[4]);
+    return id ? { collection: 'generations', id } : null;
+  }
+  if (parts.length === 6 && parts[3] === 'generations' && parts[5] === 'preview') {
+    const id = decodePathSegment(parts[4]);
+    return id ? { collection: 'generations', id, action: 'preview' } : null;
+  }
+  if (parts.length === 6 && parts[3] === 'generations' && parts[5] === 'narration') {
+    const id = decodePathSegment(parts[4]);
+    return id ? { collection: 'generations', id, action: 'narration' } : null;
   }
   if (parts.length === 6 && parts[3] === 'scenes' && parts[5] === 'video') {
     const id = decodePathSegment(parts[4]);
@@ -383,7 +411,7 @@ function courseReviewPath(pathname: string, action?: "publish" | "revise" | "sim
   return decodeURIComponent(parts[3]);
 }
 
-function validDraftBody(value: unknown): value is { sourceArtifactIds: string[]; mediaAssetVersionIds?: string[]; userInstruction?: string; outputSchemaVersion?: string; tokenBudget?: number } {
+function validDraftBody(value: unknown): value is { sourceArtifactIds: string[]; mediaAssetVersionIds?: string[]; userInstruction?: string; outputSchemaVersion?: string; tokenBudget?: number; videoLesson?: boolean } {
   return isObject(value)
     && Array.isArray(value.sourceArtifactIds)
     && value.sourceArtifactIds.length > 0
@@ -392,7 +420,8 @@ function validDraftBody(value: unknown): value is { sourceArtifactIds: string[];
     && (value.mediaAssetVersionIds === undefined || (Array.isArray(value.mediaAssetVersionIds) && value.mediaAssetVersionIds.length <= 32 && new Set(value.mediaAssetVersionIds).size === value.mediaAssetVersionIds.length && value.mediaAssetVersionIds.every(id=>typeof id === "string" && /^[A-Za-z0-9._:-]{1,128}$/.test(id))))
     && (value.userInstruction === undefined || (typeof value.userInstruction === "string" && value.userInstruction.length <= 2_000))
     && (value.outputSchemaVersion === undefined || (typeof value.outputSchemaVersion === "string" && /^[A-Za-z0-9._-]{1,64}$/.test(value.outputSchemaVersion)))
-    && (value.tokenBudget === undefined || (typeof value.tokenBudget === "number" && Number.isSafeInteger(value.tokenBudget)));
+    && (value.tokenBudget === undefined || (typeof value.tokenBudget === "number" && Number.isSafeInteger(value.tokenBudget)))
+    && (value.videoLesson === undefined || typeof value.videoLesson === "boolean");
 }
 
 function validRetryBody(value: unknown): value is { reason: string } {
@@ -436,7 +465,7 @@ function validModelSessionStartBody(value: unknown): value is ModelSessionStartR
 
 function validReviewBody(value: unknown): value is { targetType: ReviewTargetType; targetId: string; decision: ReviewDecision; rationale: string; revision: number } {
   if (!isObject(value)) return false;
-  const targetTypes = ["COURSE", "AI_DRAFT", "SOURCE", "MODEL", "SIMULATION", "ASSESSMENT", "POLICY"];
+  const targetTypes = ["COURSE", "AI_DRAFT", "SOURCE", "MODEL", "SIMULATION", "ASSESSMENT", "POLICY", "VIDEO_LESSON"];
   const decisions = ["APPROVE", "REJECT", "NEEDS_CHANGES"];
   return targetTypes.includes(String(value.targetType))
     && typeof value.targetId === "string" && jobIdPattern.test(value.targetId)
@@ -754,6 +783,48 @@ export function createJobStatusHttpServer(options: JobStatusHttpOptions): Server
       }else if(organizations.length>1){writeJson(response,503,errorBody('ORGANIZATION_ROLES_UNAVAILABLE','Scoped authorization is unavailable.'),origin);return;}
       const tenant=tenantFor(request,principal,organizationId);
       if (openMontageRoute) {
+        if (openMontageRoute.collection === 'generations') {
+          if (!options.openMontageGenerationService) { writeJson(response, 503, errorBody('OPENMONTAGE_GENERATION_UNAVAILABLE', 'OpenMontage generation is unavailable.'), origin); return; }
+          const service = options.openMontageGenerationService;
+          const contentType = request.headers['content-type']?.split(';', 1)[0]?.trim().toLowerCase();
+          try {
+            if (!openMontageRoute.id) {
+              if (request.method !== 'POST') { writeJson(response, 405, errorBody('METHOD_NOT_ALLOWED', 'Use POST to create an OpenMontage generation.'), origin); return; }
+              if (!canUpload(principal)) { writeJson(response, 403, errorBody('AUTHOR_ROLE_REQUIRED', 'An author role is required.'), origin); return; }
+              if (contentType !== 'application/json') throw Error('OPENMONTAGE_GENERATION_REQUEST_INVALID');
+              const key = idempotencyKey(request); const raw = await readJsonBody(request, Math.max(maxBodyBytes, 64 * 1024));
+              if (!key || !isObject(raw) || Object.keys(raw).some(field => !['sceneManifest', 'prompt', 'mode', 'narrationText', 'narrationVoice'].includes(field)) || !raw.sceneManifest || typeof raw.prompt !== 'string' || !raw.prompt.trim() || raw.prompt.length > 4000 || (raw.mode !== undefined && !['LOCKED_INTERACTIVE', 'CINEMATIC'].includes(String(raw.mode))) || (raw.narrationText !== undefined && (typeof raw.narrationText !== 'string' || !raw.narrationText.trim() || raw.narrationText.length > 12_000)) || (raw.narrationVoice !== undefined && (typeof raw.narrationVoice !== 'string' || !raw.narrationVoice.trim() || raw.narrationVoice.length > 200))) throw Error('OPENMONTAGE_GENERATION_REQUEST_INVALID');
+              writeJson(response, 202, await service.create(tenant, { sceneManifest: raw.sceneManifest, prompt: raw.prompt, mode: raw.mode as 'LOCKED_INTERACTIVE' | 'CINEMATIC' | undefined, narrationText: raw.narrationText as string | undefined, narrationVoice: raw.narrationVoice as string | undefined, idempotencyKey: key, requestHash: createHash('sha256').update(JSON.stringify(raw)).digest('hex') }), origin);
+              return;
+            }
+            if (openMontageRoute.action === 'narration') {
+              if (request.method !== 'GET') { writeJson(response, 405, errorBody('METHOD_NOT_ALLOWED', 'Use GET to load narration audio.'), origin); return; }
+              if (!canUpload(principal) && !canReview(principal) && !canPublish(principal)) { writeJson(response, 403, errorBody('CONTENT_ROLE_REQUIRED', 'A content role is required.'), origin); return; }
+              const content = await service.narration(tenant, openMontageRoute.id);
+              if (!content) { writeJson(response, 404, errorBody('OPENMONTAGE_NARRATION_NOT_FOUND', 'The narration preview was not found.'), origin); return; }
+              response.setHeader('Content-Type', content.contentType); response.setHeader('Cache-Control', 'no-store'); response.setHeader('X-Content-Type-Options', 'nosniff'); response.setHeader('Content-Length', content.bytes.byteLength); if (origin) response.setHeader('Access-Control-Allow-Origin', origin); response.end(Buffer.from(content.bytes)); return;
+            }
+            if (openMontageRoute.action === 'preview') {
+              if (request.method !== 'GET') { writeJson(response, 405, errorBody('METHOD_NOT_ALLOWED', 'Use GET to load a generation preview.'), origin); return; }
+              if (!canUpload(principal) && !canReview(principal) && !canPublish(principal)) { writeJson(response, 403, errorBody('CONTENT_ROLE_REQUIRED', 'A content role is required.'), origin); return; }
+              const content = await service.preview(tenant, openMontageRoute.id);
+              if (!content) { writeJson(response, 404, errorBody('OPENMONTAGE_GENERATION_PREVIEW_NOT_FOUND', 'The generation preview was not found.'), origin); return; }
+              response.setHeader('Content-Type', content.contentType); response.setHeader('Cache-Control', 'no-store'); response.setHeader('X-Content-Type-Options', 'nosniff'); response.setHeader('Content-Length', content.bytes.byteLength); if (origin) response.setHeader('Access-Control-Allow-Origin', origin); response.end(Buffer.from(content.bytes)); return;
+            }
+            if (request.method !== 'GET') { writeJson(response, 405, errorBody('METHOD_NOT_ALLOWED', 'Use GET to load a generation.'), origin); return; }
+            if (!canUpload(principal) && !canReview(principal) && !canPublish(principal)) { writeJson(response, 403, errorBody('CONTENT_ROLE_REQUIRED', 'A content role is required.'), origin); return; }
+            const result = await service.get(tenant, openMontageRoute.id);
+            writeJson(response, result ? 200 : 404, result ?? errorBody('OPENMONTAGE_GENERATION_NOT_FOUND', 'The generation was not found.'), origin);
+            return;
+          } catch (error) {
+            const code = error instanceof Error ? error.message : 'OPENMONTAGE_GENERATION_FAILED';
+            const notFound = ['OPENMONTAGE_GENERATION_NOT_FOUND', 'OPENMONTAGE_GENERATION_PREVIEW_NOT_FOUND', 'OPENMONTAGE_NARRATION_NOT_FOUND', 'OPENMONTAGE_BRIEF_NOT_FOUND', 'OPENMONTAGE_SOURCE_VIDEO_UNAVAILABLE', 'OPENMONTAGE_MODEL_UNAVAILABLE'].includes(code);
+            const conflict = ['IDEMPOTENCY_KEY_REUSED', 'OPENMONTAGE_GENERATION_CONTENT_MISMATCH', 'OPENMONTAGE_PROMPT_HASH_MISMATCH'].includes(code);
+            const invalid = ['OPENMONTAGE_GENERATION_REQUEST_INVALID', 'OPENMONTAGE_NARRATION_INVALID', 'IDEMPOTENCY_KEY_INVALID', 'SCENE_ID_INVALID', 'BRIEF_ID_INVALID'].includes(code);
+            writeJson(response, notFound ? 404 : conflict ? 409 : invalid || error instanceof SyntaxError ? 422 : 500, errorBody(code, 'The OpenMontage generation could not be completed.'), origin);
+          }
+          return;
+        }
         if (!options.openMontageSceneService) { writeJson(response, 503, errorBody('OPENMONTAGE_UNAVAILABLE', 'OpenMontage scene handoff is unavailable.'), origin); return; }
         const service = options.openMontageSceneService;
         const contentType = request.headers['content-type']?.split(';', 1)[0]?.trim().toLowerCase();

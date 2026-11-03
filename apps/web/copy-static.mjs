@@ -22,8 +22,12 @@ await copyFile(resolve(root, "src/model/optimization-report.json"), resolve(root
 await copyFile(resolve(root, "../../fixtures/reference/model/aurora-infusion-controller.glb"), resolve(root, "dist/model/aurora-infusion-controller.glb"));
 await copyFile(resolve(root, "../../fixtures/aurora-training/aurora-training.glb"), resolve(root, "dist/model/aurora-training.glb"));
 await copyFile(resolve(root, "src/model/aurora-training-manifest.json"), resolve(root, "dist/model/aurora-training-manifest.json"));
-await copyFile(resolve(root, "../../fixtures/nxstage-system-one/nxstage-system-one.glb"), resolve(root, "dist/model/nxstage-system-one.glb"));
-await copyFile(resolve(root, "../../fixtures/nxstage-system-one/model-manifest.json"), resolve(root, "dist/model/nxstage-system-one-manifest.json"));
+await copyFile(resolve(root, "../../fixtures/nxstage-system-one-interactive/nxstage-system-one.glb"), resolve(root, "dist/model/nxstage-system-one.glb"));
+await copyFile(resolve(root, "../../fixtures/nxstage-system-one-interactive/model-manifest.json"), resolve(root, "dist/model/nxstage-system-one-manifest.json"));
+await copyFile(resolve(root, "../../fixtures/nxstage-system-one/nxstage-system-one.glb"), resolve(root, "dist/model/nxstage-cinematic-source.glb"));
+await copyFile(resolve(root, "../../fixtures/nxstage-system-one/nxstage-cinematic-source-manifest.json"), resolve(root, "dist/model/nxstage-cinematic-source-manifest.json"));
+await copyFile(resolve(root, "src/model/nxstage-training-scene-manifest.json"), resolve(root, "dist/model/nxstage-training-scene-manifest.json"));
+await copyFile(resolve(root, "src/model/nxstage-cinematic-scene-manifest.json"), resolve(root, "dist/model/nxstage-cinematic-scene-manifest.json"));
 await copyFile(resolve(root, "src/model/aurora-training-scene-manifest.json"), resolve(root, "dist/model/aurora-training-scene-manifest.json"));
 await copyFile(resolve(root, "src/model/aurora-infusion-controller.mobile.glb"), resolve(root, "dist/model/aurora-infusion-controller.mobile.glb"));
 await copyFile(resolve(root, "src/model/aurora-infusion-controller.reduced.glb"), resolve(root, "dist/model/aurora-infusion-controller.reduced.glb"));
@@ -32,8 +36,14 @@ await mkdir(resolve(root, "dist/demo-assets"), { recursive: true });
 for (const index of Array.from({ length: 8 }, (_, value) => String(value).padStart(3, "0"))) {
   await copyFile(resolve(root, `../../output/reconstruction-capture/images/view-${index}.png`), resolve(root, `dist/demo-assets/view-${index}.png`));
 }
-await copyFile(resolve(root, "../../fixtures/nxstage-system-one/nxstage-system-one-preview.png"), resolve(root, "dist/demo-assets/nxstage-system-one-preview.png"));
+await copyFile(resolve(root, "../../fixtures/nxstage-system-one-interactive/nxstage-system-one-preview.png"), resolve(root, "dist/demo-assets/nxstage-system-one-preview.png"));
+await copyFile(resolve(root, "../../fixtures/nxstage-system-one/nxstage-clinical-photo-v4.png"), resolve(root, "dist/demo-assets/nxstage-clinical-photo-v4.png"));
+await copyFile(resolve(root, "../../fixtures/nxstage-system-one/nxstage-office-background-photo-openmontage.mp4"), resolve(root, "dist/demo-assets/nxstage-office-background-photo-openmontage.mp4"));
+await copyFile(resolve(root, "../../fixtures/nxstage-system-one/nxstage-photo-video-composite-review.png"), resolve(root, "dist/demo-assets/nxstage-photo-video-composite-review.png"));
 await copyFile(resolve(root, "../../fixtures/reference/video/aic-priming-demo.mp4"), resolve(root, "dist/demo-assets/aic-priming-demo.mp4"));
+await copyFile(resolve(root, "../../fixtures/nxstage-system-one/nxstage-office-background-openmontage.mp4"), resolve(root, "dist/demo-assets/nxstage-office-background-openmontage.mp4"));
+await copyFile(resolve(root, "../../fixtures/nxstage-system-one/nxstage-hallway-to-room-background-openmontage.mp4"), resolve(root, "dist/demo-assets/nxstage-hallway-to-room-background-openmontage.mp4"));
+await copyFile(resolve(root, "../../fixtures/nxstage-system-one/nxstage-hallway-to-room-composite.mp4"), resolve(root, "dist/demo-assets/nxstage-hallway-to-room-composite.mp4"));
 
 await copyFile(resolve(root, "src/organization-settings.html"), resolve(root, "dist/organization-settings.html"));
 

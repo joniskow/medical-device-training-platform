@@ -13,8 +13,26 @@ export interface ModelInteractionTarget {
   targetId: string;
   nodePath: string;
   displayName: string;
+  interactionType?: "press" | "turn" | "open";
   pressDepthMeters?: number;
   pressAxis?: [number, number, number];
+  turnSensitivity?: number;
+  turnMinRadians?: number;
+  turnMaxRadians?: number;
+  openRotationRadians?: number;
+  /** Apply rotationY around the component pivot’s local Y axis. */
+  openRotationSpace?: "local";
+  /** Touch movement in CSS pixels allowed before treating a tap as a drag. */
+  touchTapSlopPixels?: number;
+  openLiftMeters?: number;
+  openTranslationMeters?: number;
+  openDragDirection?: [number, number];
+  openVerb?: string;
+  closeVerb?: string;
+  /** Required whenever the target is away from its closed position. */
+  openRequires?: { componentId: string; transform: "rotationY" | "translationX"; value: number; message: string };
+  /** Required whenever the target is away from its fully open position. */
+  closeRequires?: { componentId: string; transform: "rotationY" | "translationX"; value: number; message: string };
 }
 
 export interface ModelFidelityEvidence {
@@ -77,7 +95,7 @@ export class GlbValidationError extends Error {
 type GlbDocument = {
   scene?: number;
   scenes?: Array<{ nodes?: number[] }>;
-  nodes?: Array<{ name?: string; mesh?: number; children?: number[]; extras?: { componentId?: string; interaction?: string; displayName?: string; interactionTargetOwner?: string; interactionTargetId?: string; interactionTargetDisplayName?: string; pressDepthMeters?: number; pressAxis?: [number, number, number] } }>;
+  nodes?: Array<{ name?: string; mesh?: number; children?: number[]; translation?: [number, number, number]; rotation?: [number, number, number, number]; extras?: { componentId?: string; interaction?: string; displayName?: string; interactionTargetOwner?: string; interactionTargetId?: string; interactionTargetDisplayName?: string; interactionType?: "press" | "turn" | "open"; pressDepthMeters?: number; pressAxis?: [number, number, number]; turnSensitivity?: number; turnMinRadians?: number; turnMaxRadians?: number; openRotationRadians?: number; openRotationSpace?: "local"; touchTapSlopPixels?: number; openLiftMeters?: number; openTranslationMeters?: number } }>;
   meshes?: Array<{ primitives?: Array<{ indices?: number }> }>;
   materials?: unknown[];
   images?: Array<{bufferView?:number;uri?:string}>;
@@ -165,8 +183,17 @@ export function createGlbModelManifest(bytes: Uint8Array, sourceHash?: string, t
       targetId: extras.interactionTargetId,
       nodePath: paths.get(nodes.indexOf(node)) ?? node.name ?? extras.interactionTargetId,
       displayName: extras.interactionTargetDisplayName ?? node.name ?? extras.interactionTargetId,
+      ...(extras.interactionType !== undefined ? { interactionType: extras.interactionType } : {}),
       ...(extras.pressDepthMeters !== undefined ? { pressDepthMeters: extras.pressDepthMeters } : {}),
-      ...(extras.pressAxis !== undefined ? { pressAxis: extras.pressAxis } : {})
+      ...(extras.pressAxis !== undefined ? { pressAxis: extras.pressAxis } : {}),
+      ...(extras.turnSensitivity !== undefined ? { turnSensitivity: extras.turnSensitivity } : {}),
+      ...(extras.turnMinRadians !== undefined ? { turnMinRadians: extras.turnMinRadians } : {}),
+      ...(extras.turnMaxRadians !== undefined ? { turnMaxRadians: extras.turnMaxRadians } : {}),
+      ...(extras.openRotationRadians !== undefined ? { openRotationRadians: extras.openRotationRadians } : {}),
+      ...(extras.openRotationSpace !== undefined ? { openRotationSpace: extras.openRotationSpace } : {}),
+      ...(extras.touchTapSlopPixels !== undefined ? { touchTapSlopPixels: extras.touchTapSlopPixels } : {}),
+      ...(extras.openLiftMeters !== undefined ? { openLiftMeters: extras.openLiftMeters } : {}),
+      ...(extras.openTranslationMeters !== undefined ? { openTranslationMeters: extras.openTranslationMeters } : {})
     } satisfies ModelInteractionTarget;
     owner.interactionTargets = [...(owner.interactionTargets ?? []), target];
   }

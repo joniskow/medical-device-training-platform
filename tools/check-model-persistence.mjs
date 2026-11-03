@@ -278,4 +278,27 @@ const malformedStateResume = await sessionService.resume(
   { releaseBindingId: "releasebind:release-1:model-1", modelVersionId: "model-1", nextSequence: 3 }
 );
 assert.equal(malformedStateResume?.status, "version_mismatch", "malformed persisted sequence state must fail closed");
+// A direct session action must obey the same physical dependency as the 3D UI.
+manifest.components.push({ componentId: "HANDLE", nodePath: "Controller/Handle", displayName: "Handle", aliases: [], interactionCapabilities: ["select", "open", "rotate"], permittedTransforms: { rotationY: { min: 0, max: Math.PI / 2, step: Math.PI / 4 } }, interactionTargets: [{ targetId: "HANDLE-LIFT", nodePath: "Controller/Handle", displayName: "Handle", interactionType: "open", openRotationRadians: Math.PI / 2, closeRequires: { componentId: "AIC-C02", transform: "rotationY", value: 0, message: "Close the cover first." } }] });
+manifest.components[0].interactionTargets = [{ targetId: "COVER", nodePath: "Controller/Safety Cover", displayName: "Cover", interactionType: "open", openRotationRadians: Math.PI / 2, openRequires: { componentId: "HANDLE", transform: "rotationY", value: Math.PI / 2, message: "Raise the handle first." } }];
+simulationDefinition.model.componentIds.push("HANDLE");
+simulationDefinition.components.push({ componentId: "HANDLE", initialState: "closed", allowedActions: ["transform_component"] });
+simulationDefinition.initialState.componentStates.HANDLE = "closed";
+state = { releaseBindingId: "releasebind:release-1:model-1", modelVersionId: "model-1", sequence: 0, nextSequence: 1, transforms: { "AIC-C02": { rotationY: 0, translationX: 0 }, HANDLE: { rotationY: 0, translationX: 0 } }, scorePoints: 0, completed: false, allowedActions: ["transform_component"], simulationState: { currentStepId: "open-cover", variables: {}, componentStates: { "AIC-C02": "closed", HANDLE: "closed" }, completedStepIds: [], resolvedFaultIds: [], score: 0, nextSequence: 1, acceptedActionIds: [], acceptedNonces: [] } };
+storedAction = undefined;
+const lockedAction = { clientActionId: "locked-cover", releaseBindingId: "releasebind:release-1:model-1", modelVersionId: "model-1", expectedSequence: 1, type: "transform_component", componentId: "AIC-C02", transform: { rotationY: Math.PI / 2 } };
+const locked = await sessionService.submit({ organizationId: "org-1", actorId: "learner-1", correlationId: "corr-locked" }, "session-1", lockedAction, "locked-cover");
+assert.equal(locked.status, "invalid_precondition", JSON.stringify(locked));
+assert.equal(locked.feedback, "Raise the handle first.");
+assert.equal(state.nextSequence, 1, "A blocked action must not advance the session");
+state.transforms["AIC-C02"].rotationY = Math.PI / 2;
+state.transforms.HANDLE.rotationY = Math.PI / 2;
+const partialHandle = await sessionService.submit({ organizationId: "org-1", actorId: "learner-1", correlationId: "corr-partial-handle" }, "session-1", { ...lockedAction, clientActionId: "partial-handle", componentId: "HANDLE", transform: { rotationY: Math.PI / 4 } }, "partial-handle");
+assert.equal(partialHandle.status, "invalid_precondition", JSON.stringify(partialHandle));
+assert.equal(partialHandle.feedback, "Close the cover first.", "A partly lowered handle must report its own interlock");
+assert.equal(state.nextSequence, 1, "A blocked partial movement must not advance the session");
+state.transforms["AIC-C02"].rotationY = 0;
+state.transforms.HANDLE.rotationY = Math.PI / 2;
+const unlocked = await sessionService.submit({ organizationId: "org-1", actorId: "learner-1", correlationId: "corr-unlocked" }, "session-1", { ...lockedAction, clientActionId: "unlocked-cover" }, "unlocked-cover");
+assert.equal(unlocked.status, "accepted", JSON.stringify(unlocked));
 console.log("Model persistence passed: approved release binding, private URLs, idempotent tenant-scoped session start, bounded transforms, and authoritative sequence advancement are enforced.");

@@ -60,6 +60,14 @@ const validSimulation = validateSimulationDefinition(simulation);
 assert.equal(validSimulation.valid, true);
 assert.deepEqual(validSimulation.findings, []);
 
+const decimalMotion = structuredClone(simulation);
+decimalMotion.steps[0].action = { type: "transform_component", componentId: "AIC-C01", transform: { translationX: 0.6 } };
+decimalMotion.components[0].allowedActions.push("transform_component");
+const decimalAction = value => ({ actionId: "decimal-motion", sequence: 1, nonce: "decimal-motion", type: "transform_component", payload: { componentId: "AIC-C01", transform: { translationX: value } } });
+assert.equal(applySimulationAction(decimalMotion, createInitialSimulationState(decimalMotion), decimalAction(0.1 * 6)).accepted, true, "Equivalent decimal positions must match despite floating-point roundoff");
+assert.equal(applySimulationAction(decimalMotion, createInitialSimulationState(decimalMotion), decimalAction(0.60001)).accepted, false, "A meaningfully different position must not match");
+assert.equal(applySimulationAction(decimalMotion, createInitialSimulationState(decimalMotion), decimalAction("0.6")).accepted, false, "A string must not be accepted as a numeric transform");
+
 // Stable identity must be unambiguous before graph traversal or publication.
 for (const [code, mutate] of [
   ['MODEL_COMPONENT_DUPLICATE', draft => draft.model.componentIds.push(draft.model.componentIds[0])],

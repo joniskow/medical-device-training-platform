@@ -26,10 +26,11 @@ try {
   assert.equal(create.status, 201);
   const complete = await fetch(`http://127.0.0.1:${port}/api/v1/upload-sessions/upload:test/complete`, { method: "POST", headers, body: JSON.stringify({ blobKey: "org_fixture/uploads/test/file.pdf", contentType: "application/pdf", sizeBytes: 10, sha256: "a".repeat(64) }) });
   assert.equal(complete.status, 200);
-  const draft = await fetch(`http://127.0.0.1:${port}/api/v1/course-versions/course:test/generate-draft`, { method: "POST", headers, body: JSON.stringify({ sourceArtifactIds: ["assetv:test"],mediaAssetVersionIds:["media:test"] }) });
+  const draft = await fetch(`http://127.0.0.1:${port}/api/v1/course-versions/course:test/generate-draft`, { method: "POST", headers, body: JSON.stringify({ sourceArtifactIds: ["assetv:test"],mediaAssetVersionIds:["media:test"],videoLesson:true }) });
   assert.equal(draft.status, 200);
   assert.equal((await draft.json()).result.status, "DRAFT");
   assert.deepEqual(draftBody.mediaAssetVersionIds,['media:test']);
+  assert.equal(draftBody.videoLesson, true);
   for(const mediaAssetVersionIds of ['wrong',['bad id'],['same','same'],Array.from({length:33},(_,i)=>'media:'+i)]){
     const response=await fetch(`http://127.0.0.1:${port}/api/v1/course-versions/course:test/generate-draft`,{method:'POST',headers,body:JSON.stringify({sourceArtifactIds:['assetv:test'],mediaAssetVersionIds})});
     assert.equal(response.status,422);

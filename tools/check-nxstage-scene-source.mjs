@@ -17,8 +17,8 @@ for (const marker of [
   'root["interaction_model"]'
 ]) assert.ok(source.includes(marker), `NxStage source is missing ${marker}`);
 
-for (const targetId of ["NX-C01-FLOW", "NX-C01-RATE", "NX-C01-STOP", "NX-C01-MUTE"]) {
-  assert.ok(source.includes(`mark_interaction(${targetId === "NX-C01-FLOW" ? "flow" : targetId === "NX-C01-RATE" ? "rate" : targetId === "NX-C01-STOP" ? "stop" : "mute"}, \"${targetId}\"`), `NxStage source is missing ${targetId}`);
+for (const [variable, targetId] of [["flow", "NX-C01-FLOW"], ["rate", "NX-C01-RATE"], ["stop", "NX-C01-STOP"], ["mute", "NX-C01-MUTE"]]) {
+  assert.ok(source.includes(`mark_interaction(${variable}, \"${targetId}\"`), `NxStage source is missing ${targetId}`);
 }
 
-console.log("NxStage Blender source passed: photo-grounded silhouette details, uncertainty metadata, and four named press targets are present.");
+console.log("NxStage Blender source passed: photo-grounded silhouette details, uncertainty metadata, and five named press targets are present.");

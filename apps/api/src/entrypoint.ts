@@ -38,6 +38,7 @@ import {readInvitationConfiguration} from './invitation-configuration.js';
 import { createCourseChangeService } from './course-change-service.js';
 import { createAttemptInvalidationService } from './attempt-invalidation.js';
 import { createOpenMontageSceneService } from './openmontage-scene-service.js';
+import { createOpenMontageGenerationService } from './openmontage-generation-service.js';
 import { readImageGenerationBaseInstructions } from './image-generation-configuration.js';
 
 function required(name: string): string {
@@ -95,6 +96,8 @@ const draftService = createSourceGroundedDraftService({
   draftStore: courseReviewStore,
   promptVersion: process.env.AI_PROMPT_VERSION?.trim() || "course-draft.v1"
 });
+const openMontageSceneService = createOpenMontageSceneService(pool, storage, { baseInstructions: readImageGenerationBaseInstructions() });
+const openMontageGenerationService = createOpenMontageGenerationService({ jobs: createPostgresJobStore(pool), storage, scenes: openMontageSceneService });
 const server = createJobStatusHttpServer({
   publicCourseCatalogService:createPublicCourseCatalogService(pool),
   candidateLearningAccessStore:createCandidateLearningAccessStore(pool),
@@ -135,7 +138,8 @@ const server = createJobStatusHttpServer({
   memberService:createMemberService(pool),
   invitationService:createInvitationService(pool,readInvitationConfiguration(process.env)),
   attemptInvalidationService: createAttemptInvalidationService(pool),
-  openMontageSceneService: createOpenMontageSceneService(pool, storage, { baseInstructions: readImageGenerationBaseInstructions() }),
+  openMontageSceneService,
+  openMontageGenerationService,
   learnerSimulationService: createLearnerSimulationService(pool,modelSessionService),
   credentialService: createPostgresCredentialService(pool),
   publicVerificationService:createPublicVerificationService(pool,{perAddress:Number(process.env.VERIFICATION_PER_ADDRESS_PER_MINUTE??60),perCredential:Number(process.env.VERIFICATION_PER_CREDENTIAL_PER_MINUTE??30)}),

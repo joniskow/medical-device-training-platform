@@ -8,6 +8,7 @@ import {
   composeImageGenerationPrompt,
   type OpenMontageRenderArtifact,
   type OpenMontageSceneBrief,
+  type OpenMontageIntegrationMode,
   type TrainingSceneManifest,
   validateOpenMontageSceneBrief,
   validateOpenMontageRenderArtifact,
@@ -21,7 +22,7 @@ type SceneSource = { sceneManifest: TrainingSceneManifest; brief: OpenMontageSce
 type VideoInput = OpenMontageRenderArtifact['video'];
 
 export interface OpenMontageSceneService {
-  createBrief(tenant: TenantContext, input: { sceneManifest: unknown; prompt: string; promptHash?: string; idempotencyKey: string; requestHash: string }): Promise<{ briefId: string; brief: OpenMontageSceneBrief }>;
+  createBrief(tenant: TenantContext, input: { sceneManifest: unknown; prompt: string; mode?: OpenMontageIntegrationMode; promptHash?: string; idempotencyKey: string; requestHash: string }): Promise<{ briefId: string; brief: OpenMontageSceneBrief }>;
   ingestRender(tenant: TenantContext, input: { sceneId: string; briefId: string; video: VideoInput; idempotencyKey: string; requestHash: string }): Promise<{ artifactId: string; artifact: OpenMontageRenderArtifact }>;
   getArtifact(tenant: TenantContext, artifactId: string): Promise<{ artifactId: string; artifact: OpenMontageRenderArtifact } | null>;
   approveRender(tenant: TenantContext, input: { artifactId: string; reviewerId: string; reviewRef: string; idempotencyKey: string; requestHash: string }): Promise<{ artifactId: string; artifact: OpenMontageRenderArtifact; sceneManifest: TrainingSceneManifest }>;
@@ -96,10 +97,11 @@ export function createOpenMontageSceneService(pool: Pool, storage: Pick<PrivateO
   return {
     async createBrief(tenant, input) {
       const scene = validateTrainingSceneManifest(input.sceneManifest);
-      const prompt = composeImageGenerationPrompt(options.baseInstructions, input.prompt);
+      const mode = input.mode ?? 'LOCKED_INTERACTIVE';
+      const prompt = composeImageGenerationPrompt(options.baseInstructions, input.prompt, mode);
       const promptHash = digestPrompt(prompt);
       if (input.promptHash !== undefined && requireHash(input.promptHash, 'OPENMONTAGE_PROMPT_HASH') !== promptHash) throw new Error('OPENMONTAGE_PROMPT_HASH_MISMATCH');
-      const brief = createOpenMontageSceneBrief(scene, prompt, promptHash);
+      const brief = createOpenMontageSceneBrief(scene, prompt, promptHash, mode);
       requireId(input.idempotencyKey, 'IDEMPOTENCY_KEY');
       return withTenantTransaction(pool, tenant, async client => {
         const existing = (await client.query('SELECT brief_id,brief FROM openmontage_scene_briefs WHERE organization_id=$1 AND idempotency_key=$2 FOR SHARE', [tenant.organizationId, input.idempotencyKey])).rows[0];

@@ -1,0 +1,251 @@
+{
+  "schemaVersion": "authored-model.v1",
+  "source": "blender/nxstage_system_one_interaction_review.py",
+  "blenderVersion": "5.2.3 LTS",
+  "sha256": "3f39654c055fca75e61c831ffc524b77ca1000ed43b1c411abece80cb1889846",
+  "bytes": 4562268,
+  "reviewStatus": "REVIEW_REQUIRED",
+  "fidelity": {
+    "status": "VISUAL_RECONSTRUCTION",
+    "sourceType": "REFERENCE_IMAGES",
+    "scaleStatus": "UNMEASURED",
+    "hiddenSurfaceUncertainty": "UNKNOWN",
+    "summary": "Photo-grounded hard-surface reconstruction; proportions follow the supplied reference imagery, but no measured scale or hidden-surface evidence was supplied.",
+    "evidenceRefs": [
+      "fixtures/nxstage-system-one-interaction-review/panel-review.png",
+      "fixtures/nxstage-system-one-interaction-review/front-review.png",
+      "fixtures/nxstage-system-one-interaction-review/lower-cabinet-review.png",
+      "fixtures/nxstage-system-one-interaction-review/rear-review.png"
+    ]
+  },
+  "sourcePhotoSet": [
+    {
+      "file": "output/nxstage-system-one-photos/20261020_130814.jpg",
+      "bytes": 2667915,
+      "sha256": "2ca138d71b8c42c803975d2b2755cfcd1ba1eeec6babe70d836abcf7dea40a29"
+    },
+    {
+      "file": "output/nxstage-system-one-photos/20261020_130828.jpg",
+      "bytes": 2640708,
+      "sha256": "629a8f80c581f4717b07ebf80064c858ce642791695592402fd6783b6098e6c0"
+    },
+    {
+      "file": "output/nxstage-system-one-photos/20261020_130843.jpg",
+      "bytes": 2915190,
+      "sha256": "fbb0bfd7c5689d287a2db9eb13959b3c2c71d4c3033bff2a53cc6574ec1d4df0"
+    },
+    {
+      "file": "output/nxstage-system-one-photos/20261020_130845.jpg",
+      "bytes": 2589306,
+      "sha256": "1346a7df4313382a135f81747f6158cd8da013001eb92b9668187175635a260e"
+    },
+    {
+      "file": "output/nxstage-system-one-photos/20261020_130849.jpg",
+      "bytes": 2523365,
+      "sha256": "05c865a37d7c2f6f801548bedeea429926dc0b302945ba69f809a4a898f73287"
+    },
+    {
+      "file": "output/nxstage-system-one-photos/20261020_130908.jpg",
+      "bytes": 2828487,
+      "sha256": "966bd84796149d5ea1a6ef5b638df661c4ec846c6fef6ed611a8f0a43dcc49ba"
+    },
+    {
+      "file": "output/nxstage-system-one-photos/20261020_130936.jpg",
+      "bytes": 2098167,
+      "sha256": "1e709da4b6b0a38a65250c475c5a3c375a10c5015196d24ac86ebbcb95126a1d"
+    },
+    {
+      "file": "output/nxstage-system-one-photos/20261020_130938.jpg",
+      "bytes": 2125280,
+      "sha256": "a16f4611b4ffff733b76882d6ac7f13b084cbadc5b4315d529ef3eb0553f518e"
+    },
+    {
+      "file": "output/nxstage-system-one-photos/20261020_130954.jpg",
+      "bytes": 2611532,
+      "sha256": "322c99f312057672738b25d85da05e18af47b54471f5aa9be75ec862cfd1ba5d"
+    },
+    {
+      "file": "output/nxstage-system-one-photos/20261020_131015.jpg",
+      "bytes": 2541569,
+      "sha256": "edf3c8af8dfa277cd76587576b76f1f448ad00253ad3a908714a078360673c1b"
+    },
+    {
+      "file": "output/nxstage-system-one-photos/20261020_131018.jpg",
+      "bytes": 2679794,
+      "sha256": "6ca919c1115a955c2fd003f47bb7f72e33b3a4e404620a8462c7ba666893c12f"
+    },
+    {
+      "file": "output/nxstage-system-one-photos/20261020_131048.jpg",
+      "bytes": 1766328,
+      "sha256": "0a72bc724009f2d22b5e2553f6148d992d4d3e7e4b2b221909bf938c89536d4d"
+    },
+    {
+      "file": "output/nxstage-system-one-photos/20261020_131051.jpg",
+      "bytes": 1563950,
+      "sha256": "22cfc04d764f042a296f6c2b0e844d2827c88f535ad3fd1bc798b3fd88162d8e"
+    },
+    {
+      "file": "output/nxstage-system-one-photos/20261020_131101.jpg",
+      "bytes": 1796321,
+      "sha256": "dff6db507a2cc6a1903b6f5e2cded9e1458965558595dcf7c9fc1355841999a3"
+    },
+    {
+      "file": "output/nxstage-system-one-photos/20261020_131233.jpg",
+      "bytes": 2052443,
+      "sha256": "7a6ceaf7fb0253053310700deb04547401b73e607961acb1c1d338f5e0fcc78a"
+    },
+    {
+      "file": "output/nxstage-system-one-photos/20261020_131241.jpg",
+      "bytes": 2529895,
+      "sha256": "3284b5ab41979ca67cca0781cb8de0744a0a0715faa4e516406a4ec76e06f87c"
+    },
+    {
+      "file": "output/nxstage-system-one-photos/20261020_131259.jpg",
+      "bytes": 2274016,
+      "sha256": "5f390091aa02b1f0deac4436a05950fc5b776f4713f1e00934c0724b62b28a67"
+    },
+    {
+      "file": "output/nxstage-system-one-photos/20261020_131328.jpg",
+      "bytes": 1934802,
+      "sha256": "8ba46dd585a1b41fa6ea300b085ce6996336d78a82e095e9a3300d70cdf69630"
+    },
+    {
+      "file": "output/nxstage-system-one-photos/20261020_131336.jpg",
+      "bytes": 2531714,
+      "sha256": "0c8646602be1a8a86c333b6c1bf86f26b47f749a36b8f44eda7f388df4cbce18"
+    },
+    {
+      "file": "output/nxstage-system-one-photos/20261020_131352.jpg",
+      "bytes": 1468647,
+      "sha256": "40047390d9c784b4951a83b71272eceb57a1cdd36c41bff832801296546c776f"
+    }
+  ],
+  "interactionTargets": [
+    {
+      "targetId": "NX-C01-ADD-FLUID",
+      "nodePath": "Cycler door travel axis/Cycler door assembly/System One control fascia/Photographed Add Fluid",
+      "displayName": "Add Fluid",
+      "pressDepthMeters": 0.004,
+      "pressAxis": [
+        0,
+        0,
+        -1
+      ]
+    },
+    {
+      "targetId": "NX-C01-VOLUME-TOGGLE",
+      "nodePath": "Cycler door travel axis/Cycler door assembly/System One control fascia/Photographed Volume Toggle",
+      "displayName": "Volume Toggle",
+      "pressDepthMeters": 0.004,
+      "pressAxis": [
+        0,
+        0,
+        -1
+      ]
+    },
+    {
+      "targetId": "NX-C01-TREATMENT",
+      "nodePath": "Cycler door travel axis/Cycler door assembly/System One control fascia/Photographed Treatment",
+      "displayName": "Treatment",
+      "pressDepthMeters": 0.004,
+      "pressAxis": [
+        0,
+        0,
+        -1
+      ]
+    },
+    {
+      "targetId": "NX-C01-ROW1-DOWN",
+      "nodePath": "Cycler door travel axis/Cycler door assembly/System One control fascia/Photographed Dialysate decrease",
+      "displayName": "Dialysate decrease",
+      "pressDepthMeters": 0.004,
+      "pressAxis": [
+        0,
+        0,
+        -1
+      ]
+    },
+    {
+      "targetId": "NX-C01-ROW1-UP",
+      "nodePath": "Cycler door travel axis/Cycler door assembly/System One control fascia/Photographed Dialysate increase",
+      "displayName": "Dialysate increase",
+      "pressDepthMeters": 0.004,
+      "pressAxis": [
+        0,
+        0,
+        -1
+      ]
+    },
+    {
+      "targetId": "NX-C01-ROW2-DOWN",
+      "nodePath": "Cycler door travel axis/Cycler door assembly/System One control fascia/Photographed Ultrafiltration decrease",
+      "displayName": "Ultrafiltration decrease",
+      "pressDepthMeters": 0.004,
+      "pressAxis": [
+        0,
+        0,
+        -1
+      ]
+    },
+    {
+      "targetId": "NX-C01-ROW2-UP",
+      "nodePath": "Cycler door travel axis/Cycler door assembly/System One control fascia/Photographed Ultrafiltration increase",
+      "displayName": "Ultrafiltration increase",
+      "pressDepthMeters": 0.004,
+      "pressAxis": [
+        0,
+        0,
+        -1
+      ]
+    },
+    {
+      "targetId": "NX-C01-ROW3-DOWN",
+      "nodePath": "Cycler door travel axis/Cycler door assembly/System One control fascia/Photographed Blood flow decrease",
+      "displayName": "Blood flow decrease",
+      "pressDepthMeters": 0.004,
+      "pressAxis": [
+        0,
+        0,
+        -1
+      ]
+    },
+    {
+      "targetId": "NX-C01-ROW3-UP",
+      "nodePath": "Cycler door travel axis/Cycler door assembly/System One control fascia/Photographed Blood flow increase",
+      "displayName": "Blood flow increase",
+      "pressDepthMeters": 0.004,
+      "pressAxis": [
+        0,
+        0,
+        -1
+      ]
+    },
+    {
+      "targetId": "NX-C01-STOP",
+      "nodePath": "Cycler door travel axis/Cycler door assembly/System One control fascia/Photographed Stop control",
+      "displayName": "Stop control",
+      "pressDepthMeters": 0.006,
+      "pressAxis": [
+        0,
+        0,
+        -1
+      ]
+    },
+    {
+      "targetId": "NX-C01-MUTE",
+      "nodePath": "Cycler door travel axis/Cycler door assembly/System One control fascia/Photographed Mute control",
+      "displayName": "Mute control",
+      "pressDepthMeters": 0.004,
+      "pressAxis": [
+        0,
+        0,
+        -1
+      ]
+    }
+  ],
+  "limitations": [
+    "No measured scale reference",
+    "Hidden geometry remains unverified",
+    "Not a clinical, regulatory, service, or manufacturing model"
+  ]
+}

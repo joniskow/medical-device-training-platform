@@ -416,7 +416,12 @@ function actionMatches(expected: SimulationActionRequirement, action: Simulation
   if (expected.transform !== undefined) {
     const actual = action.payload.transform;
     if (!isRecord(actual)) return false;
-    for (const key of ["rotationY", "translationX"] as const) if (expected.transform[key] !== undefined && actual[key] !== expected.transform[key]) return false;
+    for (const key of ["rotationY", "translationX"] as const) {
+      const expectedValue = expected.transform[key];
+      if (expectedValue === undefined) continue;
+      const actualValue = actual[key];
+      if (typeof actualValue !== "number" || !Number.isFinite(actualValue) || Math.abs(actualValue - expectedValue) > Number.EPSILON * 16 * Math.max(1, Math.abs(actualValue), Math.abs(expectedValue))) return false;
+    }
   }
   return true;
 }
@@ -555,6 +560,7 @@ export function validateCourseForPublication(input: PublicationValidationInput):
   let hasInteractive = false;
   let hasSimulation = false;
   let hasAssessment = false;
+  const activityIds = new Set<string>();
   const assessmentIds = new Set<string>();
   for (const [moduleIndex, module] of modules.entries()) {
     const activities = isRecord(module) && Array.isArray(module.activities) ? module.activities : [];
@@ -565,6 +571,7 @@ export function validateCourseForPublication(input: PublicationValidationInput):
         finding(findings, "ACTIVITY_TYPE_INVALID", `${path}.type`, "The activity type is not in the supported catalog.");
         continue;
       }
+      if (text(activity.activityId)) activityIds.add(activity.activityId);
       if (["3d_viewer", "hotspot", "guided_procedure", "manipulation", "assembly", "fault_troubleshooting", "simulation", "simulation_outcome"].includes(activity.type)) hasInteractive = true;
       if(['image','video'].includes(activity.type)){
         for(const issue of validateMediaActivity(activity,input.approvedMediaAssets??[]).findings)finding(findings,issue.code,`${path}.media`,issue.message);
@@ -593,6 +600,27 @@ export function validateCourseForPublication(input: PublicationValidationInput):
     }
   }
 
+  const approvedReviews = new Set(input.approvedReviewTargets ?? []);
+  const videoLessons = Array.isArray(course.videoLessons) ? course.videoLessons : [];
+  const approvedMedia = new Map((input.approvedMediaAssets ?? []).map(asset => [asset.assetVersionId, asset]));
+  for (const [lessonIndex, lesson] of videoLessons.entries()) {
+    const path = `course.videoLessons[${lessonIndex}]`;
+    const report = validateVideoLesson(lesson);
+    for (const issue of report.findings) finding(findings, issue.code, `${path}.${issue.path}`, issue.message);
+    if (isRecord(lesson) && text(lesson.lessonId) && !approvedReviews.has(`VIDEO_LESSON:${lesson.lessonId}`)) finding(findings, "REVIEW_REQUIRED", path, "The video lesson requires reviewer approval before publication.");
+    if (isRecord(lesson)) for (const [sceneIndex, scene] of (Array.isArray(lesson.scenes) ? lesson.scenes : []).entries()) {
+      const scenePath = `${path}.scenes[${sceneIndex}]`;
+      for (const citation of Array.isArray(scene.citations) ? scene.citations : []) if (isRecord(citation) && text(citation.assetVersionId) && !approvedSources.has(citation.assetVersionId)) finding(findings, "CITATION_SOURCE_NOT_APPROVED", `${scenePath}.citations`, "Video scene citations must be approved sources.");
+      const visual = isRecord(scene) && isRecord(scene.visual) ? scene.visual : {};
+      if (text(scene.checkpointActivityId) && !activityIds.has(scene.checkpointActivityId)) finding(findings, "VIDEO_LESSON_CHECKPOINT_INVALID", `${scenePath}.checkpointActivityId`, "Video lesson checkpoints must link to activities in the same course.");
+      if (text(visual.assetVersionId)) {
+        const asset = approvedMedia.get(visual.assetVersionId);
+        const expected = visual.kind === "source_image" ? "image" : "video";
+        if (!asset || asset.sourceType !== expected) finding(findings, "VIDEO_LESSON_MEDIA_INVALID", `${scenePath}.visual.assetVersionId`, "Video lesson visuals must bind an approved media asset of the matching type.");
+      }
+    }
+  }
+
   const model = isRecord(course.model) ? course.model : {};
   const modelComponentIds = hasInteractive ? validateModelManifest(model.manifest, "course.model.manifest", findings) : new Set<string>();
   for(const [mi,module] of modules.entries())for(const [ai,activity] of (isRecord(module)&&Array.isArray(module.activities)?module.activities:[]).entries()){
@@ -603,7 +631,6 @@ export function validateCourseForPublication(input: PublicationValidationInput):
   if (hasInteractive && !text(model.modelVersionId)) finding(findings, "MODEL_BINDING_REQUIRED", "course.model.modelVersionId", "Interactive activities must bind to an approved model version.");
   if (hasInteractive && !text(model.manifestHash)) finding(findings, "MODEL_HASH_REQUIRED", "course.model.manifestHash", "Interactive activities must bind to an immutable model manifest hash.");
 
-  const approvedReviews = new Set(input.approvedReviewTargets ?? []);
   if (hasInteractive && text(model.modelVersionId) && !approvedReviews.has(`MODEL:${model.modelVersionId}`)) finding(findings, "REVIEW_REQUIRED", "course.model", "The bound model has not been approved by a reviewer.");
 
   const simulation = isRecord(course.simulation) ? course.simulation : {};
@@ -673,5 +700,7 @@ export * from './media.js';
 import {validateMediaActivity} from './media.js';
 export * from './model-exploration.js';
 import {validateModelExploration} from './model-exploration.js';
+export * from './video-lesson.js';
+import {validateVideoLesson} from './video-lesson.js';
 
 export {remapCourseComponents,type ComponentMapping} from "./component-remapping.js";

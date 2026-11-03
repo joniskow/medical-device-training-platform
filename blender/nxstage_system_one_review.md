@@ -38,20 +38,24 @@ blender -b --python blender\nxstage_system_one_scene.py
 
 The generated authoring/render files are `blender/nxstage_system_one.blend` and
 `fixtures/nxstage-system-one/nxstage-system-one-preview.png`. The runtime export is
-`fixtures/nxstage-system-one/nxstage-system-one.glb`, paired with
-`fixtures/nxstage-system-one/model-manifest.json` and provenance metadata. The
+`fixtures/nxstage-system-one-interactive/nxstage-system-one.glb`, paired with
+`fixtures/nxstage-system-one-interactive/model-manifest.json` and provenance metadata. The
 presentation floor, lights, and cameras are excluded from the GLB selection so the
 browser loads only the device geometry.
 
-The scene was exported and rendered with Blender 5.2.3. The generated GLB contains
-232 meshes, 77,730 triangles, 15 materials, and the four named interaction targets;
-the browser check loads that exact hash rather than a separately approximated copy.
+The scene was exported and rendered with Blender 5.2.3. The manifest records the
+geometry counts and source hash; the browser check loads those exact model bytes.
 
-The current scene also carries export-friendly interaction metadata on the four
-front controls (`NX-C01-FLOW`, `NX-C01-RATE`, `NX-C01-STOP`, and
-`NX-C01-MUTE`). The metadata describes bounded local press depth; it is an
+The current scene carries export-friendly interaction metadata for Flow, L/hr,
+Stop, Mute and the six adjustment areas. The surrounding pale icon fields are
+visual-only. The metadata describes bounded local press depth; it is an
 authoring contract, not clinical control behavior. Browser-side pointer capture
 keeps a pressed control latched until release or cancellation, including when a
 drag leaves the mesh.
+
+The visible control inks use the supplied frontal view for restrained hue and
+matte-laminate tuning while keeping the authored press meshes and stable target
+IDs. This is visual reconstruction evidence, not a calibrated colorimetric or
+manufacturing claim.
 
 This is a visual training reconstruction, not a clinical, regulatory, service, or manufacturing model.

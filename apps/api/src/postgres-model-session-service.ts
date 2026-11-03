@@ -3,7 +3,7 @@ import { createHash, randomUUID } from "node:crypto";
 import type { Pool, PoolClient } from "pg";
 import type { TenantContext } from "@medical-device/contracts";
 import { withTenantTransaction } from "@medical-device/db";
-import { applyPermittedTransform, validateAuthoritativeModelState, validateBrowserModelManifest, type AuthoritativeModelState, type ModelComponentManifest } from "@medical-device/model-runtime";
+import { applyPermittedTransform, interactionStateViolation, validateAuthoritativeModelState, validateBrowserModelManifest, type AuthoritativeModelState, type ModelComponentManifest } from "@medical-device/model-runtime";
 import { applySimulationAction, createInitialSimulationState, validateSimulationDefinition, type SimulationAction, type SimulationDefinition, type SimulationState } from "@medical-device/simulation-schema";
 import { sameModelSessionAction, type ModelSessionActionRequest, type ModelSessionActionResult, type ModelSessionService, type ModelSessionStartRequest, type ModelSessionStartResult } from "./model-session-service.js";
 import { issueCredentialInTransaction } from "./credential-service.js";
@@ -477,6 +477,11 @@ export function createPostgresModelSessionService(input: { pool: Pool }): ModelS
         } else if(action.type === "request_hint") {
           const currentStep = simulationState.currentStepId ? typedDefinition.steps.find((step) => step.stepId === simulationState.currentStepId) : undefined;
           feedback = currentStep?.hints?.[0] ?? "Hint requested. Continue with the next permitted procedure action.";
+        }
+        if (action.type === "transform_component" || action.type === "reset_component" || action.transform) {
+          const manifest = validateBrowserModelManifest(modelRow.rows[0].manifest);
+          const violation = interactionStateViolation(manifest, next.transforms, componentId);
+          if (violation) return result("invalid_precondition", row.next_sequence, violation, model, { clientActionId: action.clientActionId });
         }
         let scoreDelta = 0;
         const currentStep = simulationState.currentStepId ? typedDefinition.steps.find((step) => step.stepId === simulationState.currentStepId) : undefined;

@@ -1,9 +1,7 @@
 {
   "schemaVersion": "model-manifest.v1",
   "format": "glb",
-  "modelVersionId": "modelv_aurora_training_photogrammetry_demo_v1",
-  "releaseBindingId": "releasebind_aurora_training_photogrammetry_demo_v1",
-  "sourceHash": "6493273784dccac04e51ebf9ea0aa90f34d208eaa6b9ad0b7ff9a387e52eb079",
+  "sourceHash": "60d3ba12354fca86033d1b6d199b0e626f9a42de8095cfed2acd8be7cf8209bf",
   "unitSystem": "meter",
   "scaleMeters": 1,
   "upAxis": "Y",
@@ -11,11 +9,11 @@
   "origin": "bounding-box-center",
   "forwardAxis": "-Z",
   "normalizationStatus": "CANONICAL",
-  "sceneNodeCount": 56,
-  "meshCount": 52,
+  "sceneNodeCount": 61,
+  "meshCount": 56,
   "materialCount": 10,
   "textureCount": 0,
-  "triangleCount": 1228,
+  "triangleCount": 1392,
   "materials": [
     {
       "materialId": "material-0",
@@ -59,6 +57,18 @@
     }
   ],
   "textures": [],
+  "fidelity": {
+    "status": "SEMANTIC_FIXTURE",
+    "sourceType": "PROCEDURAL_SYNTHETIC",
+    "scaleStatus": "UNMEASURED",
+    "hiddenSurfaceUncertainty": "UNKNOWN",
+    "summary": "Detailed authored training geometry for interaction rehearsal; not a real-device reconstruction or dimensional/manufacturing model.",
+    "evidenceRefs": [
+      "fixtures/reference/images/aic-overview.png",
+      "fixtures/reference/images/aic-control-panel.png",
+      "fixtures/reference/images/aic-safety-cover.png"
+    ]
+  },
   "components": [
     {
       "componentId": "AIC-C01",
@@ -75,23 +85,64 @@
           "nodePath": "Aurora Training Controller/Control Panel/Prime key",
           "displayName": "Prime button",
           "pressDepthMeters": 0.004,
-          "pressAxis": [0, 0, 1]
+          "pressAxis": [
+            0,
+            0,
+            1
+          ]
         },
         {
           "targetId": "AIC-C01-READY",
           "nodePath": "Aurora Training Controller/Control Panel/Ready key",
           "displayName": "Ready button",
           "pressDepthMeters": 0.004,
-          "pressAxis": [0, 0, 1]
+          "pressAxis": [
+            0,
+            0,
+            1
+          ]
         },
         {
           "targetId": "AIC-C01-STOP",
           "nodePath": "Aurora Training Controller/Control Panel/Stop key",
           "displayName": "Stop button",
           "pressDepthMeters": 0.004,
-          "pressAxis": [0, 0, 1]
+          "pressAxis": [
+            0,
+            0,
+            1
+          ]
         }
       ]
+    },
+    {
+      "componentId": "AIC-C04",
+      "nodePath": "Aurora Training Controller/Flow Dial",
+      "displayName": "Flow Dial",
+      "aliases": [],
+      "interactionCapabilities": [
+        "select",
+        "turn"
+      ],
+      "interactionTargets": [
+        {
+          "targetId": "AIC-C04-FLOW-DIAL",
+          "nodePath": "Aurora Training Controller/Flow Dial/Flow dial knob",
+          "displayName": "Flow dial",
+          "interactionType": "turn",
+          "turnSensitivity": 0.012,
+          "turnMinRadians": -3.141592653589793,
+          "turnMaxRadians": 3.141592653589793
+        }
+      ],
+      "permittedTransforms": {
+        "rotationY": {
+          "min": -3.141592653589793,
+          "max": 3.141592653589793,
+          "step": 0.17453292519943295,
+          "snap": 0.17453292519943295
+        }
+      }
     },
     {
       "componentId": "AIC-C03",
@@ -109,7 +160,17 @@
       "aliases": [],
       "interactionCapabilities": [
         "select",
-        "rotate"
+        "rotate",
+        "open"
+      ],
+      "interactionTargets": [
+        {
+          "targetId": "AIC-C02-LATCH",
+          "nodePath": "Aurora Training Controller/Safety Cover/Door latch",
+          "displayName": "Safety cover latch",
+          "interactionType": "open",
+          "openRotationRadians": 1.5707963267948966
+        }
       ],
       "permittedTransforms": {
         "rotationY": {
@@ -121,6 +182,8 @@
       }
     }
   ],
+  "modelVersionId": "modelv_aurora_training_photogrammetry_demo_v1",
+  "releaseBindingId": "releasebind_aurora_training_photogrammetry_demo_v1",
   "performanceBudget": {
     "minimumFps": 30,
     "interactiveWithinMs": 5000,

@@ -1,10 +1,11 @@
 {
   "schemaVersion": "authored-model.v1",
   "source": "tools/build-aurora-training-model.mjs",
-  "sha256": "6493273784dccac04e51ebf9ea0aa90f34d208eaa6b9ad0b7ff9a387e52eb079",
-  "bytes": 89048,
+  "sha256": "60d3ba12354fca86033d1b6d199b0e626f9a42de8095cfed2acd8be7cf8209bf",
+  "bytes": 98196,
   "componentIds": [
     "AIC-C01",
+    "AIC-C04",
     "AIC-C03",
     "AIC-C02"
   ],
@@ -17,25 +18,12 @@
   },
   "provenance": "procedural-synthetic",
   "reviewStatus": "REVIEW_REQUIRED",
-  "fidelity": {
-    "status": "SEMANTIC_FIXTURE",
-    "scaleStatus": "UNMEASURED",
-    "hiddenSurfaceUncertainty": "UNKNOWN",
-    "summary": "Detailed authored training geometry for interaction rehearsal; not a real-device reconstruction or dimensional/manufacturing model."
-  },
   "limitations": [
     "Fictional training device, not a reproduction of commercial equipment",
     "Authored geometry; not reconstructed from image/video",
     "Movement limits must be configured and reviewed on import"
   ],
   "recommendedInteractions": {
-    "AIC-C01": {
-      "targets": [
-        { "targetId": "AIC-C01-PRIME", "pressDepthMeters": 0.004 },
-        { "targetId": "AIC-C01-READY", "pressDepthMeters": 0.004 },
-        { "targetId": "AIC-C01-STOP", "pressDepthMeters": 0.004 }
-      ]
-    },
     "AIC-C02": {
       "rotationY": {
         "min": 0,

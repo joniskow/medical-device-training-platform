@@ -27,12 +27,22 @@ export interface TrainingSceneCamera {
     radial: [number, number, number];
     tangential: [number, number];
   };
+  exposure?: number;
+  whiteBalanceKelvin?: number;
+  lightDirection?: [number, number, number];
 }
 
 export interface TrainingSceneRenderPolicy {
   opacity: number;
   receiveShadows: boolean;
   castShadows: boolean;
+  contactShadow?: {
+    enabled: boolean;
+    opacity: number;
+    softness: number;
+    offsetMeters: number;
+    direction?: [number, number];
+  };
 }
 
 export interface TrainingSceneInteractionCue {
@@ -57,6 +67,9 @@ export interface TrainingSceneProduction {
   rightsReview: 'APPROVED';
   reviewerId?: string;
   reviewRef?: string;
+  integrationMode?: 'LOCKED_INTERACTIVE' | 'CINEMATIC';
+  sourceRevision?: string;
+  modelRevision?: string;
 }
 
 export interface TrainingSceneManifest {
@@ -104,7 +117,7 @@ function parseModel(value: unknown): TrainingSceneModel {
 }
 
 function parseCamera(value: unknown): TrainingSceneCamera {
-  const camera = record(value); exactKeys(camera, ['projection', 'focalLengthPixels', 'principalPointPixels', 'orbit', 'distortion']);
+  const camera = record(value); exactKeys(camera, ['projection', 'focalLengthPixels', 'principalPointPixels', 'orbit', 'distortion', 'exposure', 'whiteBalanceKelvin', 'lightDirection']);
   if (camera.projection !== 'perspective') fail('PROJECTION_INVALID');
   const principal = vector2(camera.principalPointPixels, 0, 1_000_000);
   const orbit = camera.orbit === undefined ? undefined : (() => {
@@ -115,12 +128,21 @@ function parseCamera(value: unknown): TrainingSceneCamera {
     const item = record(camera.distortion); exactKeys(item, ['radial', 'tangential']);
     return { radial: vector(item.radial, -100, 100), tangential: vector2(item.tangential, -100, 100) };
   })();
-  return { projection: 'perspective', focalLengthPixels: finite(camera.focalLengthPixels, 1, 1_000_000), principalPointPixels: principal, ...(orbit ? { orbit } : {}), ...(distortion ? { distortion } : {}) };
+  const exposure = camera.exposure === undefined ? undefined : finite(camera.exposure, -32, 32);
+  const whiteBalanceKelvin = camera.whiteBalanceKelvin === undefined ? undefined : finite(camera.whiteBalanceKelvin, 1000, 20000);
+  const lightDirection = camera.lightDirection === undefined ? undefined : vector(camera.lightDirection, -1, 1);
+  return { projection: 'perspective', focalLengthPixels: finite(camera.focalLengthPixels, 1, 1_000_000), principalPointPixels: principal, ...(orbit ? { orbit } : {}), ...(distortion ? { distortion } : {}), ...(exposure === undefined ? {} : { exposure }), ...(whiteBalanceKelvin === undefined ? {} : { whiteBalanceKelvin }), ...(lightDirection ? { lightDirection } : {}) };
 }
 
 function parseRender(value: unknown): TrainingSceneRenderPolicy {
-  const render = record(value); exactKeys(render, ['opacity', 'receiveShadows', 'castShadows']);
-  return { opacity: finite(render.opacity, 0, 1), receiveShadows: boolean(render.receiveShadows), castShadows: boolean(render.castShadows) };
+  const render = record(value); exactKeys(render, ['opacity', 'receiveShadows', 'castShadows', 'contactShadow']);
+  const contactShadow = render.contactShadow === undefined ? undefined : (() => {
+    const item = record(render.contactShadow); exactKeys(item, ['enabled', 'opacity', 'softness', 'offsetMeters', 'direction']);
+    const direction = item.direction === undefined ? undefined : vector2(item.direction, -1, 1);
+    if (direction && Math.hypot(direction[0], direction[1]) < 0.001) fail('CONTACT_SHADOW_DIRECTION_INVALID');
+    return { enabled: boolean(item.enabled), opacity: finite(item.opacity, 0, 1), softness: finite(item.softness, 0, 1), offsetMeters: finite(item.offsetMeters, -10, 10), ...(direction ? { direction } : {}) };
+  })();
+  return { opacity: finite(render.opacity, 0, 1), receiveShadows: boolean(render.receiveShadows), castShadows: boolean(render.castShadows), ...(contactShadow ? { contactShadow } : {}) };
 }
 
 function parseInteraction(value: unknown, durationSeconds: number): TrainingSceneInteraction {
@@ -142,7 +164,7 @@ function parseInteraction(value: unknown, durationSeconds: number): TrainingScen
 }
 
 function parseProduction(value: unknown): TrainingSceneProduction {
-  const production = record(value); exactKeys(production, ['pipeline', 'sourceRefs', 'promptHash', 'rightsReview', 'reviewerId', 'reviewRef']);
+  const production = record(value); exactKeys(production, ['pipeline', 'sourceRefs', 'promptHash', 'rightsReview', 'reviewerId', 'reviewRef', 'integrationMode', 'sourceRevision', 'modelRevision']);
   const pipeline = production.pipeline === 'OPENMONTAGE' || production.pipeline === 'MANUAL' || production.pipeline === 'OTHER' ? production.pipeline : fail('PRODUCTION_PIPELINE_INVALID');
   if (!Array.isArray(production.sourceRefs) || production.sourceRefs.length === 0 || production.sourceRefs.length > 32) fail('PRODUCTION_SOURCES_INVALID');
   const sourceRefs = (production.sourceRefs as unknown[]).map((source: unknown) => text(source, 500));
@@ -150,8 +172,11 @@ function parseProduction(value: unknown): TrainingSceneProduction {
   if (production.rightsReview !== 'APPROVED') fail('PRODUCTION_RIGHTS_REVIEW_REQUIRED');
   const reviewerId = production.reviewerId === undefined ? undefined : text(production.reviewerId, 200);
   const reviewRef = production.reviewRef === undefined ? undefined : text(production.reviewRef, 500);
+  const integrationMode = production.integrationMode === undefined ? undefined : production.integrationMode === 'LOCKED_INTERACTIVE' || production.integrationMode === 'CINEMATIC' ? production.integrationMode : fail('INTEGRATION_MODE_INVALID');
+  const sourceRevision = production.sourceRevision === undefined ? undefined : text(production.sourceRevision, 200);
+  const modelRevision = production.modelRevision === undefined ? undefined : text(production.modelRevision, 200);
   if (pipeline === 'OPENMONTAGE' && (!reviewerId || !reviewRef)) fail('PRODUCTION_REVIEW_EVIDENCE_REQUIRED');
-  return { pipeline, sourceRefs, ...(promptHash ? { promptHash } : {}), rightsReview: 'APPROVED', ...(reviewerId ? { reviewerId } : {}), ...(reviewRef ? { reviewRef } : {}) };
+  return { pipeline, sourceRefs, ...(promptHash ? { promptHash } : {}), rightsReview: 'APPROVED', ...(reviewerId ? { reviewerId } : {}), ...(reviewRef ? { reviewRef } : {}), ...(integrationMode ? { integrationMode } : {}), ...(sourceRevision ? { sourceRevision } : {}), ...(modelRevision ? { modelRevision } : {}) };
 }
 
 export function validateTrainingSceneManifest(value: unknown): TrainingSceneManifest {

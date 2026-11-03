@@ -89,6 +89,7 @@ advancedTools.addEventListener("toggle", () => document.body.classList.toggle("a
 
 let accessToken = getAccessToken();
 if(accessToken){
+  document.body.classList.add('advanced-mode');
   for(const section of [uploadSection,jobSection,reviewSection])section.classList.remove('hidden');
   signInButton.classList.add('hidden');signOutButton.classList.remove('hidden');identityElement.textContent='Signed in.';
 }
@@ -126,6 +127,7 @@ let libraryLoading = false;
 const sourceOptions = document.querySelector<HTMLElement>("#source-options")!;
 const generationStatus = document.querySelector<HTMLElement>("#generation-status")!;
 const generateButton = document.querySelector<HTMLButtonElement>("#generate-course")!;
+const generateVideoLesson = document.querySelector<HTMLInputElement>("#generate-video-lesson")!;
 const moreSources = document.querySelector<HTMLButtonElement>("#more-sources")!;
 let sourceCursor: string | undefined;
 let sourcesLoading = false;
@@ -250,7 +252,7 @@ document.querySelector("#generate-course-form")!.addEventListener("submit", asyn
   try {
     const response = await apiJson<{ aiRunId: string; appliedToCourse: boolean; result: { status: string; warnings?: Array<{ message: string }> } }>(`/api/v1/course-versions/${encodeURIComponent(courseVersionId)}/generate-draft`, {
       method: "POST", headers: { "content-type": "application/json" },
-      body: JSON.stringify({ sourceArtifactIds, mediaAssetVersionIds, userInstruction: document.querySelector<HTMLTextAreaElement>("#generation-instructions")!.value.trim() })
+      body: JSON.stringify({ sourceArtifactIds, mediaAssetVersionIds, videoLesson: generateVideoLesson.checked, userInstruction: document.querySelector<HTMLTextAreaElement>("#generation-instructions")!.value.trim() })
     });
     if (epoch !== editorEpoch) return;
     if (response.appliedToCourse && !draftDirty && generation === editGeneration && !saveInFlight) { courseVersionInput.value = courseVersionId; await loadReview(); }
@@ -312,7 +314,7 @@ document.querySelector("#course-create-form")!.addEventListener("submit", async 
     draftTitle.focus();
   } catch (error) {
     libraryStatus.textContent = error instanceof Error
-      ? error.message
+      ? `${error.message} Retry with the same title to recover the request.`
       : "The course could not be opened or created. Retry with the same title to recover the request.";
   }
   finally { createCourseButton.disabled = false; }
@@ -400,6 +402,35 @@ function renderDraftModules() {
     list:cursor=>apiJson(base+(cursor?'?beforeRevision='+cursor:'')),preview:(eventId,side)=>apiJson(base+'?eventId='+encodeURIComponent(eventId)+'&side='+side),
     restore:async(input,key)=>{draftFields.disabled=true;try{await apiJson(base,{method:'POST',headers:{'content-type':'application/json','idempotency-key':key},body:JSON.stringify({...input,confirmed:true})});if(!active())return;await loadReview();draftTitle.focus();}finally{if(active())draftFields.disabled=false;}}
    });
+  }
+
+  const videoLessons = contentRows(editingContent.videoLessons);
+  if (videoLessons.length) {
+    const box = document.createElement('fieldset'), legend = document.createElement('legend');
+    legend.textContent = 'Video lesson builder'; box.append(legend);
+    const note = document.createElement('p'); note.textContent = 'Edit the source-grounded narration and scene plan before requesting a cinematic render. Every scene remains reviewable against its cited source.'; box.append(note);
+    for (const [lessonIndex, lesson] of videoLessons.entries()) {
+      const lessonBox = document.createElement('fieldset'), lessonLegend = document.createElement('legend'); lessonLegend.textContent = `Lesson ${lessonIndex + 1}`; lessonBox.append(lessonLegend);
+      const field = (labelText: string, value: unknown, update: (value: string) => void, multiline = false) => {
+        const label = document.createElement('label'); label.append(document.createTextNode(labelText));
+        const input = document.createElement(multiline ? 'textarea' : 'input'); input.value = typeof value === 'string' ? value : String(value ?? '');
+        input.addEventListener('input', () => { update(input.value); markDraftDirty(); }); label.append(input); lessonBox.append(label);
+      };
+      field('Lesson title', lesson.title, value => { lesson.title = value; });
+      field('Duration (seconds)', lesson.durationSeconds, value => { lesson.durationSeconds = Number(value); });
+      field('Safety boundary', lesson.safetyBoundary, value => { lesson.safetyBoundary = value; }, true);
+      const scenes = contentRows(lesson.scenes);
+      for (const [sceneIndex, scene] of scenes.entries()) {
+        const sceneBox = document.createElement('fieldset'), sceneLegend = document.createElement('legend'); sceneLegend.textContent = `Scene ${sceneIndex + 1}: ${String(scene.visual && typeof scene.visual === 'object' ? (scene.visual as Record<string, unknown>).label ?? scene.sceneId : scene.sceneId)}`; sceneBox.append(sceneLegend);
+        const sceneField = (labelText: string, value: unknown, update: (value: string) => void) => { const label = document.createElement('label'); label.append(document.createTextNode(labelText)); const input = document.createElement('textarea'); input.value = typeof value === 'string' ? value : String(value ?? ''); input.addEventListener('input', () => { update(input.value); markDraftDirty(); }); label.append(input); sceneBox.append(label); };
+        sceneField('Narration', scene.narration, value => { scene.narration = value; });
+        sceneField('On-screen text (one line per item)', Array.isArray(scene.onScreenText) ? scene.onScreenText.join('\n') : '', value => { scene.onScreenText = value.split('\n').map(item => item.trim()).filter(Boolean); });
+        const sources = document.createElement('p'); sources.textContent = `Visual: ${JSON.stringify(scene.visual ?? {})} · Sources: ${JSON.stringify(scene.citations ?? [])}${scene.checkpointActivityId ? ` · Checkpoint: ${scene.checkpointActivityId}` : ''}`; sceneBox.append(sources);
+        lessonBox.append(sceneBox);
+      }
+      box.append(lessonBox);
+    }
+    draftModules.append(box);
   }
 
   const simulation=editingContent.simulation as {definition?:unknown}|undefined;
@@ -863,6 +894,7 @@ function renderReviewTargets(snapshot: ReviewSnapshot) {
     const binding = snapshot.courseVersion.content[key] as Record<string, unknown> | undefined;
     addTarget(type, binding?.[key === "model" ? "modelVersionId" : key === "simulation" ? "simulationDefinitionId" : "policyId"], label);
   }
+  for (const lesson of contentRows(snapshot.courseVersion.content.videoLessons)) addTarget("VIDEO_LESSON", lesson.lessonId, `Video lesson: ${String(lesson.title ?? "Untitled")}`);
   for (const module of contentRows(snapshot.courseVersion.content.modules)) for (const activity of contentRows(module.activities)) {
     const assessment = activity.assessment as Record<string, unknown> | undefined;
     addTarget("ASSESSMENT", assessment?.assessmentId, `Assessment: ${String(activity.title ?? "Untitled")}`);

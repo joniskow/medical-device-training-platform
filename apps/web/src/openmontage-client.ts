@@ -1,9 +1,10 @@
-import type { OpenMontageRenderArtifact, OpenMontageSceneBrief, TrainingSceneManifest } from '@medical-device/contracts';
+import type { OpenMontageGenerationStatus, OpenMontageIntegrationMode, OpenMontageRenderArtifact, OpenMontageSceneBrief, TrainingSceneManifest } from '@medical-device/contracts';
 
 export interface OpenMontageBriefResponse { briefId: string; brief: OpenMontageSceneBrief; }
 export interface OpenMontageArtifactResponse { artifactId: string; artifact: OpenMontageRenderArtifact; }
 export interface OpenMontageApprovalResponse extends OpenMontageArtifactResponse { sceneManifest: TrainingSceneManifest; }
 export interface OpenMontageSceneResponse { sceneManifest: TrainingSceneManifest; videoUrl: string; }
+export interface OpenMontageGenerationResponse { generationId: string; jobId: string; briefId: string; brief: OpenMontageSceneBrief; }
 
 async function json<T>(response: Response): Promise<T> {
   const body = await response.json().catch(() => null) as { error?: { code?: string; message?: string } } | null;
@@ -42,4 +43,23 @@ export function loadApprovedOpenMontageScene(apiBaseUrl: string, sceneId: string
 
 export function openMontageVideoUrl(apiBaseUrl: string, sceneId: string): string {
   return endpoint(apiBaseUrl, `/api/v1/openmontage/scenes/${encodeURIComponent(sceneId)}/video`);
+}
+
+export function createOpenMontageGeneration(apiBaseUrl: string, input: { sceneManifest: TrainingSceneManifest; prompt: string; mode?: OpenMontageIntegrationMode; narrationText?: string; narrationVoice?: string; idempotencyKey: string }): Promise<OpenMontageGenerationResponse> {
+  return fetch(endpoint(apiBaseUrl, '/api/v1/openmontage/generations'), {
+    method: 'POST', headers: { 'content-type': 'application/json', 'idempotency-key': input.idempotencyKey },
+    body: JSON.stringify({ sceneManifest: input.sceneManifest, prompt: input.prompt, ...(input.mode ? { mode: input.mode } : {}), ...(input.narrationText ? { narrationText: input.narrationText } : {}), ...(input.narrationVoice ? { narrationVoice: input.narrationVoice } : {}) })
+  }).then(json<OpenMontageGenerationResponse>);
+}
+
+export function loadOpenMontageGeneration(apiBaseUrl: string, generationId: string): Promise<OpenMontageGenerationStatus> {
+  return fetch(endpoint(apiBaseUrl, `/api/v1/openmontage/generations/${encodeURIComponent(generationId)}`), { cache: 'no-store' }).then(json<OpenMontageGenerationStatus>);
+}
+
+export function openMontageGenerationPreviewUrl(apiBaseUrl: string, generationId: string): string {
+  return endpoint(apiBaseUrl, `/api/v1/openmontage/generations/${encodeURIComponent(generationId)}/preview`);
+}
+
+export function openMontageGenerationNarrationUrl(apiBaseUrl: string, generationId: string): string {
+  return endpoint(apiBaseUrl, `/api/v1/openmontage/generations/${encodeURIComponent(generationId)}/narration`);
 }

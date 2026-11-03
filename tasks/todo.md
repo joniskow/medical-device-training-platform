@@ -2132,3 +2132,15 @@ The backlog is complete for the design when every item in the source document’
 
 
 
+
+## Photorealistic scene integration follow-up — 2026-11-02
+
+- [x] Add calibrated scene-manifest fields for locked-interactive/cinematic integration, camera exposure/white balance/light direction, contact-shadow policy, and source/model revisions.
+- [x] Add prompt-to-background generation contracts, tenant-scoped durable job routing, deterministic fixture provider, HTTP provider lifecycle, status/preview routes, provenance metadata, and retry/timeout classification.
+- [x] Add author prompt/mode controls, generation progress/cancellation, draft composite review state, explicit approval, and publication guard.
+- [x] Preserve stable NxStage component IDs, interaction targets, bounded press behavior, GLB hash binding, and new-source lineage separation in the authoring path.
+- [ ] Replace the current preview-only NxStage material pass with rights-cleared self-contained PBR albedo/roughness/normal assets derived from the complete 20-photo source set; record texture hashes and visual-review evidence. A source-bound, non-calibrated 20-photo ensemble PBR pass is now embedded and verified; rights clearance and independent material acceptance remain open.
+- [x] Implement and validate the deterministic tracked/offline cinematic compositor fixture; cinematic generation now requires a baked composite plus a passing tracking record and the authoring preview disables live interaction.
+- [x] Bind the locked-interactive local fallback to the calibrated photo-backed 960×540/30 fps loop and verify the moving plate plus transparent model overlay in Chrome.
+- [ ] Connect and validate the production tracked/offline compositor against the configured external provider, rights evidence, and deployed Blob artifact path. Local deterministic tracking, directional browser grounding, camera-locked interactive overlay, current model hash `e5d6c95b2a66e03c06b8ef6a71e059bfd10925ea8cba83c652d5416f58f88df8`, and cinematic composite hash `9853a25bced42bc1fcb236bbb14ddf688ec39e1a299fcec11bae5fd68b8194d9` pass; external/deployed evidence remains open.
+- [ ] Run provider rights/licensing review, output visual regression, temporal-flicker/halo/scale checks, deployed Blob review, and named-device accessibility/performance evidence. Local `pnpm nxstage-visual:validate` now passes safe-region, model-only bounds, directional-grounding, halo, and 144-frame exposure-stability checks; external rights/deployed/named-device evidence remains open.

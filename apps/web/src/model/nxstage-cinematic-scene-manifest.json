@@ -1,0 +1,70 @@
+{
+  "schemaVersion": "training-scene.v1",
+  "sceneId": "scene:nxstage:office-cinematic:v1",
+  "video": {
+    "assetVersionId": "assetv:fixture:nxstage-office-cinematic-composite:v3",
+    "sourceHash": "9853a25bced42bc1fcb236bbb14ddf688ec39e1a299fcec11bae5fd68b8194d9",
+    "contentType": "video/mp4",
+    "width": 960,
+    "height": 540,
+    "frameRate": 24,
+    "durationSeconds": 6
+  },
+  "model": {
+    "modelVersionId": "preview:nxstage-system-one-v1",
+    "sourceHash": "e5d6c95b2a66e03c06b8ef6a71e059bfd10925ea8cba83c652d5416f58f88df8",
+    "translationMeters": [
+      0,
+      0,
+      0
+    ],
+    "rotationRadians": [
+      0,
+      0,
+      0
+    ],
+    "scale": 1
+  },
+  "camera": {
+    "projection": "perspective",
+    "focalLengthPixels": 638.6100534105599,
+    "principalPointPixels": [
+      480,
+      270
+    ],
+    "distortion": {
+      "radial": [
+        0,
+        0,
+        0
+      ],
+      "tangential": [
+        0,
+        0
+      ]
+    },
+    "exposure": 0,
+    "whiteBalanceKelvin": 5200,
+    "lightDirection": [
+      -0.35,
+      0.8,
+      -0.45
+    ]
+  },
+  "render": {
+    "opacity": 1,
+    "receiveShadows": false,
+    "castShadows": false
+  },
+  "production": {
+    "pipeline": "MANUAL",
+    "sourceRefs": [
+      "assetv:fixture:nxstage-office-cinematic-composite:v3",
+      "preview:nxstage-system-one-v1"
+    ],
+    "rightsReview": "APPROVED",
+    "integrationMode": "CINEMATIC",
+    "sourceRevision": "nxstage-hallway-to-room-composite-v3",
+    "modelRevision": "e5d6c95b2a66e03c06b8ef6a71e059bfd10925ea8cba83c652d5416f58f88df8"
+  }
+}

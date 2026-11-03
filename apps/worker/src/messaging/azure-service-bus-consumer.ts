@@ -65,6 +65,7 @@ export function verifyAzureServiceBusJobMessage(message: Pick<ServiceBusReceived
 
 export type JobMessageHandlingResult = "COMPLETED" | "ABANDONED" | "DEAD_LETTERED";
 type ReconstructionHandler=(input:{tenant:TenantContext;jobId:string;workerId:string})=>Promise<JobRecord<unknown>|null>;
+type OpenMontageGenerationHandler=(input:{tenant:TenantContext;jobId:string;workerId:string})=>Promise<JobRecord<unknown>|null>;
 
 export async function handleAzureServiceBusJobMessage(input: {
   message: Pick<ServiceBusReceivedMessage, "body" | "messageId" | "applicationProperties">;
@@ -77,6 +78,7 @@ export async function handleAzureServiceBusJobMessage(input: {
   scanner?: AssetScannerPort;
   workerId: string;
   processReconstruction?:ReconstructionHandler;
+  processOpenMontageGeneration?:OpenMontageGenerationHandler;
   settle: {
     complete(): Promise<void>;
     abandon(): Promise<void>;
@@ -94,7 +96,8 @@ export async function handleAzureServiceBusJobMessage(input: {
   try {
     const stored=await input.jobStore.get(envelope.tenant,envelope.jobId);
     if(stored?.jobType==='reconstruction.generate'&&!input.processReconstruction){await input.settle.deadLetter('RECONSTRUCTION_ENGINE_UNAVAILABLE');return 'DEAD_LETTERED';}
-    const result = stored?.jobType==='reconstruction.generate'?await input.processReconstruction!({tenant:envelope.tenant,jobId:envelope.jobId,workerId:input.workerId}):await processAssetJob({
+    if(stored?.jobType==='openmontage.generate'&&!input.processOpenMontageGeneration){await input.settle.deadLetter('OPENMONTAGE_GENERATION_UNAVAILABLE');return 'DEAD_LETTERED';}
+    const result = stored?.jobType==='reconstruction.generate'?await input.processReconstruction!({tenant:envelope.tenant,jobId:envelope.jobId,workerId:input.workerId}):stored?.jobType==='openmontage.generate'?await input.processOpenMontageGeneration!({tenant:envelope.tenant,jobId:envelope.jobId,workerId:input.workerId}):await processAssetJob({
       jobStore: input.jobStore,
       storage: input.storage,
       processor: input.processor,
@@ -133,6 +136,7 @@ export interface AzureServiceBusWorkerOptions {
   scanner?: AssetScannerPort;
   workerId: string;
   processReconstruction?:ReconstructionHandler;
+  processOpenMontageGeneration?:OpenMontageGenerationHandler;
   maxConcurrentCalls?: number;
   onError?: (error: ProcessErrorArgs) => Promise<void>;
 }
@@ -140,7 +144,7 @@ export interface AzureServiceBusWorkerOptions {
 export function createAzureServiceBusWorker(options: AzureServiceBusWorkerOptions): { close(): Promise<void> } {
   // Reconstruction may exceed the SDK's five-minute renewal default.
   // https://learn.microsoft.com/en-us/javascript/api/@azure/service-bus/servicebusreceiveroptions#maxautolockrenewaldurationinms
-  const receiver: ServiceBusReceiver = options.client.createReceiver(options.queueName, { receiveMode: "peekLock",maxAutoLockRenewalDurationInMs:options.processReconstruction?3_600_000:300_000 });
+  const receiver: ServiceBusReceiver = options.client.createReceiver(options.queueName, { receiveMode: "peekLock",maxAutoLockRenewalDurationInMs:options.processReconstruction||options.processOpenMontageGeneration?3_600_000:300_000 });
   const subscription = receiver.subscribe({
     processMessage: async (message) => {
       await handleAzureServiceBusJobMessage({
@@ -154,6 +158,7 @@ export function createAzureServiceBusWorker(options: AzureServiceBusWorkerOption
         scanner: options.scanner,
         workerId: options.workerId,
         processReconstruction:options.processReconstruction,
+        processOpenMontageGeneration:options.processOpenMontageGeneration,
         settle: {
           complete: () => receiver.completeMessage(message),
           abandon: () => receiver.abandonMessage(message),

@@ -1,4 +1,4 @@
-import { isSupportedCourseActivityType, validateAssessmentDefinition, validateModelExploration, validateMediaActivity, type ApprovedMediaAsset, validateSimulationDefinition, type SimulationDefinition, validCertificationPolicy, validateCourseStory, courseStoryFaultContext, type PolicyActivity } from "@medical-device/simulation-schema";
+import { isSupportedCourseActivityType, validateAssessmentDefinition, validateModelExploration, validateMediaActivity, type ApprovedMediaAsset, validateSimulationDefinition, type SimulationDefinition, validCertificationPolicy, validateCourseStory, courseStoryFaultContext, type PolicyActivity, validateVideoLesson } from "@medical-device/simulation-schema";
 import type { AiGatewayResult } from "@medical-device/contracts";
 
 const record = (value: unknown): value is Record<string, unknown> => !!value && typeof value === "object" && !Array.isArray(value);
@@ -35,11 +35,16 @@ export function validateDraftGrounding(result: AiGatewayResult, sources: Array<{
   }
   if (!validCitations(course.citations)) return reject("AI_CITATION_INVALID", "Course citations must exactly match supplied source passage locators.");
   const assessmentIds = new Set<string>();
+  const activityIds = new Set<string>();
   const simulationActivities: Record<string, unknown>[] = [];
   for (const module of course.modules) {
     if (!record(module) || typeof module.title !== "string" || !module.title.trim() || !Array.isArray(module.activities) || !module.activities.length || module.activities.length > 200) return reject("AI_DRAFT_STRUCTURE_INVALID", "Every generated module needs a title and bounded, nonempty activities.");
     for (const activity of module.activities) {
       if (!record(activity) || typeof activity.type !== "string" || !activity.type.trim()) return reject("AI_DRAFT_STRUCTURE_INVALID", "Every generated activity needs a type.");
+      if (typeof activity.activityId === "string") {
+        if (activityIds.has(activity.activityId)) return reject("AI_DRAFT_STRUCTURE_INVALID", "Generated activity identifiers must be unique across the course.");
+        activityIds.add(activity.activityId);
+      }
       if (!isSupportedCourseActivityType(activity.type)) return reject("AI_ACTIVITY_TYPE_INVALID", "Generated activity type is not in the supported course catalog.");
       if (["multiple_choice", "multi_select", "ordered_step"].includes(activity.type)) {
         if (!validateAssessmentDefinition(activity.assessment).valid || !record(activity.assessment)) return reject("AI_ASSESSMENT_INVALID", "Generated assessment does not satisfy the assessment schema, answer or scoring rules.");
@@ -62,6 +67,22 @@ export function validateDraftGrounding(result: AiGatewayResult, sources: Array<{
       }
       if (["simulation", "simulation_outcome", "fault_troubleshooting", "guided_procedure", "manipulation", "assembly"].includes(activity.type)) simulationActivities.push(activity);
       if (!validCitations(activity.citations)) return reject("AI_CITATION_INVALID", "Every generated activity must cite supplied source passage locators.");
+    }
+  }
+  if (course.videoLessons !== undefined) {
+    if (!Array.isArray(course.videoLessons) || course.videoLessons.length > 8) return reject("AI_VIDEO_LESSON_INVALID", "Generated video lessons must be a bounded list.");
+    const approvedMedia = new Set(mediaAssets.map(asset => asset.assetVersionId));
+    for (const lesson of course.videoLessons) {
+      const report = validateVideoLesson(lesson);
+      if (!report.valid) return reject("AI_VIDEO_LESSON_INVALID", report.findings[0]?.message ?? "Generated video lesson is invalid.");
+      const scenes = (lesson as Record<string, unknown>).scenes as Array<Record<string, unknown>>;
+      for (const scene of scenes) {
+        const visual = scene.visual as Record<string, unknown>;
+        if (typeof visual.assetVersionId === "string" && !approvedMedia.has(visual.assetVersionId)) return reject("AI_VIDEO_LESSON_MEDIA_INVALID", "Video lesson visuals must bind selected approved media.");
+        if (scene.checkpointActivityId !== undefined && (typeof scene.checkpointActivityId !== "string" || !activityIds.has(scene.checkpointActivityId))) return reject("AI_VIDEO_LESSON_CHECKPOINT_INVALID", "Video lesson checkpoints must link to activities in the same course.");
+        if (!validCitations(scene.citations)) return reject("AI_CITATION_INVALID", "Every video scene must cite supplied source passage locators.");
+      }
+      if (!validCitations((lesson as Record<string, unknown>).citations)) return reject("AI_CITATION_INVALID", "Every video lesson must cite supplied source passage locators.");
     }
   }
   // Also inspect citations on questions, steps and other nested blocks. Bound
@@ -127,6 +148,13 @@ export function generatedMediaIds(result: AiGatewayResult): string[] {
       if (!record(activity) || !["image", "video"].includes(String(activity.type)) || !record(activity.media)) continue;
       if (typeof activity.media.assetVersionId === "string" && /^[A-Za-z0-9._:-]{1,128}$/.test(activity.media.assetVersionId)) ids.add(activity.media.assetVersionId);
       if (ids.size > 128) return []; // No approved context: subsequent media validation rejects.
+    }
+  }
+  for (const lesson of Array.isArray(result.output.videoLessons) ? result.output.videoLessons : []) {
+    if (!record(lesson) || !Array.isArray(lesson.scenes)) continue;
+    for (const scene of lesson.scenes) {
+      const visual = record(scene) && record(scene.visual) ? scene.visual : undefined;
+      if (visual && typeof visual.assetVersionId === "string" && /^[A-Za-z0-9._:-]{1,128}$/.test(visual.assetVersionId)) ids.add(visual.assetVersionId);
     }
   }
   return [...ids];

@@ -405,7 +405,13 @@ export function createPostgresCourseReviewStore(pool: Pool, options: { releaseAr
             return value&&['image','video'].includes(String(value.type))&&id?[id]:[];
           });
         });
-        const combinedSourceIds = [...new Set([...sourceArtifactIds, ...(aiRun.rows[0]?.source_artifact_ids ?? []),...mediaSourceIds])];
+        const videoLessonMediaIds=(Array.isArray(version.content.videoLessons)?version.content.videoLessons:[]).flatMap(lesson=>{
+          const scenes=object(lesson)?.scenes;
+          return (Array.isArray(scenes)?scenes:[]).flatMap(scene=>{
+            const visual=object(scene)?.visual;const id=text(object(visual)?.assetVersionId);return id?[id]:[];
+          });
+        });
+        const combinedSourceIds = [...new Set([...sourceArtifactIds, ...(aiRun.rows[0]?.source_artifact_ids ?? []),...mediaSourceIds,...videoLessonMediaIds])];
         const sources = combinedSourceIds.length === 0 ? [] : (await client.query<{ asset_version_id: string; sha256: string; state: string; source_type:string; content_type:string }>(
           `SELECT asset_version_id, sha256, state, source_type, content_type FROM asset_versions
            WHERE organization_id = $1 AND asset_version_id = ANY($2::text[]) FOR SHARE`,

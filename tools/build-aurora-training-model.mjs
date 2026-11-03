@@ -18,7 +18,7 @@ function accessor(values,type,componentType,target){
 }
 function material(name,color,metal=0,rough=.5,emission){const m={name,pbrMetallicRoughness:{baseColorFactor:[...color,1],metallicFactor:metal,roughnessFactor:rough}};if(emission)m.emissiveFactor=emission;return doc.materials.push(m)-1;}
 const white=material('Warm ceramic housing',[.78,.83,.84],.05,.32),navy=material('Graphite panel',[.028,.065,.09],.15,.38),teal=material('Teal cover frame',[.025,.34,.37],.18,.33),steel=material('Brushed fasteners',[.42,.5,.53],.8,.27),black=material('Rubber seals',[.018,.028,.032],0,.88),tube=material('Training line',[.58,.83,.79],0,.35),green=material('Ready indicator',[.12,.65,.45],0,.4,[.04,.3,.16]),amber=material('Warning indicator',[.95,.4,.045],0,.4,[.2,.06,.005]),screen=material('Screen glow',[.025,.16,.18],.1,.4,[.015,.12,.14]),ink=material('Display markings',[.66,.94,.88],0,.5,[.15,.3,.25]);
-function group(name,parent=0,extras,translation){const n={name,children:[]};if(extras)n.extras=extras;if(translation)n.translation=translation;const i=doc.nodes.push(n)-1;doc.nodes[parent].children.push(i);return i;}
+function group(name,parent=0,extras,translation,rotation){const n={name,children:[]};if(extras)n.extras=extras;if(translation)n.translation=translation;if(rotation)n.rotation=rotation;const i=doc.nodes.push(n)-1;doc.nodes[parent].children.push(i);return i;}
 function mesh(name,parent,positions,normals,indices,mat){
  const m=doc.meshes.push({name,primitives:[{attributes:{POSITION:accessor(positions,'VEC3',5126,34962),NORMAL:accessor(normals,'VEC3',5126,34962)},indices:accessor(indices,'SCALAR',5123,34963),material:mat}]})-1;
  const i=doc.nodes.push({name,mesh:m})-1;doc.nodes[parent].children.push(i);return i;
@@ -55,6 +55,10 @@ box('Display',panel,[-.017,.092,-.082],[.128,.071,.004],screen);
 for(let i=0;i<4;i++)box('Status row '+i,panel,[-.025,.115-i*.014,-.085],[.092-i*.012,.003,.001],ink);
 for(const [x,mat,name] of [[-.061,green,'Prime'],[0,white,'Ready'],[.061,amber,'Stop']]){const key=box(name+' key',panel,[x,.024,-.084],[.038,.024,.009],mat);doc.nodes[key].extras={interactionTargetOwner:'AIC-C01',interactionTargetId:`AIC-C01-${name.toUpperCase()}`,interactionTargetDisplayName:`${name} button`,pressDepthMeters:.004,pressAxis:[0,0,1]};box(name+' mark',panel,[x,.024,-.089],[.015,.002,.001],navy);}
 cylinder('Ready LED',panel,[.072,.122,-.085],.004,.007,green);
+const dial=group('Flow Dial',0,{componentId:'AIC-C04',interaction:'turn'},[.103,.055,-.092],[Math.SQRT1_2,0,0,Math.SQRT1_2]);
+const dialKnob=cylinder('Flow dial knob',dial,[0,0,0],.019,.012,navy,32);
+doc.nodes[dialKnob].extras={interactionTargetOwner:'AIC-C04',interactionTargetId:'AIC-C04-FLOW-DIAL',interactionTargetDisplayName:'Flow dial',interactionType:'turn',turnSensitivity:.012,turnMinRadians:-Math.PI,turnMaxRadians:Math.PI};
+for(const x of [-.012,0,.012])box('Flow dial marker',dial,[x,-.019,-.008],[.003,.007,.002],ink);
 const sensor=group('Line Sensor',0,{componentId:'AIC-C03',interaction:'select'});
 box('Line bay',sensor,[0,-.081,-.071],[.177,.137,.013],black);
 box('Sensor enclosure',sensor,[.017,-.083,-.084],[.067,.045,.016],teal);
@@ -66,7 +70,8 @@ const cover=group('Safety Cover',0,{componentId:'AIC-C02',interaction:'select'},
 // All door geometry is relative to this hinge. Positive Y rotation opens forward.
 for(const [name,c,s] of [['Top rail',[.091,.07,0],[.182,.013,.012]],['Bottom rail',[.091,-.07,0],[.182,.013,.012]],['Hinge stile',[0,0,0],[.013,.14,.013]],['Latch stile',[.182,0,0],[.013,.14,.013]]])box(name,cover,c,s,teal);
 box('Cover lower guard',cover,[.091,-.049,0],[.17,.027,.008],teal);
-box('Door latch',cover,[.186,.005,-.009],[.018,.035,.018],steel);
+const latch=box('Door latch',cover,[.186,.005,-.009],[.018,.035,.018],steel);
+doc.nodes[latch].extras={interactionTargetOwner:'AIC-C02',interactionTargetId:'AIC-C02-LATCH',interactionTargetDisplayName:'Safety cover latch',interactionType:'open',openRotationRadians:Math.PI/2};
 for(const y of [-.049,.049])cylinder('Hinge barrel '+y,cover,[0,y,0],.009,.025,steel);
 for(const x of [-.1,.1])for(const y of [-.144,.144]){box('Captive fastener '+x+y,0,[x,y,-.071],[.008,.008,.003],steel);box('Fastener slot '+x+y,0,[x,y,-.073],[.005,.001,.001],black);}
 const minimum=[Infinity,Infinity,Infinity],maximum=[-Infinity,-Infinity,-Infinity];
@@ -74,7 +79,9 @@ function bounds(index,parent=[0,0,0]){const node=doc.nodes[index],origin=parent.
 bounds(0);doc.nodes[0].translation=minimum.map((v,k)=>-(v+maximum[k])/2);
 doc.buffers=[{byteLength:offset}];let json=Buffer.from(JSON.stringify(doc));json=Buffer.concat([json,Buffer.alloc((4-json.length%4)%4,32)]);const bin=Buffer.concat(chunks),header=Buffer.alloc(20),tail=Buffer.alloc(8);header.write('glTF');header.writeUInt32LE(2,4);header.writeUInt32LE(28+json.length+bin.length,8);header.writeUInt32LE(json.length,12);header.writeUInt32LE(0x4e4f534a,16);tail.writeUInt32LE(bin.length);tail.writeUInt32LE(0x004e4942,4);const glb=Buffer.concat([header,json,tail,bin]);
 const hash=createHash('sha256').update(glb).digest('hex'),manifest=createGlbModelManifest(glb,hash);
-for(const c of manifest.components){if(c.componentId==='AIC-C02'){c.interactionCapabilities=['select','rotate'];c.permittedTransforms={rotationY:{min:0,max:Math.PI/2,step:Math.PI/12,snap:Math.PI/12}};}else if(c.componentId==='AIC-C01'){c.interactionCapabilities=['select','press'];}else c.interactionCapabilities=['select'];}
+manifest.modelVersionId='modelv_aurora_training_photogrammetry_demo_v1';
+manifest.releaseBindingId='releasebind_aurora_training_photogrammetry_demo_v1';
+for(const c of manifest.components){if(c.componentId==='AIC-C02'){c.interactionCapabilities=['select','rotate','open'];c.permittedTransforms={rotationY:{min:0,max:Math.PI/2,step:Math.PI/12,snap:Math.PI/12}};}else if(c.componentId==='AIC-C01'){c.interactionCapabilities=['select','press'];}else if(c.componentId==='AIC-C04'){c.interactionCapabilities=['select','turn'];c.permittedTransforms={rotationY:{min:-Math.PI,max:Math.PI,step:Math.PI/18,snap:Math.PI/18}};}else c.interactionCapabilities=['select'];}
 manifest.performanceBudget={minimumFps:30,interactiveWithinMs:5000,maxMemoryMb:128};
 await mkdir(folder,{recursive:true});await writeFile(folder+'/aurora-training.glb',glb);await writeFile(folder+'/model-manifest.json',JSON.stringify(manifest,null,2)+'\n');
 await writeFile(folder+'/provenance.json',JSON.stringify({schemaVersion:'authored-model.v1',source:'tools/build-aurora-training-model.mjs',sha256:hash,bytes:glb.length,componentIds:manifest.components.map(c=>c.componentId),dimensionsMeters:{housing:[.23,.33,.134]},provenance:'procedural-synthetic',reviewStatus:'REVIEW_REQUIRED',limitations:['Fictional training device, not a reproduction of commercial equipment','Authored geometry; not reconstructed from image/video','Movement limits must be configured and reviewed on import'],recommendedInteractions:{'AIC-C02':{rotationY:{min:0,max:Math.PI/2,step:Math.PI/12}}}},null,2)+'\n');

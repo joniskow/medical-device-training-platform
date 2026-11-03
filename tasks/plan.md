@@ -393,3 +393,11 @@ The chief-architect standup review, corrections, status, stop conditions, and ne
 
 The requirement-by-requirement reconciliation of the design’s MVP checklist, architecture contracts, business requirements, and remaining evidence gaps is in [tasks/requirements-audit.md](requirements-audit.md).
 
+
+## Photorealistic background + 3D device integration — 2026-11-02
+
+Implemented the first provider-backed NxStage/System One integration slice. Scene manifests now carry integration mode, calibrated exposure/white-balance/light direction, contact-shadow policy, source revision, and model revision. The authoring demo has locked-interactive and cinematic mode selection, prompt generation states, cancellation, review approval, and a publication guard. OpenMontage generations use the existing tenant-scoped job/outbox path, preserve prompt/model/scene/provider/output hashes and profile metadata, and expose author/reviewer-scoped status and preview routes. The worker supports deterministic fixture generation locally and an HTTP provider lifecycle with create, poll, retrieve, timeout, and retry handling. Existing model IDs, press behavior, review boundaries, and GLB provenance remain intact.
+
+Validation passed: contracts/API/worker/web builds; generation/provider contract; packaged Aurora + NxStage scene composite/hash checks; image-generation guard checks; existing OpenMontage HTTP approval-gate regression; NxStage GLB and Chrome interaction regression. Remaining evidence: actual rights-cleared provider output, final PBR texture authoring from the full photo set, cinematic tracking/compositor acceptance, visual regression screenshots on named device profiles, and deployed provider/Blob review evidence.
+
+Photorealistic integration follow-up: deterministic PBR maps, calibrated browser grounding, provider job lifecycle, and a gated offline cinematic composite now pass local validation. Remaining acceptance is rights-cleared photo-derived texture authoring, external provider/deployed Blob evidence, and named-device visual/temporal regression.

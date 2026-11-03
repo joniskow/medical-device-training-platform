@@ -438,7 +438,7 @@ CREATE TABLE IF NOT EXISTS course_review_decisions (
   decision_id text PRIMARY KEY,
   organization_id text NOT NULL,
   course_version_id text NOT NULL REFERENCES course_versions(course_version_id),
-  target_type text NOT NULL CHECK (target_type IN ('COURSE', 'AI_DRAFT', 'SOURCE', 'MODEL', 'SIMULATION', 'ASSESSMENT', 'POLICY')),
+  target_type text NOT NULL CHECK (target_type IN ('COURSE', 'AI_DRAFT', 'SOURCE', 'MODEL', 'SIMULATION', 'ASSESSMENT', 'POLICY', 'VIDEO_LESSON')),
   target_id text NOT NULL,
   decision text NOT NULL CHECK (decision IN ('APPROVE', 'REJECT', 'NEEDS_CHANGES')),
   rationale text NOT NULL,
@@ -452,6 +452,10 @@ CREATE TABLE IF NOT EXISTS course_review_decisions (
 
 CREATE INDEX IF NOT EXISTS course_review_decisions_version_idx
   ON course_review_decisions (organization_id, course_version_id, created_at DESC);
+
+ALTER TABLE course_review_decisions DROP CONSTRAINT IF EXISTS course_review_decisions_target_type_check;
+ALTER TABLE course_review_decisions ADD CONSTRAINT course_review_decisions_target_type_check
+  CHECK (target_type IN ('COURSE', 'AI_DRAFT', 'SOURCE', 'MODEL', 'SIMULATION', 'ASSESSMENT', 'POLICY', 'VIDEO_LESSON'));
 
 CREATE TABLE IF NOT EXISTS release_manifests (
   release_id text PRIMARY KEY,

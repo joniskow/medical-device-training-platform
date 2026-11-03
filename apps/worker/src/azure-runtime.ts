@@ -1,5 +1,8 @@
 import {createMediaAssetProcessor} from './media-asset-processor.js';
 import {processReconstructionJob} from './reconstruction-job.js';
+import {processOpenMontageGenerationJob} from './openmontage-generation-job.js';
+import {createOpenMontageProvider} from './openmontage-provider.js';
+import {createSpeechProvider} from './speech-provider.js';
 import {createReconstructionStore} from '@medical-device/db';
 import type {ReconstructionEngine} from '@medical-device/contracts';
 import {createPdfAssetProcessor} from "./pdf-asset-processor.js";
@@ -8,7 +11,7 @@ import {createModelImportStore} from '@medical-device/db';
 import { DefaultAzureCredential } from "@azure/identity";
 import { ServiceBusClient } from "@azure/service-bus";
 import { Pool } from "pg";
-import type { AssetProcessorPort } from "@medical-device/contracts";
+import type { AssetProcessorPort, OpenMontageProviderPort, SpeechSynthesisPort } from "@medical-device/contracts";
 import { createPostgresKnowledgeStore, createPostgresAssetLifecycleStore, createPostgresJobStore, createPostgresOutboxStore,createCourseChangeNotificationStore,createScheduledQualificationStore,createCredentialNotificationStore } from "@medical-device/db";
 import { createBackgroundProcessingRuntime } from "./worker-runtime.js";
 import { createAzureServiceBusDispatcher } from "./messaging/azure-service-bus-dispatcher.js";
@@ -32,6 +35,8 @@ export interface AzureBackgroundProcessingOptions {
   workerId: string;
   processor: AssetProcessorPort;
   reconstructionEngine?:ReconstructionEngine;
+  openMontageProvider?: OpenMontageProviderPort;
+  speechProvider?: SpeechSynthesisPort;
   maxConcurrentCalls?: number;
   publishIntervalMs?: number;
   onError?: (error: unknown) => Promise<void> | void;
@@ -61,6 +66,8 @@ export function createAzureBackgroundProcessingRuntime(options: AzureBackgroundP
     containerName: options.storageContainerName
   });
   const scanner = createDeterministicAssetScanner();
+  const openMontageProvider = options.openMontageProvider ?? createOpenMontageProvider();
+  const speechProvider = options.speechProvider ?? createSpeechProvider();
   const serviceBusClient = new ServiceBusClient(options.serviceBusNamespace, credential);
   const dispatcher = createAzureServiceBusDispatcher({
     client: serviceBusClient,
@@ -79,6 +86,7 @@ export function createAzureBackgroundProcessingRuntime(options: AzureBackgroundP
     scanner,
     workerId: options.workerId,
     processReconstruction:input=>processReconstructionJob({jobStore,storage,sources:createReconstructionStore(databasePool),engine:options.reconstructionEngine,...input}),
+    processOpenMontageGeneration:input=>processOpenMontageGenerationJob({jobStore,storage,provider:openMontageProvider,speech:speechProvider,...input}),
     maxConcurrentCalls: options.reconstructionEngine?1:options.maxConcurrentCalls,
     onError: async (args) => { await options.onError?.(args); }
   });

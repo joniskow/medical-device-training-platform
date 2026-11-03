@@ -1,0 +1,409 @@
+{
+  "schemaVersion": "model-manifest.v1",
+  "format": "glb",
+  "sourceHash": "28d81e89f9b010cb6dea0779991f8f444dfd4e65bcefec5518933cca90a3d64a",
+  "unitSystem": "meter",
+  "scaleMeters": 1,
+  "upAxis": "Y",
+  "handedness": "right",
+  "origin": "bounding-box-center",
+  "forwardAxis": "-Z",
+  "normalizationStatus": "CANONICAL",
+  "sceneNodeCount": 245,
+  "meshCount": 244,
+  "materialCount": 15,
+  "textureCount": 45,
+  "triangleCount": 81330,
+  "materials": [
+    {
+      "materialId": "material-0",
+      "name": "Material 1"
+    },
+    {
+      "materialId": "material-1",
+      "name": "Material 2"
+    },
+    {
+      "materialId": "material-2",
+      "name": "Material 3"
+    },
+    {
+      "materialId": "material-3",
+      "name": "Material 4"
+    },
+    {
+      "materialId": "material-4",
+      "name": "Material 5"
+    },
+    {
+      "materialId": "material-5",
+      "name": "Material 6"
+    },
+    {
+      "materialId": "material-6",
+      "name": "Material 7"
+    },
+    {
+      "materialId": "material-7",
+      "name": "Material 8"
+    },
+    {
+      "materialId": "material-8",
+      "name": "Material 9"
+    },
+    {
+      "materialId": "material-9",
+      "name": "Material 10"
+    },
+    {
+      "materialId": "material-10",
+      "name": "Material 11"
+    },
+    {
+      "materialId": "material-11",
+      "name": "Material 12"
+    },
+    {
+      "materialId": "material-12",
+      "name": "Material 13"
+    },
+    {
+      "materialId": "material-13",
+      "name": "Material 14"
+    },
+    {
+      "materialId": "material-14",
+      "name": "Material 15"
+    }
+  ],
+  "textures": [
+    {
+      "textureId": "texture-0",
+      "sha256": "59c1868cdc009cfd1bd9bd65bcaf298500635fb023ef7b4604af9f13b5ce1a71",
+      "byteLength": 3875
+    },
+    {
+      "textureId": "texture-1",
+      "sha256": "6801e48d2cfc98a3a2d405436d88b19d51055327cabaf9570510081c0c3ed4b1",
+      "byteLength": 4191
+    },
+    {
+      "textureId": "texture-2",
+      "sha256": "4ac42d09c85b0099c1ebf8075529ade96bfbd7736bf1c26df8a985ae3ad61a64",
+      "byteLength": 3575
+    },
+    {
+      "textureId": "texture-3",
+      "sha256": "29b0d5df0a295519b973825b4dc2fab9a22770fac3420569649ad3b59d42ddbd",
+      "byteLength": 3795
+    },
+    {
+      "textureId": "texture-4",
+      "sha256": "f1ab324770616edcd0710b36a9826c14a76d0812c06f4de38dc726a818004e9d",
+      "byteLength": 741
+    },
+    {
+      "textureId": "texture-5",
+      "sha256": "01878889c7f17aaf55a27efdb28796011b5204bca0784023e47bd3b9f74b9c3b",
+      "byteLength": 3550
+    },
+    {
+      "textureId": "texture-6",
+      "sha256": "f6afa141407a9c26d6877d987a1a791112d49a937a85ecb2e048fa3d81b9f040",
+      "byteLength": 3916
+    },
+    {
+      "textureId": "texture-7",
+      "sha256": "93ea4e4444f70cdae7fb29e51a8058c5bd9c3ef06e00654601d33adf5d5dbce0",
+      "byteLength": 3230
+    },
+    {
+      "textureId": "texture-8",
+      "sha256": "ac87c48b0844cac6dc5b288b4724ab2753c36a20bef8fd96c5681f01f1e544da",
+      "byteLength": 3612
+    },
+    {
+      "textureId": "texture-9",
+      "sha256": "3337a056c39fa582c06a6be84533f03cbe472f86da77c3f1706488d5dd2eb0b5",
+      "byteLength": 3849
+    },
+    {
+      "textureId": "texture-10",
+      "sha256": "a20e5f2000c5f3ea190d0c96eb1561f4c8ad3b0725fe5a1d46220fce5ae7105b",
+      "byteLength": 777
+    },
+    {
+      "textureId": "texture-11",
+      "sha256": "acd3089fedb318ec3e334ac6d7e60d9ca8ff83806570836060edc74ab9860554",
+      "byteLength": 3621
+    },
+    {
+      "textureId": "texture-12",
+      "sha256": "38258f65f46e3a8fece58dea20b84300aa5809b62dd3f0959657e7c0dfadebe5",
+      "byteLength": 3800
+    },
+    {
+      "textureId": "texture-13",
+      "sha256": "5a72fcf4c944462b94a8ce39ff37adf91d2297d034519e27ebf4c71547b255a2",
+      "byteLength": 3483
+    },
+    {
+      "textureId": "texture-14",
+      "sha256": "44cfca5c9b0eb0f9194c25769a55584ff386f6e41c743482f641531433d4b2ae",
+      "byteLength": 3667
+    },
+    {
+      "textureId": "texture-15",
+      "sha256": "74c963dd28d591c90b4848e1673ee5e0fc2aae1805a3f1390e84d1b894155c86",
+      "byteLength": 3880
+    },
+    {
+      "textureId": "texture-16",
+      "sha256": "0fee1ab007958c7a3e6d8f1e3bcbb1f84ed46525c70f20a01f2f25fc73b44abc",
+      "byteLength": 4404
+    },
+    {
+      "textureId": "texture-17",
+      "sha256": "58ee98e7ed18b783882babcc8e6560fee129129a2fab6606f1ae615c53c32958",
+      "byteLength": 3638
+    },
+    {
+      "textureId": "texture-18",
+      "sha256": "7958b4de12b58de5dcd76fc16e98af09edea2acf3640c65f1ac166524eb0e92d",
+      "byteLength": 3873
+    },
+    {
+      "textureId": "texture-19",
+      "sha256": "c9595e1ce92513606e4fc36469390fb3cbaf62a318d66ab7557fd12f6271814c",
+      "byteLength": 771
+    },
+    {
+      "textureId": "texture-20",
+      "sha256": "03242b7df9fae6c568cf8635627847bb30bfbd20a48d64afcc5a67fc1099e782",
+      "byteLength": 3628
+    },
+    {
+      "textureId": "texture-21",
+      "sha256": "c0ba3c7e80b793fa0dca1477c92988e85d2900caab5bda0aa007b7f481f82aed",
+      "byteLength": 3878
+    },
+    {
+      "textureId": "texture-22",
+      "sha256": "f924de23a1cc0f209b09a77265fe0654f28cedc53408a169ba61802408be731a",
+      "byteLength": 4752
+    },
+    {
+      "textureId": "texture-23",
+      "sha256": "cfa23beeaf1fbc94bef8fb847a7597c0a9930d2e97d94e4c1983262464a8b5cf",
+      "byteLength": 3654
+    },
+    {
+      "textureId": "texture-24",
+      "sha256": "bfbfa2a691c2c73918b9abca11cfdf9dae4e03cfaef7dd97f8aa992edf79f054",
+      "byteLength": 3894
+    },
+    {
+      "textureId": "texture-25",
+      "sha256": "f47009ef6df734d77a353be7eb27cdbc8dfbbd20229fcc5655699a57345190ef",
+      "byteLength": 3915
+    },
+    {
+      "textureId": "texture-26",
+      "sha256": "ab45909d153609218f08cb759d549cc1a8780059197cf26255415c134b9ef861",
+      "byteLength": 3607
+    },
+    {
+      "textureId": "texture-27",
+      "sha256": "de0bca8dd2b11d00e4a5926fb070aee6014f54dd7f71cf7c83b84af0755c80a6",
+      "byteLength": 3836
+    },
+    {
+      "textureId": "texture-28",
+      "sha256": "9cf09fad321cd3c745735bef80ea9fc72c8b998dd2ea98ea7d6f362ef04b9438",
+      "byteLength": 4090
+    },
+    {
+      "textureId": "texture-29",
+      "sha256": "d580f87ef5edfd80ba6e2af4dcf19801c1b85384354d5d6187dbff9f45784422",
+      "byteLength": 3624
+    },
+    {
+      "textureId": "texture-30",
+      "sha256": "74012d421162d3b55d85e767efc4c4d87d64fac878a073831d922d37d38322bf",
+      "byteLength": 3915
+    },
+    {
+      "textureId": "texture-31",
+      "sha256": "ba33398c7cf4f8306f4490917a1a293d8b67a02d6973eba2adc020de7686e006",
+      "byteLength": 4288
+    },
+    {
+      "textureId": "texture-32",
+      "sha256": "aba9bbcd34811993ba35097e1ff0bfde40d42aea76854ef962f01cdae8f90097",
+      "byteLength": 3651
+    },
+    {
+      "textureId": "texture-33",
+      "sha256": "df00de43df7927b0c3b62d8be1c5cc69dceb24ed28ebd1906a9ec33580ff6694",
+      "byteLength": 3869
+    },
+    {
+      "textureId": "texture-34",
+      "sha256": "24ddbd34d9fa96f61c447ac71ba21f5cf9ed9e8601bcab15269d8b6f533b9dff",
+      "byteLength": 4074
+    },
+    {
+      "textureId": "texture-35",
+      "sha256": "8ed0ceca7b9d3a068f57a44bfd784159e2ca562a8f51f0c0ddf4295c8c629c7a",
+      "byteLength": 3663
+    },
+    {
+      "textureId": "texture-36",
+      "sha256": "a608d7864221e7c32ce7651bb421c3ed511055a866b8bd51102b599c22521b49",
+      "byteLength": 3928
+    },
+    {
+      "textureId": "texture-37",
+      "sha256": "2c29214f1815ef25cfbcd5c3c2b1b5fb621a0cc5d2ce76363495a9fe287a49be",
+      "byteLength": 3070
+    },
+    {
+      "textureId": "texture-38",
+      "sha256": "1d29afada7a13836240d3157b8ad31586d19e4ec0e833a6351a9ccdbfbe7cd06",
+      "byteLength": 3644
+    },
+    {
+      "textureId": "texture-39",
+      "sha256": "c06792f8de3196fb57a751167b862dfef4a038cea3d1c7833c175cc2c4c2148d",
+      "byteLength": 3956
+    },
+    {
+      "textureId": "texture-40",
+      "sha256": "f80a84256a9ddc8ce65279867a4309f25ea7a168b1e9f12ce6763ec54e4fb9a3",
+      "byteLength": 1965
+    },
+    {
+      "textureId": "texture-41",
+      "sha256": "8aa48fb2a12eb456c61e6b855f483012681b0df51191d8cf7bf2f3b90aea07f5",
+      "byteLength": 3614
+    },
+    {
+      "textureId": "texture-42",
+      "sha256": "142a59f56516944dd4a403733e9375c419e5067214306ba84fc62b7aba6e29a8",
+      "byteLength": 3829
+    },
+    {
+      "textureId": "texture-43",
+      "sha256": "a2f3218df2c274bafdb113d82c0dbd2276b209e3a87ebc307f07f2466674bdd8",
+      "byteLength": 4242
+    },
+    {
+      "textureId": "texture-44",
+      "sha256": "60c912afaf17b54ce3f8efc63ab765dc7a27285e863e9244510599dc5197dd66",
+      "byteLength": 3611
+    }
+  ],
+  "components": [
+    {
+      "componentId": "nxstage-cabinet-door",
+      "nodePath": "Lower cabinet door hinge",
+      "displayName": "Lower cabinet door",
+      "aliases": [],
+      "interactionCapabilities": [
+        "select",
+        "open",
+        "rotate"
+      ],
+      "interactionTargets": [
+        {
+          "targetId": "NX-C02-CABINET-DOOR",
+          "nodePath": "Lower cabinet door hinge",
+          "displayName": "Lower cabinet door",
+          "interactionType": "open",
+          "openRotationRadians": -1.5707963267948966
+        }
+      ],
+      "permittedTransforms": {
+        "rotationY": {
+          "min": -1.5707963267948966,
+          "max": 0,
+          "step": 0.2617993877991494,
+          "snap": 0.2617993877991494
+        }
+      }
+    },
+    {
+      "componentId": "nxstage-control-panel",
+      "nodePath": "System One control fascia",
+      "displayName": "NxStage control panel",
+      "aliases": [],
+      "interactionCapabilities": [
+        "select",
+        "press"
+      ],
+      "interactionTargets": [
+        {
+          "targetId": "NX-C01-FLOW",
+          "nodePath": "Green kidney control",
+          "displayName": "Flow control",
+          "pressDepthMeters": 0.004,
+          "pressAxis": [
+            0,
+            0,
+            -1
+          ]
+        },
+        {
+          "targetId": "NX-C01-RATE",
+          "nodePath": "Green L per hour control",
+          "displayName": "L/hr control",
+          "pressDepthMeters": 0.004,
+          "pressAxis": [
+            0,
+            0,
+            -1
+          ]
+        },
+        {
+          "targetId": "NX-C01-STOP",
+          "nodePath": "Red stop control",
+          "displayName": "Stop control",
+          "pressDepthMeters": 0.006,
+          "pressAxis": [
+            0,
+            0,
+            -1
+          ]
+        },
+        {
+          "targetId": "NX-C01-MUTE",
+          "nodePath": "Yellow mute control",
+          "displayName": "Mute control",
+          "pressDepthMeters": 0.004,
+          "pressAxis": [
+            0,
+            0,
+            -1
+          ]
+        }
+      ]
+    }
+  ],
+  "modelVersionId": "preview:nxstage-system-one-v1",
+  "releaseBindingId": "preview:nxstage-system-one-v1",
+  "fidelity": {
+    "status": "VISUAL_RECONSTRUCTION",
+    "sourceType": "REFERENCE_IMAGES",
+    "scaleStatus": "UNMEASURED",
+    "hiddenSurfaceUncertainty": "UNKNOWN",
+    "summary": "Photo-grounded hard-surface reconstruction; proportions follow the supplied reference imagery, but no measured scale or hidden-surface evidence was supplied.",
+    "evidenceRefs": [
+      "fixtures/nxstage-system-one/nxstage-system-one-preview.png"
+    ]
+  },
+  "performanceBudget": {
+    "minimumFps": 30,
+    "interactiveWithinMs": 5000,
+    "maxMemoryMb": 128
+  }
+}

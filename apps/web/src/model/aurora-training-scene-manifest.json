@@ -12,7 +12,7 @@
   },
   "model": {
     "modelVersionId": "modelv_aurora_training_photogrammetry_demo_v1",
-    "sourceHash": "6493273784dccac04e51ebf9ea0aa90f34d208eaa6b9ad0b7ff9a387e52eb079",
+    "sourceHash": "60d3ba12354fca86033d1b6d199b0e626f9a42de8095cfed2acd8be7cf8209bf",
     "translationMeters": [0, 0, 0],
     "rotationRadians": [0, 0, 0],
     "scale": 1
@@ -25,12 +25,22 @@
     "distortion": {
       "radial": [0, 0, 0],
       "tangential": [0, 0]
-    }
+    },
+    "exposure": 0,
+    "whiteBalanceKelvin": 5200,
+    "lightDirection": [-0.35, 0.8, -0.45]
   },
   "render": {
     "opacity": 1,
     "receiveShadows": true,
-    "castShadows": true
+    "castShadows": true,
+    "contactShadow": {
+      "enabled": true,
+      "opacity": 0.36,
+      "softness": 0.82,
+      "offsetMeters": -0.004,
+      "direction": [0.5, 0.5]
+    }
   },
   "interaction": {
     "mode": "INTERACTIVE_OVERLAY",

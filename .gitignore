@@ -21,3 +21,7 @@ output/OpenMVS-Windows-v2.4.0.zip
 tools/reconstruction/__pycache__/
 blender/__pycache__/
 output/triposr-assets/
+tools/blender-portable/
+*.blend1
+/nxstage_system_one.blend
+/nxstage_system_one_preview.png

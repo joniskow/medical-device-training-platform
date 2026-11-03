@@ -1,0 +1,113 @@
+import { warmerDemo } from './nxstage-review-warmer.mjs';
+import { createRequire } from 'node:module';
+import { validateBrowserModelManifest } from '../packages/model-runtime/dist/browser.js';
+import { createServer } from 'node:http';
+import { readFile } from 'node:fs/promises';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { createHash } from 'node:crypto';
+import { gzipSync } from 'node:zlib';
+
+const here = dirname(fileURLToPath(import.meta.url));
+const root = resolve(here, '..');
+const candidate = process.env.NXSTAGE_REVIEW_MODEL_FOLDER ? resolve(process.env.NXSTAGE_REVIEW_MODEL_FOLDER) : resolve(root, 'fixtures/nxstage-system-one-interaction-review');
+const port = Number(process.env.NXSTAGE_REVIEW_PORT || 4215);
+const { build } = createRequire(new URL('../apps/web/package.json', import.meta.url))('esbuild');
+const bundle = await build({entryPoints:[resolve(root,'apps/web/src/model-player.ts')],bundle:true,format:'esm',platform:'browser',target:'es2022',write:false,legalComments:'none'});
+const modelPlayerSource = bundle.outputFiles[0].text;
+const modelBytes = await readFile(resolve(candidate, 'nxstage-system-one.glb'));
+const manifestBytes = await readFile(resolve(candidate, 'model-manifest.json'));
+const modelHash = createHash('sha256').update(modelBytes).digest('hex');
+if (validateBrowserModelManifest(JSON.parse(manifestBytes)).sourceHash !== modelHash) throw new Error('The review model and manifest do not match. Rebuild the manifest before starting the preview.');
+const compressedModel = gzipSync(modelBytes);
+const modelPaths = new Set(['/learner/model/aurora-infusion-controller.glb', '/learner/model/aurora-infusion-controller.mobile.glb']);
+const manifestPaths = new Set(['/learner/model-manifest.json', '/learner/model-manifest.mobile.json']);
+const files = new Map([
+  ['/learner/model-player.js', [modelPlayerSource, 'text/javascript; charset=utf-8']],
+]);
+const server = createServer(async (request, response) => {
+  try {
+    const url = new URL(request.url, 'http://localhost');
+    const path = url.pathname;
+    if (manifestPaths.has(path)) { response.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' }); return response.end(manifestBytes); }
+    if (modelPaths.has(path)) {
+      const acceptsGzip = (request.headers['accept-encoding'] ?? '').split(',').some(part => {
+        const [encoding, ...parameters] = part.trim().toLowerCase().split(';');
+        const quality = parameters.find(parameter => parameter.trim().startsWith('q='));
+        return encoding === 'gzip' && (!quality || Number(quality.trim().slice(2)) > 0);
+      });
+      response.writeHead(200, { 'content-type': 'model/gltf-binary', 'cache-control': 'no-store', 'vary': 'Accept-Encoding', ...(acceptsGzip ? { 'content-encoding': 'gzip' } : {}) });
+      return response.end(acceptsGzip ? compressedModel : modelBytes);
+    }
+    if (path === '/' || path === '/learner/model') {
+      if (url.searchParams.get('preview') !== '1') { response.writeHead(302, {location:'/learner/model?preview=1', 'cache-control':'no-store'}); return response.end(); }
+      let html = await readFile(resolve(root, 'apps/web/src/model.html'), 'utf8');
+      for (const marker of ['AIC-001 model activity', 'Synthetic release-bound rehearsal: this fixture exercises the E4 runtime and action contract. Production delivery uses a private, short-lived URL issued only for an approved course release.', 'Preparing model runtime…</p>', '<div class="controls"><button id="reset-view"']) {
+        if (!html.includes(marker)) throw new Error('The review page could not be adapted safely to the current player HTML.');
+      }
+      html = html.replaceAll('AIC-001 model activity', 'NxStage System One · interactive review')
+        .replaceAll('AIC-001 · Model runtime preview', 'NxStage System One · interactive review')
+        .replaceAll('Interactive AIC-001 model.', 'Interactive NxStage System One model.')
+        .replace('Inspect the approved model, select each named component, and complete the permitted semantic actions. Buttons with approved interaction metadata give bounded local press feedback; score and completion still come only from the server-authoritative state projection.', 'Press the controls and open the doors in the model, or select a component to use its named controls.')
+        .replace('Synthetic release-bound rehearsal: this fixture exercises the E4 runtime and action contract. Production delivery uses a private, short-lived URL issued only for an approved course release.', 'Review model: physical scale, button travel, and hidden geometry are estimates. The upper cartridge chamber is simplified and does not contain a usable cartridge. Switch on/off positions are approximate and do not simulate power. This preview does not simulate treatment settings or PureFlow operation.')
+        .replace('Preparing model runtime…</p>', 'Preparing model runtime…</p><p id="lower-panel-guidance" role="status" style="min-height:3.6em" hidden></p><style>#lower-panel-guidance[hidden]{display:block;visibility:hidden}</style><p id="warmer-demo-feedback" role="status" hidden></p>')
+        .replace('<div class="controls"><button id="reset-view"', '<div class="controls"><button id="focus-rear-switch" type="button">Focus rear switch</button><button id="focus-warmer" type="button">Focus warmer</button><button id="focus-panel" type="button">Focus control panel</button><button id="focus-pureflow" type="button">Focus lower panel</button><button id="focus-tub" type="button">Focus tub</button><button id="reset-view"')
+        .replace('Keyboard-accessible selection is the equivalent path for this preview. Visual fidelity status is shown in the release manifest and must not be read as clinical or manufacturing validation.', 'Choose a part below to find its named controls, or use the model directly.')
+        .replace('<p><a href="/learner/courses">Return to my courses</a></p>', '')
+        .replace('Step 1 · Inspect the control panel, safety cover, and line sensor. Then open the safety cover and position the line sensor.', 'Select a component and try its controls.')
+        .replace('<div class="metric">Score<strong id="score">0</strong></div>', '<div class="metric" hidden>Score<strong id="score">0</strong></div>')
+        .replace('<h2>Procedure context</h2>', '<h2>Preview feedback</h2>')
+        .replace('<button id="hint" type="button">Request hint</button>', '<button id="hint" type="button" hidden>Request hint</button>');
+      response.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' });
+      return response.end(html);
+    }
+    const file = files.get(path);
+    if (!file) return response.writeHead(404).end('Not found');
+    if (path === '/learner/model-player.js') {
+      const source = file[0];
+      const marker = '    canvas,\n    manifestUrl: asset.manifestUrl,';
+      if (!source.includes(marker)) throw new Error('The preview camera could not be applied to the current player bundle.');
+      const focusMarker = 'if (runtime) {\n  showControls.hidden = runtime.listInteractionTargets().length === 0;';
+      if (!source.includes(focusMarker)) throw new Error('The preview focus control could not be applied to the current player bundle.');
+      const actionMarker = '    const result = applyAuthoritativeResult(received, queuedAction.clientActionId, movementMatches, animateTargetId);';
+      if (!source.includes(actionMarker)) throw new Error('The warmer demonstration could not be bound to accepted preview actions.');
+
+      const positionMarker = 'const positionDescription = target.openVerb === "Lift" ?';
+      if (!source.includes(positionMarker)) throw new Error('The switch position feedback could not be bound.');
+      const resetMarker = '  runtime?.resetView();\n  announce("Camera reset to fit the approved model.");';
+      if (!source.includes(resetMarker)) throw new Error('The review reset camera could not be fitted safely.');
+      const player = (warmerDemo + source).replace(positionMarker, 'const positionDescription = target.openVerb === "Set on" ? (open ? "in the on position (power not simulated)" : "in the off position (power not simulated)") : target.openVerb === "Lift" ?').replace(marker, '    canvas,\n    selectedHighlightOpacity: 0.08,\n    camera: { alpha: Math.PI / 2, beta: 1.2, radius: 13.5, target: [0, 3.6, 0] },\n    manifestUrl: asset.manifestUrl,')
+        .replace(resetMarker, '  runtime?.resetView();\n  runtime?.fitModel();\n  announce("Camera reset to fit the approved model.");')
+        .replace(actionMarker, actionMarker + '\n    if (previewMode && result.status === "accepted" && queuedAction.type === "activate_target" && (targetId === "FW-C01-UP" || targetId === "FW-C01-DOWN")) updateWarmerDemo(targetId);')
+        .replace(focusMarker, 'runtime?.fitModel();\n' + focusMarker)
+        .replace(focusMarker, 'if (new URLSearchParams(location.search).has("test")) window.__restoreRearSwitch = (value,sequence) => { const state=runtime.getState(),transforms=Object.fromEntries(Object.entries(state.transforms).map(([id,t])=>[id,{...t,rotationY:id==="cycler-rear-power-switch"?value:t.rotationY}]));runtime.applyAuthoritativeState({modelVersionId:"preview:nxstage-system-one-interaction-review-v1",releaseBindingId:"preview:nxstage-system-one-interaction-review-v1",sequence,nextSequence:sequence+1,transforms,scorePoints:0,completed:false,allowedActions:[]}); };\n' + focusMarker)
+        .replace(focusMarker, 'if (new URLSearchParams(location.search).has("test")) window.__rearSwitchTilt = () => { const m=EngineStore.LastCreatedScene.meshes.find(m=>m.name==="Cycler rear power rocker");m.computeWorldMatrix(true);const v=m.getVerticesData("position"),p=[];for(let i=0;i<v.length;i+=3)p.push(Vector3.TransformCoordinates(new Vector3(v[i],v[i+1],v[i+2]),m.getWorldMatrix()));const top=Math.max(...p.map(q=>q.y)),bottom=Math.min(...p.map(q=>q.y)),mean=a=>a.reduce((n,q)=>n+q.z,0)/a.length;return mean(p.filter(q=>q.y>top-.002))-mean(p.filter(q=>q.y<bottom+.002)); };\n' + focusMarker)
+        .replace(focusMarker, 'if (new URLSearchParams(location.search).has("test")) window.__rearSwitchState = () => runtime?.getState().transforms["cycler-rear-power-switch"]?.rotationY;\n' + focusMarker)
+        .replace(focusMarker, 'if (new URLSearchParams(location.search).has("test")) window.__reviewTransform = id => runtime?.getState().transforms[id]; if (new URLSearchParams(location.search).has("test")) window.__reviewCameraRadius = () => EngineStore.LastCreatedScene?.activeCamera?.radius; if (new URLSearchParams(location.search).has("test")) window.__reviewCameraAngles = () => {const c=EngineStore.LastCreatedScene.activeCamera;return {alpha:c.alpha,beta:c.beta};};\n' + focusMarker)
+        .replace(focusMarker, 'if (new URLSearchParams(location.search).has("test")) window.__reviewProjectedBounds = () => { const scene=EngineStore.LastCreatedScene,engine=scene.getEngine(),width=engine.getRenderWidth(),height=engine.getRenderHeight(),viewport=scene.activeCamera.viewport.toGlobal(width,height),points=[]; for(const mesh of scene.meshes){if(!mesh.isVisible||!mesh.isEnabled()||!mesh.getTotalVertices())continue;mesh.computeWorldMatrix(true);for(const p of mesh.getBoundingInfo().boundingBox.vectorsWorld){const q=Vector3.Project(p,Matrix.Identity(),scene.getTransformMatrix(),viewport);points.push([q.x/width,q.y/height]);}} return {left:Math.min(...points.map(p=>p[0])),right:Math.max(...points.map(p=>p[0])),top:Math.min(...points.map(p=>p[1])),bottom:Math.max(...points.map(p=>p[1]))}; };\n' + focusMarker)
+        .replace(focusMarker, 'if (new URLSearchParams(location.search).has("test")) window.__reviewRearPanel = () => { const scene=EngineStore.LastCreatedScene,mesh=scene.meshes.find(m=>m.name==="Cycler rear service panel"),camera=scene.activeCamera;if(!mesh||!camera)return false;mesh.computeWorldMatrix(true);camera.setTarget(mesh.getBoundingInfo().boundingBox.centerWorld);camera.alpha=-Math.PI/2;camera.beta=Math.PI/2;camera.radius=9;return true; };\n' + focusMarker)
+        .replace(focusMarker, 'if (new URLSearchParams(location.search).has("test")) window.__reviewRearAccessory = () => { const scene=EngineStore.LastCreatedScene,mesh=scene.meshes.find(m=>m.name==="Rear white canister body"),camera=scene.activeCamera;if(!mesh||!camera)return false;mesh.computeWorldMatrix(true);camera.setTarget(mesh.getBoundingInfo().boundingBox.centerWorld);camera.alpha=-Math.PI/2;camera.beta=Math.PI/2;camera.radius=5;return true; };\n' + focusMarker)
+        .replace(focusMarker, 'if (new URLSearchParams(location.search).has("test")) { window.__reviewLowerAssembly = () => {const camera=EngineStore.LastCreatedScene?.activeCamera;if(!camera)return false;camera.setTarget(new Vector3(.45,-.55,1.25));camera.alpha=Math.PI/2;camera.beta=1.35;camera.radius=5.5;return true;}; window.__reviewCameraBeta = () => EngineStore.LastCreatedScene?.activeCamera?.beta; }\n' + focusMarker)
+        .replace(focusMarker, 'if (new URLSearchParams(location.search).has("test")) window.__reviewNodeCenter = name => {const m=EngineStore.LastCreatedScene?.meshes.find(item=>item.name===name);if(!m)return null;m.computeWorldMatrix(true);return m.getBoundingInfo().boundingBox.centerWorld.asArray();};\n' + focusMarker)
+        .replace(focusMarker, 'if (new URLSearchParams(location.search).has("test")) window.__inspectRear = () => { const scene=EngineStore.LastCreatedScene,camera=scene.activeCamera;camera.setTarget(new Vector3(0,3.5,0));camera.alpha=-Math.PI/2;camera.beta=1.2;camera.radius=11;return scene.meshes.filter(mesh=>mesh.name.startsWith("Cycler rear")).map(mesh=>mesh.name); };\n' + focusMarker)
+        .replace(focusMarker, 'if (new URLSearchParams(location.search).has("test")) window.__inspectIVPole = () => { const scene=EngineStore.LastCreatedScene,camera=scene.activeCamera; camera.setTarget(new Vector3(0,7.57,-1.02));camera.alpha=.8;camera.beta=1.15;camera.radius=3.2;return scene.meshes.filter(mesh=>mesh.name.startsWith("IV hanger ")).map(mesh=>mesh.name); };\n' + focusMarker)
+        .replace(focusMarker, 'if (new URLSearchParams(location.search).has("test")) window.__warmerDemoLights = () => Array.from({length: 9}, (_, index) => EngineStore.LastCreatedScene.meshes.find(mesh => mesh.name === "Warmer setting indicator " + (index + 1))?.material?.emissiveColor?.g ?? 0);\n' + focusMarker)
+        .replace(focusMarker, 'const reviewFace = rear => { const camera=EngineStore.LastCreatedScene?.activeCamera;if(camera){camera.alpha=rear ? -Math.PI/2 : Math.PI/2;camera.beta=rear ? 1.2 : 1.4;} };\ndocument.querySelector("#focus-rear-switch")?.addEventListener("click", () => { runtime?.frameComponent("cycler-rear-power-switch");reviewFace(true);const camera=EngineStore.LastCreatedScene?.activeCamera;if(camera)camera.radius=Math.max(camera.radius,1.6);document.querySelector("#model-canvas")?.scrollIntoView({block:"nearest"}); });\n' + focusMarker)
+        .replace(focusMarker, 'document.querySelector("#focus-warmer")?.addEventListener("click", () => { runtime?.frameComponent("express-warmer-panel");reviewFace(false); });\n' + focusMarker)
+        .replace(focusMarker, 'document.querySelector("#focus-panel")?.addEventListener("click", () => { runtime?.frameComponent("nxstage-control-panel");reviewFace(false); });\ndocument.querySelector("#focus-pureflow")?.addEventListener("click", () => { if (runtime?.getState().selectedComponentId !== "pureflow-control-panel") document.querySelector("[data-component-id=pureflow-control-panel]")?.click(); document.querySelector("#focus-component")?.click();reviewFace(false); });\ndocument.querySelector("#focus-tub")?.addEventListener("click", () => { if (runtime?.getState().selectedComponentId !== "pureflow-tub") document.querySelector("[data-component-id=pureflow-tub]")?.click(); document.querySelector("#focus-component")?.click();reviewFace(false);const camera=EngineStore.LastCreatedScene?.activeCamera;if(camera && (runtime?.getState().transforms["pureflow-tub"]?.translationX ?? 0) > .01)camera.beta=.9; });\nif (new URLSearchParams(location.search).has("test")) window.__projectTubMotion = (x,y) => { const scene=EngineStore.LastCreatedScene,canvas=document.querySelector("#model-canvas"),rect=canvas.getBoundingClientRect(),pick=scene.pick(x-rect.left,y-rect.top),root=scene.getTransformNodeByName("PureFlow tub travel axis"),engine=scene.getEngine(),view=scene.activeCamera.viewport.toGlobal(engine.getRenderWidth(),engine.getRenderHeight()); if(!pick?.pickedPoint||!root) return null; root.parent?.computeWorldMatrix(true); const travel=Vector3.TransformNormal(new Vector3(2.1,0,0),root.parent?.getWorldMatrix()??Matrix.Identity()),a=Vector3.Project(pick.pickedPoint,Matrix.Identity(),scene.getTransformMatrix(),view),b=Vector3.Project(pick.pickedPoint.add(travel),Matrix.Identity(),scene.getTransformMatrix(),view); return {x:(b.x-a.x)*rect.width/engine.getRenderWidth(),y:(b.y-a.y)*rect.height/engine.getRenderHeight()}; };\n' + focusMarker)
+        .replace(focusMarker, 'if (new URLSearchParams(location.search).has("test")) window.__reviewVentPoint = () => { const scene=EngineStore.LastCreatedScene,mesh=scene.meshes.find(item=>item.name==="Cycler arched front vent 08"),canvas=document.querySelector("#model-canvas"),rect=canvas.getBoundingClientRect(),engine=scene.getEngine();if(!mesh)return null;mesh.computeWorldMatrix(true);const p=Vector3.Project(mesh.getBoundingInfo().boundingBox.centerWorld,Matrix.Identity(),scene.getTransformMatrix(),scene.activeCamera.viewport.toGlobal(engine.getRenderWidth(),engine.getRenderHeight()));return {x:rect.left+p.x*rect.width/engine.getRenderWidth(),y:rect.top+p.y*rect.height/engine.getRenderHeight(),metadata:mesh.metadata};};\n' + focusMarker)
+        .replace(focusMarker, 'if (new URLSearchParams(location.search).has("test")) window.__reviewHandlePoint = () => { const scene=EngineStore.LastCreatedScene,mesh=scene.meshes.find(item=>item.name==="Cycler door pull"),rect=canvas.getBoundingClientRect(),engine=scene.getEngine();if(!mesh)return null;mesh.computeWorldMatrix(true);const p=Vector3.Project(mesh.getBoundingInfo().boundingBox.centerWorld,Matrix.Identity(),scene.getTransformMatrix(),scene.activeCamera.viewport.toGlobal(engine.getRenderWidth(),engine.getRenderHeight()));return {x:rect.left+p.x*rect.width/engine.getRenderWidth(),y:rect.top+p.y*rect.height/engine.getRenderHeight()};};\n' + focusMarker)
+        .replace(focusMarker, 'if (new URLSearchParams(location.search).has("test")) window.__reviewTargetPoint = id => { const scene=EngineStore.LastCreatedScene,mesh=(id==="PF-C02-TUB" ? scene.meshes.find(item=>item.name==="PureFlow tub front") : scene.meshes.find(item=>item.metadata?.interactionTargetId===id)),canvas=document.querySelector("#model-canvas"),rect=canvas.getBoundingClientRect(),engine=scene.getEngine(); if(!mesh)return null; mesh.computeWorldMatrix(true); const p=Vector3.Project(mesh.getBoundingInfo().boundingBox.centerWorld,Matrix.Identity(),scene.getTransformMatrix(),scene.activeCamera.viewport.toGlobal(engine.getRenderWidth(),engine.getRenderHeight())); return {x:rect.left+p.x*rect.width/engine.getRenderWidth(),y:rect.top+p.y*rect.height/engine.getRenderHeight()}; };\n' + focusMarker)
+        .replace(focusMarker, 'if (new URLSearchParams(location.search).has("test")) window.__reviewTargetPosition = id => EngineStore.LastCreatedScene.meshes.find(item=>item.metadata?.interactionTargetId===id)?.position.asArray(); if (new URLSearchParams(location.search).has("test")) window.__reviewHits = (x,y) => { const scene=EngineStore.LastCreatedScene,rect=document.querySelector("#model-canvas").getBoundingClientRect(); return (scene.multiPick(x-rect.left,y-rect.top)||[]).filter(hit=>hit.hit).sort((a,b)=>a.distance-b.distance).slice(0,5).map(hit=>({name:hit.pickedMesh?.name,target:hit.pickedMesh?.metadata?.interactionTargetId,distance:hit.distance})); };\n' + focusMarker);
+      response.writeHead(200, { 'content-type': file[1], 'cache-control': 'no-store' });
+      return response.end(player);
+    }
+    response.writeHead(200, { 'content-type': file[1], 'cache-control': 'no-store' });
+    return response.end(await readFile(file[0]));
+  } catch (error) {
+    if (!response.headersSent) response.writeHead(500, { 'content-type': 'text/plain; charset=utf-8' });
+    response.end('Unable to load the preview.');
+    console.error(error);
+  }
+});
+server.listen(port, '127.0.0.1', () => console.log(`Preserved interaction review: http://127.0.0.1:${port}/learner/model?preview=1`));

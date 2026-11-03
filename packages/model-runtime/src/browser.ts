@@ -7,6 +7,23 @@ export interface ComponentTransform { rotationY: number; translationX: number; }
 export interface AuthoritativeModelState { releaseBindingId: string; modelVersionId: string; sequence: number; nextSequence: number; selectedComponentId?: string; transforms: Record<string, ComponentTransform>; scorePoints: number; completed: boolean; activeStepId?: string; activeStepTitle?: string; activeFaultId?: string; activeFaultTitle?: string; allowedActions: string[]; }
 export interface AuthoritativeActionResult { status: SemanticActionStatus; clientActionId?: string; nextSequence: number; state?: AuthoritativeModelState; feedback: string; scoreDelta?: number; retryable?: boolean; }
 
+/** Return the first unmet physical dependency in a complete model state. */
+export function interactionStateViolation(manifest: ModelManifest, transforms: Record<string, ComponentTransform>, changedComponentId?: string): string | undefined {
+  const components = changedComponentId ? [...manifest.components].sort((a, b) => Number(b.componentId === changedComponentId) - Number(a.componentId === changedComponentId)) : manifest.components;
+  for (const component of components) for (const target of component.interactionTargets ?? []) {
+    if (target.interactionType !== "open" || (!target.openRequires && !target.closeRequires)) continue;
+    const position = transforms[component.componentId];
+    if (!position) return "The model component state is incomplete.";
+    const value = target.openTranslationMeters !== undefined ? position.translationX : position.rotationY;
+    const open = target.openTranslationMeters ?? target.openRotationRadians ?? component.permittedTransforms?.rotationY?.max ?? 0;
+    const requirements = [Math.abs(value) > 1e-5 ? target.openRequires : undefined, Math.abs(value - open) > 1e-5 ? target.closeRequires : undefined];
+    for (const requirement of requirements) {
+      if (requirement && (!transforms[requirement.componentId] || Math.abs(transforms[requirement.componentId][requirement.transform] - requirement.value) > 1e-5)) return requirement.message;
+    }
+  }
+  return undefined;
+}
+
 export function validateAuthoritativeModelState(manifest: ModelManifest, state: AuthoritativeModelState): boolean {
   if (state.releaseBindingId !== manifest.releaseBindingId || state.modelVersionId !== manifest.modelVersionId) return false;
   if (!Number.isSafeInteger(state.sequence) || state.sequence < 0 || !Number.isSafeInteger(state.nextSequence) || state.nextSequence !== state.sequence + 1) return false;
@@ -19,13 +36,13 @@ export function validateAuthoritativeModelState(manifest: ModelManifest, state: 
     if (!Number.isFinite(value)) return false;
     if (!rule) return value === 0;
     const normalized = applyPermittedTransform({ permittedTransforms: { rotationY: rule } }, { rotationY: 0, translationX: 0 }, { rotationY: value });
-    return normalized !== null && normalized.rotationY === value;
+    return normalized !== null && Math.abs(normalized.rotationY - value) <= Number.EPSILON * 16 * Math.max(1, Math.abs(normalized.rotationY), Math.abs(value));
   };
   return manifest.components.every((component) => {
     const transform = state.transforms[component.componentId];
     return stateTransformAllowed(transform.rotationY, component.permittedTransforms?.rotationY)
       && stateTransformAllowed(transform.translationX, component.permittedTransforms?.translationX);
-  });
+  }) && interactionStateViolation(manifest, state.transforms) === undefined;
 }
 
 export function applyPermittedTransform(component: { permittedTransforms?: { rotationY?: { min: number; max: number; step?: number; snap?: number }; translationX?: { min: number; max: number; step?: number; snap?: number } } }, current: ComponentTransform, requested: Partial<ComponentTransform> | undefined): ComponentTransform | null {
@@ -122,12 +139,59 @@ export function validateBrowserModelManifest(value: unknown): ModelManifest {
       if (!Array.isArray(component.interactionTargets) || component.interactionTargets.length === 0 || new Set(component.interactionTargets.map((target) => target.targetId)).size !== component.interactionTargets.length || new Set(component.interactionTargets.map((target) => target.nodePath)).size !== component.interactionTargets.length) throw new Error("MODEL_INTERACTION_TARGETS_INVALID");
       for (const target of component.interactionTargets) {
         if (!target || typeof target.targetId !== "string" || !target.targetId.trim() || typeof target.nodePath !== "string" || !target.nodePath.trim() || typeof target.displayName !== "string" || !target.displayName.trim()) throw new Error("MODEL_INTERACTION_TARGETS_INVALID");
+        if (target.interactionType !== undefined && !["press", "turn", "open"].includes(target.interactionType)) throw new Error("MODEL_INTERACTION_TYPE_INVALID");
         if (target.pressDepthMeters !== undefined && (!Number.isFinite(target.pressDepthMeters) || target.pressDepthMeters <= 0 || target.pressDepthMeters > 0.05)) throw new Error("MODEL_PRESS_DEPTH_INVALID");
         if (target.pressAxis !== undefined && (!Array.isArray(target.pressAxis) || target.pressAxis.length !== 3 || target.pressAxis.some((value) => typeof value !== "number" || !Number.isFinite(value)) || Math.hypot(...target.pressAxis) < 1e-6)) throw new Error("MODEL_PRESS_AXIS_INVALID");
+        if (target.turnSensitivity !== undefined && (!Number.isFinite(target.turnSensitivity) || target.turnSensitivity <= 0 || target.turnSensitivity > 1)) throw new Error("MODEL_TURN_SENSITIVITY_INVALID");
+        if ((target.turnMinRadians !== undefined && !Number.isFinite(target.turnMinRadians)) || (target.turnMaxRadians !== undefined && !Number.isFinite(target.turnMaxRadians)) || (target.turnMinRadians !== undefined && target.turnMaxRadians !== undefined && target.turnMinRadians > target.turnMaxRadians)) throw new Error("MODEL_TURN_RANGE_INVALID");
+        if (target.openRotationRadians !== undefined && !Number.isFinite(target.openRotationRadians)) throw new Error("MODEL_OPEN_ROTATION_INVALID");
+        if (target.openRotationSpace !== undefined && (target.openRotationSpace !== "local" || target.interactionType !== "open" || target.openTranslationMeters !== undefined)) throw new Error("MODEL_OPEN_ROTATION_SPACE_INVALID");
+        if (target.touchTapSlopPixels !== undefined && (target.interactionType !== "open" || !Number.isFinite(target.touchTapSlopPixels) || target.touchTapSlopPixels < 6 || target.touchTapSlopPixels > 24)) throw new Error("MODEL_TOUCH_TAP_SLOP_INVALID");
+        if (target.openLiftMeters !== undefined && (!Number.isFinite(target.openLiftMeters) || target.openLiftMeters <= 0 || target.openLiftMeters > 1 || target.interactionType !== "open" || target.openTranslationMeters !== undefined)) throw new Error("MODEL_OPEN_LIFT_INVALID");
+        if (target.openTranslationMeters !== undefined && (!Number.isFinite(target.openTranslationMeters) || target.interactionType !== "open" || target.openRotationRadians !== undefined)) throw new Error("MODEL_OPEN_TRANSLATION_INVALID");
+        if (target.openDragDirection !== undefined && (target.interactionType !== "open" || !Array.isArray(target.openDragDirection) || target.openDragDirection.length !== 2 || target.openDragDirection.some((value) => !Number.isFinite(value)) || Math.hypot(...target.openDragDirection) < 1e-6)) throw new Error("MODEL_OPEN_DRAG_DIRECTION_INVALID");
+        for (const verb of [target.openVerb, target.closeVerb]) if (verb !== undefined && (target.interactionType !== "open" || typeof verb !== "string" || !verb.trim() || verb.length > 40)) throw new Error("MODEL_OPEN_VERB_INVALID");
       }
     }
+    const rotatingTargets = (component.interactionTargets ?? []).filter(target => target.interactionType === "turn" || (target.interactionType === "open" && target.openTranslationMeters === undefined));
+    if (rotatingTargets.some(target => target.openRotationSpace === "local") && rotatingTargets.some(target => target.interactionType !== "turn" && target.openRotationSpace !== "local")) throw new Error("MODEL_OPEN_ROTATION_SPACE_INVALID");
     for (const rule of [component.permittedTransforms?.rotationY, component.permittedTransforms?.translationX]) {
       if (rule && (typeof rule.min !== "number" || typeof rule.max !== "number" || !Number.isFinite(rule.min) || !Number.isFinite(rule.max) || rule.min > rule.max || typeof rule.step !== "number" || !Number.isFinite(rule.step) || rule.step <= 0 || (rule.snap !== undefined && (typeof rule.snap !== "number" || !Number.isFinite(rule.snap) || rule.snap <= 0)))) throw new Error("MODEL_TRANSFORM_RULE_INVALID");
+    }
+    for (const target of component.interactionTargets ?? []) {
+      if (target.interactionType !== "open" && target.interactionType !== "turn") continue;
+      if (target.openTranslationMeters !== undefined) {
+        const rule = component.permittedTransforms?.translationX;
+        const normalized = applyPermittedTransform(component, { rotationY: 0, translationX: 0 }, { translationX: target.openTranslationMeters });
+        const zero = applyPermittedTransform(component, { rotationY: 0, translationX: 0 }, { translationX: 0 });
+        if (!rule || rule.min > 0 || rule.max < 0 || target.openTranslationMeters === 0 || !zero || Math.abs(zero.translationX) > 1e-9 || !normalized || Math.abs(normalized.translationX - target.openTranslationMeters) > 1e-9) throw new Error("MODEL_OPEN_TRANSLATION_INVALID");
+        continue;
+      }
+      const rule = component.permittedTransforms?.rotationY;
+      if (!rule || rule.min > 0 || rule.max < 0) throw new Error("MODEL_INTERACTION_ROTATION_INVALID");
+      const isSetting = (value: number) => {
+        const normalized = applyPermittedTransform(component, { rotationY: 0, translationX: 0 }, { rotationY: value });
+        return normalized !== null && Math.abs(normalized.rotationY - value) <= 1e-9;
+      };
+      if (!isSetting(0)) throw new Error("MODEL_INTERACTION_ROTATION_INVALID");
+      if (target.interactionType === "turn") {
+        const min = Math.max(rule.min, target.turnMinRadians ?? rule.min);
+        const max = Math.min(rule.max, target.turnMaxRadians ?? rule.max);
+        if (min >= max || min > 0 || max < 0 || !isSetting(min) || !isSetting(max)) throw new Error("MODEL_INTERACTION_ROTATION_INVALID");
+      } else {
+        const open = target.openRotationRadians ?? rule.max;
+        if (open === 0 || !isSetting(open)) throw new Error("MODEL_INTERACTION_ROTATION_INVALID");
+      }
+    }
+  }
+  for (const component of manifest.components) for (const target of component.interactionTargets ?? []) {
+    for (const requirement of [target.openRequires, target.closeRequires]) {
+      if (requirement === undefined) continue;
+      if (target.interactionType !== "open" || !requirement || typeof requirement.componentId !== "string" || requirement.componentId === component.componentId || !["rotationY", "translationX"].includes(requirement.transform) || !Number.isFinite(requirement.value) || typeof requirement.message !== "string" || !requirement.message.trim()) throw new Error("MODEL_INTERACTION_REQUIREMENT_INVALID");
+      const dependency = manifest.components.find((item) => item.componentId === requirement.componentId);
+      const rule = dependency?.permittedTransforms?.[requirement.transform];
+      const normalized = dependency && applyPermittedTransform(dependency, { rotationY: 0, translationX: 0 }, { [requirement.transform]: requirement.value });
+      if (!rule || !normalized || Math.abs(normalized[requirement.transform] - requirement.value) > 1e-9) throw new Error("MODEL_INTERACTION_REQUIREMENT_INVALID");
     }
   }
   if (manifest.variant !== undefined) {

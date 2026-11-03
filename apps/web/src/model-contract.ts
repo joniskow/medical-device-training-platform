@@ -11,7 +11,7 @@ export interface ModelComponentManifest {
   aliases: string[];
   interactionCapabilities: string[];
   interactionVolume?: { min: [number, number, number]; max: [number, number, number] };
-  interactionTargets?: Array<{ targetId: string; nodePath: string; displayName: string; pressDepthMeters?: number; pressAxis?: [number, number, number] }>;
+  interactionTargets?: Array<{ targetId: string; nodePath: string; displayName: string; interactionType?: "press" | "turn" | "open"; pressDepthMeters?: number; pressAxis?: [number, number, number]; turnSensitivity?: number; turnMinRadians?: number; turnMaxRadians?: number; openRotationRadians?: number }>;
   permittedTransforms?: { rotationY?: { min: number; max: number; step: number; snap?: number }; translationX?: { min: number; max: number; step: number; snap?: number } };
 }
 
@@ -72,7 +72,15 @@ export interface AuthoritativeActionResult {
 export interface ModelRuntimeState {
   phase: ModelRuntimePhase;
   selectedComponentId?: string;
+  hoveredComponentId?: string;
+  hoveredInteractionTargetId?: string;
+  hoveredInteractionTargetName?: string;
+  focusedInteractionTargetId?: string;
+  focusedInteractionTargetName?: string;
+  focusedInteractionType?: "press" | "turn" | "open" | "activate";
   pressedInteractionTargetId?: string;
+  pressedInteractionTargetName?: string;
+  interactionMessage?: string;
   componentIds: string[];
   transforms: Record<string, ComponentTransform>;
   authoritative?: AuthoritativeModelState;
@@ -87,9 +95,21 @@ export interface ModelRuntimeState {
 export interface ModelRuntime {
   getState(): ModelRuntimeState;
   selectComponent(componentId: string, source?: ModelSelectionSource): void;
-  applyAuthoritativeState(state: AuthoritativeModelState): void;
+  applyAuthoritativeState(state: AuthoritativeModelState, options?: { animateTargetId?: string }): void;
   resetView(): void;
   dispose(): void;
+}
+
+export interface InteractiveModelRuntime extends ModelRuntime {
+  setInteractionEnabled(enabled: boolean): void;
+  setCameraInteractive(enabled: boolean): void;
+  fitModel(): void;
+  frameComponent(componentId: string): void;
+  setInteractionHintsVisible(visible: boolean): void;
+  interactionBlockReason(targetId: string, destination?: Partial<{ rotationY: number; translationX: number }>): string | undefined;
+  listInteractionTargets(): Array<{ targetId: string; componentId: string; displayName: string; interactionType: "press" | "turn" | "open" | "activate"; isOpen: boolean; isFullyOpen: boolean; openVerb: string; closeVerb: string }>;
+  /** For dials, direction selects left/right. For doors, +1 opens fully and -1 closes; omit it to toggle. */
+  activateInteractionTarget(targetId: string, direction?: -1 | 1): boolean;
 }
 
 export interface SemanticActionTransport {

@@ -114,7 +114,7 @@ export interface AiRunStorePort {
   record(input: { tenant: TenantContext; request: AiGatewayRequest; result: AiGatewayResult; promptVersion: string; courseVersionId?: OpaqueId }): Promise<OpaqueId>;
 }
 
-export type ReviewTargetType = "COURSE" | "AI_DRAFT" | "SOURCE" | "MODEL" | "SIMULATION" | "ASSESSMENT" | "POLICY";
+export type ReviewTargetType = "COURSE" | "AI_DRAFT" | "SOURCE" | "MODEL" | "SIMULATION" | "ASSESSMENT" | "POLICY" | "VIDEO_LESSON";
 export type ReviewDecision = "APPROVE" | "REJECT" | "NEEDS_CHANGES";
 
 export interface CourseReviewDecisionRecord {
@@ -242,6 +242,7 @@ export type AiOperation =
   | "extract_document"
   | "summarize_source"
   | "generate_course_draft"
+  | "generate_video_lesson"
   | "generate_assessment_draft"
   | "generate_simulation_draft"
   | "suggest_component_metadata"

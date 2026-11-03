@@ -9,6 +9,8 @@ import { createJobStatusHttpServer } from "../apps/api/dist/job-status-http.js";
 const root = resolve(import.meta.dirname, "..");
 const mobileManifest = JSON.parse(await readFile(resolve(root, "apps/web/dist/model-manifest.mobile.json"), "utf8"));
 const forceManifestFailure = process.env.E4_RELEASE_BROWSER_FORCE_MANIFEST_FAILURE === "1";
+const slowSelections = process.env.E4_RELEASE_BROWSER_SLOW_SELECTIONS === "1" || process.argv.includes("--slow-selections");
+const retrySelection = process.argv.includes("--retry-selection");
 const candidates = [process.env.E4_CHROME_PATH, "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe", "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe"].filter(Boolean);
 let browserPath;
 for (const candidate of candidates) { try { await stat(candidate); browserPath = candidate; break; } catch {} }
@@ -55,6 +57,11 @@ class DevTools {
 }
 
 let semanticMode=false;
+let delayedSelections=0;
+let selectionsInFlight=0;
+let overlappedSelection=false;
+let staleActions=0;
+let failedSelection=false;
 function stateFor(state) {
   return {
     releaseBindingId: "releasebind_aic001_preview_v1",
@@ -116,8 +123,11 @@ const server = createJobStatusHttpServer({
       assert.equal(sessionId, "session-1");
       assert.equal(action.releaseBindingId, "releasebind_aic001_preview_v1");
       assert.equal(action.modelVersionId, "modelv_aic001_reference_v1");
+      if (retrySelection && action.type === "select_component" && !failedSelection) { failedSelection = true; throw new Error("Simulated interrupted selection"); }
+      if (slowSelections && action.type === "select_component") { delayedSelections += 1; selectionsInFlight += 1; await new Promise(wait => setTimeout(wait, 1500)); selectionsInFlight -= 1; }
+      if (slowSelections && action.type === "transform_component" && selectionsInFlight) overlappedSelection = true;
       if(semanticMode){assert.equal(action.type,'inspect_component');assert.equal(action.value,'inspected');assert.equal(action.stepId,'procedure');}
-      if (action.expectedSequence !== sessionState.nextSequence) return { status: "stale_sequence", clientActionId: action.clientActionId, nextSequence: sessionState.nextSequence, feedback: "Stale sequence." };
+      if (action.expectedSequence !== sessionState.nextSequence) { staleActions += 1; return { status: "stale_sequence", clientActionId: action.clientActionId, nextSequence: sessionState.nextSequence, feedback: "Stale sequence." }; }
       if (action.componentId && !sessionState.transforms[action.componentId]) return { status: "unknown_component", clientActionId: action.clientActionId, nextSequence: sessionState.nextSequence, feedback: "Unknown component." };
       if (action.type === "transform_component" && action.componentId) sessionState.transforms[action.componentId] = { ...sessionState.transforms[action.componentId], ...(action.transform ?? {}) };
       sessionState.selectedComponentId = action.componentId ?? sessionState.selectedComponentId;
@@ -182,21 +192,50 @@ try {
     assert.fail(`missing action ${label}`);
   };
   await pressEnter("#component-list button[data-component-id='AIC-C02']");
+  if (retrySelection) {
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      if (await devtools.evaluate("!document.querySelector('#retry-action').hidden")) break;
+      await new Promise(wait => setTimeout(wait, 50));
+    }
+    assert(await devtools.evaluate("!document.querySelector('#retry-action').hidden"), "An interrupted action must offer an explicit retry");
+    const failedBody = JSON.parse((await devtools.evaluate('window.__e4Bodies')).at(-1));
+    const beforeBlocked = await devtools.evaluate('window.__e4Bodies.length');
+    await click('#hint');
+    assert.equal(await devtools.evaluate('window.__e4Bodies.length'), beforeBlocked, 'Later actions must wait for the unconfirmed action');
+    assert.match(await devtools.evaluate('document.querySelector("#model-status").textContent'), /Retry the unconfirmed action/, 'The learner must be told how to continue');
+    assert.match(await devtools.evaluate('document.querySelector("#model-status").textContent'), /This action was not sent/, 'The learner must know the later action did not run');
+    await click('#retry-action');
+    await waitForAction("Open safety cover");
+    const retriedBody = JSON.parse((await devtools.evaluate('window.__e4Bodies')).at(-1));
+    assert.equal(retriedBody.clientActionId, failedBody.clientActionId, 'Retry must preserve the action identity');
+    assert.equal(retriedBody.expectedSequence, failedBody.expectedSequence, 'Retry must preserve the original sequence');
+  }
   await waitForAction("Open safety cover");
   await click("#action-controls > button");
   await pressEnter("#component-list button[data-component-id='AIC-C03']");
   await waitForAction("Position line sensor");
   await click("#action-controls > button");
+  if (slowSelections) {
+    for (let attempt = 0; attempt < 100 && selectionsInFlight; attempt += 1) await new Promise(wait => setTimeout(wait, 50));
+    assert.equal(selectionsInFlight, 0, 'Delayed selections must finish before checking their results');
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      if ((await devtools.evaluate("document.querySelector('#completion')?.textContent"))?.includes("Completed")) break;
+      await new Promise(wait => setTimeout(wait, 50));
+    }
+  }
   const completion = await devtools.evaluate("document.querySelector('#completion')?.textContent");
   const score = await devtools.evaluate("document.querySelector('#score')?.textContent");
   const actionLog = await devtools.evaluate("document.querySelector('#action-log')?.textContent");
   const allowed = await devtools.evaluate("document.querySelector('#allowed-actions')?.textContent");
   const ariaCurrent = await devtools.evaluate("document.querySelector(\"#component-list button[data-component-id='AIC-C03']\")?.getAttribute('aria-current')");
   const requestBodies = await devtools.evaluate("window.__e4Bodies");
+  if (slowSelections) assert(delayedSelections >= 2, 'The test must actually delay both selection actions');
+  if (slowSelections) assert.equal(overlappedSelection, false, 'Movement must wait until the preceding selection is confirmed');
+  if (slowSelections) assert.equal(staleActions, 0, 'Rapid actions must not produce stale session requests');
   const requestHeaders = await devtools.evaluate("window.__e4Headers");
   const responseErrors = await devtools.evaluate("window.__e4Responses");
   const actionTypes = requestBodies.map((body) => JSON.parse(body).type);
-  assert.deepEqual(actionTypes, ["select_component", "transform_component", "select_component", "transform_component"], `unexpected duplicate or missing semantic actions: ${JSON.stringify(requestBodies)}`);
+  assert.deepEqual(actionTypes, retrySelection ? ["select_component", "select_component", "transform_component", "select_component", "transform_component"] : ["select_component", "transform_component", "select_component", "transform_component"], `unexpected duplicate or missing semantic actions: ${JSON.stringify(requestBodies)}`);
   assert.ok(requestHeaders.filter(headers=>headers.authorization==='Bearer test-learner-token').every(headers=>headers['x-organization-id']==='org-fixture'),'Organization context missing from asset/session transport');
   assert.ok(requestHeaders.filter((headers) => headers.authorization === "Bearer test-learner-token").length >= 5, `authenticated asset/session requests missing bearer token: ${JSON.stringify(requestHeaders)}`);
   assert.match(completion, /Completed/, `completion=${completion}; score=${score}; action=${actionLog}; bodies=${JSON.stringify(requestBodies)}; responses=${JSON.stringify(responseErrors)}`);

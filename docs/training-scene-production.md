@@ -43,7 +43,7 @@ The current Aurora example uses the `MANUAL` pipeline in its checked-in scene ma
 
 ## NxStage office preview
 
-The local NxStage preview uses an OpenMontage-rendered 960×540, 30 fps, 3-second office plate at `fixtures/nxstage-system-one/nxstage-office-background-openmontage.mp4`. The interactive GLB stays in the browser foreground; the video is muted, looping, and does not own any device geometry. The generated artifact is recorded as `REVIEW_REQUIRED` in the ignored local handoff output until a reviewer signs off on rights, continuity, and foreground occlusion.
+The local NxStage preview uses the photo-backed OpenMontage fixture at `fixtures/nxstage-system-one/nxstage-office-background-photo-openmontage.mp4` (960×540, 30 fps, 3 seconds). The interactive GLB stays in the browser foreground; the video is muted, looping, and does not own any device geometry. The generated artifact is recorded as `REVIEW_REQUIRED` in the ignored local handoff output until a reviewer signs off on rights, continuity, and foreground occlusion.
 
 ## OpenMontage API handoff
 
@@ -56,3 +56,9 @@ The production handoff is tenant-scoped and follows the existing private upload/
 5. The web client in `apps/web/src/openmontage-client.ts` calls the same handoff operations and uses the returned `videoUrl`; it does not substitute an unreviewed or independently hosted video.
 
 The API route is wired in `apps/api/src/entrypoint.ts`, persisted in tenant-isolated OpenMontage tables, and covered by `pnpm openmontage:api:validate`.
+
+## Narration handoff
+
+The creator studio accepts an editable narration script with the background request. The worker sends that script to the configured Azure Speech adapter (`AZURE_SPEECH_MODE=http`, `AZURE_SPEECH_ENDPOINT`, and the deployment-held `AZURE_SPEECH_API_KEY`) or uses a deterministic silent WAV fallback locally. The generated audio is stored under the tenant-scoped derived prefix and returned as a `REVIEW_REQUIRED` narration preview at `/api/v1/openmontage/generations/:generationId/narration`; it is never treated as approved course evidence automatically.
+
+The generation status includes the narration provider, voice output type, and estimated duration. Reviewers must listen to the preview against the editable script and the source guide before approving the associated course/video lesson. The local provider and HTTP route are covered by `pnpm openmontage:generation:validate` and `pnpm openmontage:api:validate`.

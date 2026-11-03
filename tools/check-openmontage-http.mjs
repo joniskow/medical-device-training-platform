@@ -6,6 +6,7 @@ const brief = { schemaVersion: 'openmontage-scene-brief.v1', sceneId: manifest.s
 const artifact = { schemaVersion: 'openmontage-render-artifact.v1', brief: { sceneId: manifest.sceneId, modelVersionId: 'model:nxstage', modelSourceHash: 'b'.repeat(64), promptHash: 'c'.repeat(64) }, video: { assetVersionId: 'video:2', sourceHash: 'd'.repeat(64), contentType: 'video/mp4', width: 960, height: 540, frameRate: 30, durationSeconds: 3, byteLength: 123 }, status: 'REVIEW_REQUIRED' };
 const approved = { ...artifact, status: 'APPROVED', review: { reviewerId: 'reviewer', reviewRef: 'review:1' } };
 const calls = [];
+const generationCalls = [];
 const service = {
   async createBrief(tenant, input) { calls.push(['brief', tenant.organizationId, input.idempotencyKey]); return { briefId: 'brief:1', brief }; },
   async ingestRender(tenant, input) { calls.push(['ingest', tenant.organizationId, input.briefId]); return { artifactId: 'artifact:1', artifact }; },
@@ -16,6 +17,12 @@ const service = {
 };
 const server = createJobStatusHttpServer({
   openMontageSceneService: service,
+  openMontageGenerationService: {
+    async create(tenant, input) { generationCalls.push(['create', tenant.organizationId, input.mode ?? 'LOCKED_INTERACTIVE', input.narrationText]); return { generationId: 'openmontage-generation:test', jobId: 'job_openmontage_test', briefId: 'brief:1', brief }; },
+    async get() { return { generationId: 'openmontage-generation:test', jobId: 'job_openmontage_test', briefId: 'brief:1', mode: 'LOCKED_INTERACTIVE', promptHash: 'c'.repeat(64), state: 'SUCCEEDED', outcome: { adapter: 'openmontage', adapterVersion: 'test', status: 'REVIEW_REQUIRED', details: { narration: { contentType: 'audio/mpeg', durationSeconds: 3, provider: 'azure-speech' } } }, narration: { audioUrl: '/api/v1/openmontage/generations/openmontage-generation%3Atest/narration', contentType: 'audio/mpeg', durationSeconds: 3, provider: 'azure-speech' } }; },
+    async preview() { return { bytes: Buffer.from('draft-video'), contentType: 'video/mp4' }; },
+    async narration() { return { bytes: Buffer.from('draft-audio'), contentType: 'audio/mpeg' }; }
+  },
   statusService: { get: async () => null, retry: async () => null },
   authenticator: { authenticate: async request => ({ subject: request.headers.authorization === 'Bearer reviewer' ? 'reviewer' : request.headers.authorization === 'Bearer learner' ? 'learner' : 'author', roles: [] }) },
   organizationContextResolver: { resolveActiveOrganizations: async () => ['org_fixture'], resolveOrganizationRoles: async subject => subject === 'reviewer' ? ['reviewer'] : subject === 'learner' ? ['learner'] : ['author'] }
@@ -38,6 +45,16 @@ try {
   assert.equal(scene.status, 200);
   const video = await request('/api/v1/openmontage/scenes/scene%3Anxstage-office/video');
   assert.equal(video.status, 200); assert.equal(video.headers.get('content-type'), 'video/mp4'); assert.equal(Buffer.from(await video.arrayBuffer()).toString(), 'video');
+  const generationResponse = await request('/api/v1/openmontage/generations', { method: 'POST', headers: { 'idempotency-key': 'generation-key' }, body: JSON.stringify({ sceneManifest: manifest, prompt: 'A calm doctors office', mode: 'LOCKED_INTERACTIVE', narrationText: 'Simulation-only training.' }) });
+  assert.equal(generationResponse.status, 202);
+  const generation = await request('/api/v1/openmontage/generations/openmontage-generation%3Atest');
+  assert.equal(generation.status, 200);
+  assert.equal((await generation.json()).narration.provider, 'azure-speech');
+  const generationPreview = await request('/api/v1/openmontage/generations/openmontage-generation%3Atest/preview');
+  assert.equal(generationPreview.status, 200); assert.equal(Buffer.from(await generationPreview.arrayBuffer()).toString(), 'draft-video');
+  const generationNarration = await request('/api/v1/openmontage/generations/openmontage-generation%3Atest/narration');
+  assert.equal(generationNarration.status, 200); assert.equal(generationNarration.headers.get('content-type'), 'audio/mpeg'); assert.equal(Buffer.from(await generationNarration.arrayBuffer()).toString(), 'draft-audio');
   assert.deepEqual(calls, [['brief', 'org_fixture', 'brief-key'], ['ingest', 'org_fixture', 'brief:1'], ['approve', 'org_fixture', 'artifact:1']]);
+  assert.deepEqual(generationCalls, [['create', 'org_fixture', 'LOCKED_INTERACTIVE', 'Simulation-only training.']]);
   console.log('OpenMontage HTTP passed: author brief, render ingestion, reviewer gate, approved scene lookup, and video delivery are tenant-scoped and role-checked.');
 } finally { await new Promise(resolve => server.close(resolve)); }

@@ -12,6 +12,10 @@ assert.match(prompt, /every visible material and surface must be photorealistic/
 assert.match(prompt, /Always use the user's standpoint as the point of view/);
 assert.match(prompt, /Keep the foreground device unchanged/);
 assert.match(prompt, /Scene-specific request:\nCreate a quiet clinical room\./);
+const cinematicPrompt = composeImageGenerationPrompt(base, 'Create a slow room walkthrough.', 'CINEMATIC');
+assert.match(cinematicPrompt, /Integration mode: CINEMATIC/);
+assert.match(cinematicPrompt, /physically coherent and trackable/);
+assert.match(prompt, /Integration mode: LOCKED_INTERACTIVE/);
 assert.throws(() => composeImageGenerationPrompt(undefined, '   '), /IMAGE_GENERATION_SCENE_PROMPT_REQUIRED/);
 assert.throws(() => composeImageGenerationPrompt('x'.repeat(4000), 'scene'), /IMAGE_GENERATION_PROMPT_TOO_LONG/);
 assert.throws(() => readImageGenerationBaseInstructions({ IMAGE_GENERATION_BASE_INSTRUCTIONS: 'inline', IMAGE_GENERATION_BASE_INSTRUCTIONS_FILE: 'instructions.txt' }), /IMAGE_GENERATION_BASE_INSTRUCTIONS_AMBIGUOUS/);
