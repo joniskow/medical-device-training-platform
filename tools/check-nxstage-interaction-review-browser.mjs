@@ -279,6 +279,17 @@ try{
  await evaluate('document.querySelector("#model-canvas").scrollIntoView({block:"center"})');
  await new Promise(wait=>setTimeout(wait,350));
  const tubImage=await command('Page.captureScreenshot',{format:'png'});await writeFile('output/nxstage-interaction-review/review-tub-out.png',Buffer.from(tubImage.data,'base64'));
+ const tubRim=await evaluate('window.__findVisibleTubPart("Tub front rim")');
+ assert(tubRim, 'The exposed front rim must be a direct tub target');
+ await command('Emulation.setTouchEmulationEnabled',{enabled:true,maxTouchPoints:1});
+ await command('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[{...tubRim,id:49}]});
+ await waitFor('/Holding PureFlow tub/.test(document.querySelector("#model-status").textContent)');
+ await command('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]});
+ await waitFor('/PureFlow tub is pushed in/.test(document.querySelector("#model-status").textContent)');
+ await command('Emulation.setTouchEmulationEnabled',{enabled:false});
+ await evaluate('[...document.querySelectorAll("#action-controls button")].find(b=>b.textContent==="Pull out PureFlow tub").click()');
+ await waitFor('/PureFlow tub is pulled out/.test(document.querySelector("#model-status").textContent)');
+ await new Promise(wait=>setTimeout(wait,600));
  const materialPoint=await evaluate('(()=>{const r=document.querySelector("#model-canvas").getBoundingClientRect();return {x:r.left+8,y:r.top+8}})()');
  await command('Input.dispatchMouseEvent',{type:'mouseMoved',...materialPoint});
  await evaluate('document.querySelector("[data-component-id=nxstage-cabinet-door]").click()');
