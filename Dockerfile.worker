@@ -28,6 +28,7 @@ COPY packages/db ./packages/db
 COPY packages/model-runtime ./packages/model-runtime
 COPY packages/storage ./packages/storage
 COPY tools/reconstruction ./tools/reconstruction
+COPY fixtures/nxstage-system-one ./fixtures/nxstage-system-one
 RUN pnpm install --frozen-lockfile
 RUN pnpm --filter @medical-device/contracts build && pnpm --filter @medical-device/simulation-schema build && pnpm --filter @medical-device/model-runtime build && pnpm --filter @medical-device/db build && pnpm --filter @medical-device/storage build && pnpm --filter @medical-device/worker build && pnpm deploy --legacy --filter @medical-device/worker --prod /out
 
@@ -57,6 +58,7 @@ ENV BLENDER_USER_CONFIG=/tmp/blender-config
 RUN groupadd --system app && useradd --system --gid app app
 COPY --from=build /out ./
 COPY --from=build /workspace/tools/reconstruction /opt/reconstruction-scripts
+COPY --from=build /workspace/fixtures/nxstage-system-one ./fixtures/nxstage-system-one
 COPY --from=openmvs /opt/openmvs /opt/openmvs
 RUN mkdir -p /tmp/reconstruction /tmp/blender-config && chown -R app:app /tmp/reconstruction /tmp/blender-config
 USER app
