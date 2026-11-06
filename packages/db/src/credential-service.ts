@@ -29,6 +29,7 @@ export async function issueCredentialInTransaction(client:PoolClient,tenant:Tena
           WHERE e.organization_id=$1 AND e.enrollment_id=$2 AND e.learner_id=$3 AND e.status='ACTIVE' AND r.status='PUBLISHED' FOR UPDATE OF e FOR SHARE OF r`,[tenant.organizationId,enrollmentId,tenant.actorId]);
         const release=bound.rows[0];if(!release)throw new Error('CREDENTIAL_NOT_FOUND');
         const policy=release.manifest?.content?.policy;
+        if(policy?.credentialIssuance==='DISABLED') { if(automatic)return null; throw new Error('CREDENTIAL_ISSUANCE_DISABLED'); }
         if(automatic && policy?.schemaVersion!=='certification-policy.v1')return null;
         const qualificationId='initial';
         // Serialize qualification across course versions so delayed historical issuance cannot race supersession.

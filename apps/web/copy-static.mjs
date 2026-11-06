@@ -1,8 +1,11 @@
-import { copyFile, mkdir } from "node:fs/promises";
+import { copyFile, mkdir, readFile, writeFile } from "node:fs/promises";
+import { gzipSync } from 'node:zlib';
 import { resolve } from "node:path";
 
 const root = resolve(import.meta.dirname);
 await mkdir(resolve(root, "dist"), { recursive: true });
+await copyFile(resolve(root, 'src/api-docs.html'), resolve(root, 'dist/api-docs.html'));
+await copyFile(resolve(root, 'src/developer-starter.html'), resolve(root, 'dist/developer-starter.html'));
 await copyFile(resolve(root, "src/index.html"), resolve(root, "dist/index.html"));
 await copyFile(resolve(root, "src/demo.html"), resolve(root, "dist/demo.html"));
 await copyFile(resolve(root, "src/demo.css"), resolve(root, "dist/demo.css"));
@@ -24,6 +27,9 @@ await copyFile(resolve(root, "../../fixtures/aurora-training/aurora-training.glb
 await copyFile(resolve(root, "src/model/aurora-training-manifest.json"), resolve(root, "dist/model/aurora-training-manifest.json"));
 await copyFile(resolve(root, "../../fixtures/nxstage-system-one-interactive/nxstage-system-one.glb"), resolve(root, "dist/model/nxstage-system-one.glb"));
 await copyFile(resolve(root, "../../fixtures/nxstage-system-one-interactive/model-manifest.json"), resolve(root, "dist/model/nxstage-system-one-manifest.json"));
+await copyFile(resolve(root, "../../fixtures/nxstage-system-one-rear-outlet-depth-review/nxstage-system-one.glb"), resolve(root, "dist/model/nxstage-review.glb"));
+await copyFile(resolve(root, "../../fixtures/nxstage-system-one-rear-outlet-depth-review/model-manifest.json"), resolve(root, "dist/model/nxstage-review-manifest.json"));
+await copyFile(resolve(root, "../../fixtures/nxstage-system-one-rear-outlet-depth-review/office-scene-review.json"), resolve(root, "dist/model/nxstage-review-scene.json"));
 await copyFile(resolve(root, "../../fixtures/nxstage-system-one/nxstage-system-one.glb"), resolve(root, "dist/model/nxstage-cinematic-source.glb"));
 await copyFile(resolve(root, "../../fixtures/nxstage-system-one/nxstage-cinematic-source-manifest.json"), resolve(root, "dist/model/nxstage-cinematic-source-manifest.json"));
 await copyFile(resolve(root, "src/model/nxstage-training-scene-manifest.json"), resolve(root, "dist/model/nxstage-training-scene-manifest.json"));
@@ -58,3 +64,9 @@ await copyFile(resolve(root,'src/candidate-training.html'),resolve(root,'dist/ca
 await copyFile(resolve(root,'src/course-availability.html'),resolve(root,'dist/course-availability.html'));
 
 await copyFile(resolve(root,'src/wallet.html'),resolve(root,'dist/wallet.html'));
+
+// Public bundles are compressed once at build time, without per-request CPU cost.
+for(const name of ['training-viewer.js','developer-starter.js','signin.js','auth-redirect.js']){
+ const file=resolve(root,'dist',name);
+ await writeFile(`${file}.gz`,gzipSync(await readFile(file),{level:9}));
+}

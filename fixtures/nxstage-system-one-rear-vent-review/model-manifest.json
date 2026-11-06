@@ -1,0 +1,919 @@
+{
+  "schemaVersion": "model-manifest.v1",
+  "format": "glb",
+  "sourceHash": "88f4eb6782dde1d6b5f9d18636954ae13418a0db81fff9082ee4826de7358354",
+  "unitSystem": "meter",
+  "scaleMeters": 1,
+  "upAxis": "Y",
+  "handedness": "right",
+  "origin": "bounding-box-center",
+  "forwardAxis": "-Z",
+  "normalizationStatus": "CANONICAL",
+  "sceneNodeCount": 219,
+  "meshCount": 210,
+  "materialCount": 20,
+  "textureCount": 59,
+  "triangleCount": 80095,
+  "materials": [
+    {
+      "materialId": "material-0",
+      "name": "Material 1"
+    },
+    {
+      "materialId": "material-1",
+      "name": "Material 2"
+    },
+    {
+      "materialId": "material-2",
+      "name": "Material 3"
+    },
+    {
+      "materialId": "material-3",
+      "name": "Material 4"
+    },
+    {
+      "materialId": "material-4",
+      "name": "Material 5"
+    },
+    {
+      "materialId": "material-5",
+      "name": "Material 6"
+    },
+    {
+      "materialId": "material-6",
+      "name": "Material 7"
+    },
+    {
+      "materialId": "material-7",
+      "name": "Material 8"
+    },
+    {
+      "materialId": "material-8",
+      "name": "Material 9"
+    },
+    {
+      "materialId": "material-9",
+      "name": "Material 10"
+    },
+    {
+      "materialId": "material-10",
+      "name": "Material 11"
+    },
+    {
+      "materialId": "material-11",
+      "name": "Material 12"
+    },
+    {
+      "materialId": "material-12",
+      "name": "Material 13"
+    },
+    {
+      "materialId": "material-13",
+      "name": "Material 14"
+    },
+    {
+      "materialId": "material-14",
+      "name": "Material 15"
+    },
+    {
+      "materialId": "material-15",
+      "name": "Material 16"
+    },
+    {
+      "materialId": "material-16",
+      "name": "Material 17"
+    },
+    {
+      "materialId": "material-17",
+      "name": "Material 18"
+    },
+    {
+      "materialId": "material-18",
+      "name": "Material 19"
+    },
+    {
+      "materialId": "material-19",
+      "name": "Subtle embossed mark study"
+    }
+  ],
+  "textures": [
+    {
+      "textureId": "texture-0",
+      "sha256": "e7f000302f15a8aaeafd03987f87761e3b6c5a0bfc29cdcc318abd942fc65696",
+      "byteLength": 3689
+    },
+    {
+      "textureId": "texture-1",
+      "sha256": "571eeced56a5d0267231ae06e73219d4780d20757933b68f1e6e4a325b01ce76",
+      "byteLength": 2579
+    },
+    {
+      "textureId": "texture-2",
+      "sha256": "a75c30c31368421e5c554ec0f04a401258fc32634e3a84074e2628fbda0be483",
+      "byteLength": 3215
+    },
+    {
+      "textureId": "texture-3",
+      "sha256": "e7f000302f15a8aaeafd03987f87761e3b6c5a0bfc29cdcc318abd942fc65696",
+      "byteLength": 3689
+    },
+    {
+      "textureId": "texture-4",
+      "sha256": "e7f555f89d09306f6af528540a5ed8bef797f9a00aa1528366021c2479b259c3",
+      "byteLength": 1654
+    },
+    {
+      "textureId": "texture-5",
+      "sha256": "d999da72cc7a4a27d2edf0d52b471dcbd22f78b0d87c98c3ba2713e5ba30c6f7",
+      "byteLength": 3226
+    },
+    {
+      "textureId": "texture-6",
+      "sha256": "e7f000302f15a8aaeafd03987f87761e3b6c5a0bfc29cdcc318abd942fc65696",
+      "byteLength": 3689
+    },
+    {
+      "textureId": "texture-7",
+      "sha256": "9434229fc2146694ce3b78b1853a0a8543e92fd14aa8d3e75ba5383b2fec9595",
+      "byteLength": 413
+    },
+    {
+      "textureId": "texture-8",
+      "sha256": "a3f65d68a97fdc7b576d115948c8f7149ca4bdc46ceb9d0d1b638a4507bd6660",
+      "byteLength": 3231
+    },
+    {
+      "textureId": "texture-9",
+      "sha256": "38258f65f46e3a8fece58dea20b84300aa5809b62dd3f0959657e7c0dfadebe5",
+      "byteLength": 3800
+    },
+    {
+      "textureId": "texture-10",
+      "sha256": "a314656145aec5514b53b04683d1ece245155e4c5374c0cc507f36acbde2ea93",
+      "byteLength": 2832
+    },
+    {
+      "textureId": "texture-11",
+      "sha256": "44365e32e897effbfa145c349b1296a57bf0595503bbc144d0f5c279075a11c6",
+      "byteLength": 3648
+    },
+    {
+      "textureId": "texture-12",
+      "sha256": "df00de43df7927b0c3b62d8be1c5cc69dceb24ed28ebd1906a9ec33580ff6694",
+      "byteLength": 3869
+    },
+    {
+      "textureId": "texture-13",
+      "sha256": "24ddbd34d9fa96f61c447ac71ba21f5cf9ed9e8601bcab15269d8b6f533b9dff",
+      "byteLength": 4074
+    },
+    {
+      "textureId": "texture-14",
+      "sha256": "8ed0ceca7b9d3a068f57a44bfd784159e2ca562a8f51f0c0ddf4295c8c629c7a",
+      "byteLength": 3663
+    },
+    {
+      "textureId": "texture-15",
+      "sha256": "74012d421162d3b55d85e767efc4c4d87d64fac878a073831d922d37d38322bf",
+      "byteLength": 3915
+    },
+    {
+      "textureId": "texture-16",
+      "sha256": "d96b9cdf4457b7b378c8b494d6c828e0e8cf4216b2a10940798482a065b2aa77",
+      "byteLength": 4149
+    },
+    {
+      "textureId": "texture-17",
+      "sha256": "048c2fc35071f0b284981f4ad66067b16fdbce8958a49a47f776724ac07a50a8",
+      "byteLength": 3609
+    },
+    {
+      "textureId": "texture-18",
+      "sha256": "de0bca8dd2b11d00e4a5926fb070aee6014f54dd7f71cf7c83b84af0755c80a6",
+      "byteLength": 3836
+    },
+    {
+      "textureId": "texture-19",
+      "sha256": "a7c704129883205f11cc85be83cdf970ed2c585c4e217f7e17100d640f9dd66b",
+      "byteLength": 4057
+    },
+    {
+      "textureId": "texture-20",
+      "sha256": "f0cd6be466eef6422335c36a7764fd30a0b0233eee80a547cac87886124f16d8",
+      "byteLength": 3673
+    },
+    {
+      "textureId": "texture-21",
+      "sha256": "148cc9f4af57e1ad2c4ec1cf3e0247606e3e58f15918720e635bafc096078bdc",
+      "byteLength": 3846
+    },
+    {
+      "textureId": "texture-22",
+      "sha256": "8cfb697a4180b2baad3eb6e9ab599c772dc3c2752dd5e9fcf426e4f101f3fa37",
+      "byteLength": 3904
+    },
+    {
+      "textureId": "texture-23",
+      "sha256": "3e0ee9b4346c58da3e2af14229762bbcfb987381251e39888b6d24ecf4b70e81",
+      "byteLength": 3645
+    },
+    {
+      "textureId": "texture-24",
+      "sha256": "e7f000302f15a8aaeafd03987f87761e3b6c5a0bfc29cdcc318abd942fc65696",
+      "byteLength": 3689
+    },
+    {
+      "textureId": "texture-25",
+      "sha256": "ba191c27a5c41d5948f3513e2cd79edb9b11c617bbc22f333e19607cfa86e345",
+      "byteLength": 1599
+    },
+    {
+      "textureId": "texture-26",
+      "sha256": "f68371356fe0028e21850cf3b6dcd7126a77587a231a880da149e0df785d6212",
+      "byteLength": 3230
+    },
+    {
+      "textureId": "texture-27",
+      "sha256": "e7f000302f15a8aaeafd03987f87761e3b6c5a0bfc29cdcc318abd942fc65696",
+      "byteLength": 3689
+    },
+    {
+      "textureId": "texture-28",
+      "sha256": "4be4ec6f269e823f7621f43fb4787363228692759e85e3bbe3c3024de4790faa",
+      "byteLength": 2817
+    },
+    {
+      "textureId": "texture-29",
+      "sha256": "35baf6fcbb736075f93c1a19f8fba9f3ecce873024fc5f900f6898da75fa4cb3",
+      "byteLength": 3216
+    },
+    {
+      "textureId": "texture-30",
+      "sha256": "e7f000302f15a8aaeafd03987f87761e3b6c5a0bfc29cdcc318abd942fc65696",
+      "byteLength": 3689
+    },
+    {
+      "textureId": "texture-31",
+      "sha256": "4be4ec6f269e823f7621f43fb4787363228692759e85e3bbe3c3024de4790faa",
+      "byteLength": 2817
+    },
+    {
+      "textureId": "texture-32",
+      "sha256": "35baf6fcbb736075f93c1a19f8fba9f3ecce873024fc5f900f6898da75fa4cb3",
+      "byteLength": 3216
+    },
+    {
+      "textureId": "texture-33",
+      "sha256": "739f5af79c0ae10923777da085932e8cf996c1ecad947285c0b6019d8d9da8d7",
+      "byteLength": 1394508
+    },
+    {
+      "textureId": "texture-34",
+      "sha256": "908f962b4f22d8442a0bcc0c2c0b8891ceb70316e9219dd103b07c2eb6dc2153",
+      "byteLength": 315
+    },
+    {
+      "textureId": "texture-35",
+      "sha256": "739f5af79c0ae10923777da085932e8cf996c1ecad947285c0b6019d8d9da8d7",
+      "byteLength": 1394508
+    },
+    {
+      "textureId": "texture-36",
+      "sha256": "3f75fd6f64dafde14b84403426937967b9d8f302dbf34c49566b3e7ee96c6158",
+      "byteLength": 411
+    },
+    {
+      "textureId": "texture-37",
+      "sha256": "e7f000302f15a8aaeafd03987f87761e3b6c5a0bfc29cdcc318abd942fc65696",
+      "byteLength": 3689
+    },
+    {
+      "textureId": "texture-38",
+      "sha256": "fd29cab186907773461591899935eec82f9224029de1ec80c519fd09bb58345c",
+      "byteLength": 2850
+    },
+    {
+      "textureId": "texture-39",
+      "sha256": "422ba21ef38d9817fe2cfc862b527342dbbb5bddafedaea95a4d8538f94aa9a8",
+      "byteLength": 3209
+    },
+    {
+      "textureId": "texture-40",
+      "sha256": "72ea551c41f906289701c3e2bf8e9208f017ada99c4f878a3e8d958118ddf9e5",
+      "byteLength": 3827
+    },
+    {
+      "textureId": "texture-41",
+      "sha256": "1b9a21196b6fd1dae5c600cf4a20fb9fbfb1f1eaa614a34676bfa35482f97341",
+      "byteLength": 4300
+    },
+    {
+      "textureId": "texture-42",
+      "sha256": "e5e85510fdf0201e3b793cb464aecc95881181b50ed186f2a3db6b07554f345a",
+      "byteLength": 3669
+    },
+    {
+      "textureId": "texture-43",
+      "sha256": "e7f000302f15a8aaeafd03987f87761e3b6c5a0bfc29cdcc318abd942fc65696",
+      "byteLength": 3689
+    },
+    {
+      "textureId": "texture-44",
+      "sha256": "629d7a5566fe3545649c83859b42d8ece06d66c235fe19b503017dacbcc42108",
+      "byteLength": 2855
+    },
+    {
+      "textureId": "texture-45",
+      "sha256": "2edcb6da3965aacf26dcbc3c5e4671f01592d24ccf64da66b12fc3e6594168b1",
+      "byteLength": 3207
+    },
+    {
+      "textureId": "texture-46",
+      "sha256": "c091e3ae3a74cdd768a5f2f6f42ab1bb83cd3157c38ea0a65d4dcb65612843d5",
+      "byteLength": 3877
+    },
+    {
+      "textureId": "texture-47",
+      "sha256": "2583676f18579b7b21a59802de45a4bed10c366b6631661a1d5cb460dee87b9a",
+      "byteLength": 4023
+    },
+    {
+      "textureId": "texture-48",
+      "sha256": "5564d668948e5891ae6d0784a9dff929658e58c963d3c32718372175d52b1c1b",
+      "byteLength": 3609
+    },
+    {
+      "textureId": "texture-49",
+      "sha256": "872bebc515ef3bca5377adfe27531802f6e0c1c5289604edbd34365c877ff4a1",
+      "byteLength": 3888
+    },
+    {
+      "textureId": "texture-50",
+      "sha256": "4ec12128c06715a7be44cd497a32959031334500ff9d064c6d5ce1a3b7ae3b3c",
+      "byteLength": 3988
+    },
+    {
+      "textureId": "texture-51",
+      "sha256": "6b29da5ab261042dfd4fbf6ce15027b7564b6bd4703f341b474004aac9c60aa0",
+      "byteLength": 3650
+    },
+    {
+      "textureId": "texture-52",
+      "sha256": "a608d7864221e7c32ce7651bb421c3ed511055a866b8bd51102b599c22521b49",
+      "byteLength": 3928
+    },
+    {
+      "textureId": "texture-53",
+      "sha256": "2c29214f1815ef25cfbcd5c3c2b1b5fb621a0cc5d2ce76363495a9fe287a49be",
+      "byteLength": 3070
+    },
+    {
+      "textureId": "texture-54",
+      "sha256": "1d29afada7a13836240d3157b8ad31586d19e4ec0e833a6351a9ccdbfbe7cd06",
+      "byteLength": 3644
+    },
+    {
+      "textureId": "texture-55",
+      "sha256": "bfbfa2a691c2c73918b9abca11cfdf9dae4e03cfaef7dd97f8aa992edf79f054",
+      "byteLength": 3894
+    },
+    {
+      "textureId": "texture-56",
+      "sha256": "16c8cde561d81ab06ca64d495a9fff42e7d146d61b81fa65b274a27633619cb2",
+      "byteLength": 3792
+    },
+    {
+      "textureId": "texture-57",
+      "sha256": "b63352aa634eb5ab981e6468fe69d1d03a1776774c22093ab4f8cf01f1efb291",
+      "byteLength": 3599
+    },
+    {
+      "textureId": "texture-58",
+      "sha256": "5cd6e2a7aab8f07eb5114e68dd121f33e86a56e10a93eb6acd5c44e223a2b895",
+      "byteLength": 23046
+    }
+  ],
+  "components": [
+    {
+      "componentId": "nxstage-cabinet-door",
+      "nodePath": "Cabinet proportion study/Lower cabinet door hinge",
+      "displayName": "Lower cabinet door",
+      "aliases": [],
+      "interactionCapabilities": [
+        "select",
+        "open",
+        "rotate"
+      ],
+      "interactionTargets": [
+        {
+          "targetId": "NX-C02-CABINET-DOOR",
+          "nodePath": "Cabinet proportion study/Lower cabinet door hinge",
+          "displayName": "Lower cabinet door",
+          "interactionType": "open",
+          "openRotationRadians": -1.5707963267948966,
+          "closeRequires": {
+            "componentId": "pureflow-tub",
+            "transform": "translationX",
+            "value": 0,
+            "message": "Push the tub in before closing the cabinet door."
+          }
+        }
+      ],
+      "permittedTransforms": {
+        "rotationY": {
+          "min": -1.5707963267948966,
+          "max": 0,
+          "step": 0.2617993877991494,
+          "snap": 0.017453292519943295
+        }
+      }
+    },
+    {
+      "componentId": "pureflow-tub",
+      "nodePath": "Cabinet proportion study/PureFlow tub outward orientation/PureFlow tub travel axis",
+      "displayName": "PureFlow tub",
+      "aliases": [],
+      "interactionCapabilities": [
+        "select",
+        "open",
+        "translate"
+      ],
+      "interactionTargets": [
+        {
+          "targetId": "PF-C02-TUB",
+          "nodePath": "Cabinet proportion study/PureFlow tub outward orientation/PureFlow tub travel axis",
+          "displayName": "PureFlow tub",
+          "interactionType": "open",
+          "openTranslationMeters": 0.4537753003484877,
+          "openVerb": "Pull out",
+          "closeVerb": "Push in",
+          "openRequires": {
+            "componentId": "nxstage-cabinet-door",
+            "transform": "rotationY",
+            "value": -1.5707963267948966,
+            "message": "Open the cabinet door fully before pulling out the tub."
+          }
+        }
+      ],
+      "permittedTransforms": {
+        "translationX": {
+          "min": 0,
+          "max": 0.4537753003484877,
+          "step": 0.008561798119782785,
+          "snap": 0.0008561798119782785
+        }
+      }
+    },
+    {
+      "componentId": "nxstage-cycler-handle",
+      "nodePath": "Cycler door travel axis/Cycler door assembly/Cycler handle hinge axis/Cycler handle hinge",
+      "displayName": "Cycler door handle",
+      "aliases": [],
+      "interactionCapabilities": [
+        "select",
+        "open",
+        "rotate"
+      ],
+      "interactionTargets": [
+        {
+          "targetId": "NX-C04-CYCLER-HANDLE",
+          "nodePath": "Cycler door travel axis/Cycler door assembly/Cycler handle hinge axis/Cycler handle hinge",
+          "displayName": "Cycler door handle",
+          "interactionType": "open",
+          "openRotationRadians": -1.5707963267948966,
+          "openVerb": "Lift",
+          "closeVerb": "Lower",
+          "closeRequires": {
+            "componentId": "nxstage-cycler-door",
+            "transform": "translationX",
+            "value": 0,
+            "message": "Close the cycler door before lowering the handle."
+          }
+        }
+      ],
+      "permittedTransforms": {
+        "rotationY": {
+          "min": -1.5707963267948966,
+          "max": 0,
+          "step": 1.5707963267948966
+        }
+      }
+    },
+    {
+      "componentId": "nxstage-control-panel",
+      "nodePath": "Cycler door travel axis/Cycler door assembly/System One control fascia",
+      "displayName": "NxStage control panel",
+      "aliases": [],
+      "interactionCapabilities": [
+        "select",
+        "press"
+      ],
+      "interactionTargets": [
+        {
+          "targetId": "NX-C01-ADD-FLUID",
+          "nodePath": "Cycler door travel axis/Cycler door assembly/System One control fascia/Photographed Add Fluid",
+          "displayName": "Add Fluid",
+          "pressDepthMeters": 0.0003424719247913114,
+          "pressAxis": [
+            0,
+            0,
+            -1
+          ]
+        },
+        {
+          "targetId": "NX-C01-VOLUME-TOGGLE",
+          "nodePath": "Cycler door travel axis/Cycler door assembly/System One control fascia/Photographed Volume Toggle",
+          "displayName": "Volume Toggle",
+          "pressDepthMeters": 0.0003424719247913114,
+          "pressAxis": [
+            0,
+            0,
+            -1
+          ]
+        },
+        {
+          "targetId": "NX-C01-TREATMENT",
+          "nodePath": "Cycler door travel axis/Cycler door assembly/System One control fascia/Photographed Treatment",
+          "displayName": "Treatment",
+          "pressDepthMeters": 0.0003424719247913114,
+          "pressAxis": [
+            0,
+            0,
+            -1
+          ]
+        },
+        {
+          "targetId": "NX-C01-ROW1-DOWN",
+          "nodePath": "Cycler door travel axis/Cycler door assembly/System One control fascia/Photographed Dialysate decrease",
+          "displayName": "Dialysate decrease",
+          "pressDepthMeters": 0.0003424719247913114,
+          "pressAxis": [
+            0,
+            0,
+            -1
+          ]
+        },
+        {
+          "targetId": "NX-C01-ROW1-UP",
+          "nodePath": "Cycler door travel axis/Cycler door assembly/System One control fascia/Photographed Dialysate increase",
+          "displayName": "Dialysate increase",
+          "pressDepthMeters": 0.0003424719247913114,
+          "pressAxis": [
+            0,
+            0,
+            -1
+          ]
+        },
+        {
+          "targetId": "NX-C01-ROW2-DOWN",
+          "nodePath": "Cycler door travel axis/Cycler door assembly/System One control fascia/Photographed Ultrafiltration decrease",
+          "displayName": "Ultrafiltration decrease",
+          "pressDepthMeters": 0.0003424719247913114,
+          "pressAxis": [
+            0,
+            0,
+            -1
+          ]
+        },
+        {
+          "targetId": "NX-C01-ROW2-UP",
+          "nodePath": "Cycler door travel axis/Cycler door assembly/System One control fascia/Photographed Ultrafiltration increase",
+          "displayName": "Ultrafiltration increase",
+          "pressDepthMeters": 0.0003424719247913114,
+          "pressAxis": [
+            0,
+            0,
+            -1
+          ]
+        },
+        {
+          "targetId": "NX-C01-ROW3-DOWN",
+          "nodePath": "Cycler door travel axis/Cycler door assembly/System One control fascia/Photographed Blood flow decrease",
+          "displayName": "Blood flow decrease",
+          "pressDepthMeters": 0.0003424719247913114,
+          "pressAxis": [
+            0,
+            0,
+            -1
+          ]
+        },
+        {
+          "targetId": "NX-C01-ROW3-UP",
+          "nodePath": "Cycler door travel axis/Cycler door assembly/System One control fascia/Photographed Blood flow increase",
+          "displayName": "Blood flow increase",
+          "pressDepthMeters": 0.0003424719247913114,
+          "pressAxis": [
+            0,
+            0,
+            -1
+          ]
+        },
+        {
+          "targetId": "NX-C01-STOP",
+          "nodePath": "Cycler door travel axis/Cycler door assembly/System One control fascia/Photographed Stop control",
+          "displayName": "Stop control",
+          "pressDepthMeters": 0.0005137078871869671,
+          "pressAxis": [
+            0,
+            0,
+            -1
+          ]
+        },
+        {
+          "targetId": "NX-C01-MUTE",
+          "nodePath": "Cycler door travel axis/Cycler door assembly/System One control fascia/Photographed Mute control",
+          "displayName": "Mute control",
+          "pressDepthMeters": 0.0003424719247913114,
+          "pressAxis": [
+            0,
+            0,
+            -1
+          ]
+        }
+      ]
+    },
+    {
+      "componentId": "nxstage-cycler-door",
+      "nodePath": "Cycler door travel axis/Cycler door assembly",
+      "displayName": "Upper cycler door",
+      "aliases": [],
+      "interactionCapabilities": [
+        "select",
+        "open",
+        "translate"
+      ],
+      "interactionTargets": [
+        {
+          "targetId": "NX-C03-CYCLER-DOOR",
+          "nodePath": "Cycler door travel axis/Cycler door assembly/Cycler door front shell",
+          "displayName": "Upper cycler door",
+          "interactionType": "open",
+          "openTranslationMeters": 0.06849438495826228,
+          "openRequires": {
+            "componentId": "nxstage-cycler-handle",
+            "transform": "rotationY",
+            "value": -1.5707963267948966,
+            "message": "Lift the cycler door handle before opening the door."
+          }
+        }
+      ],
+      "permittedTransforms": {
+        "translationX": {
+          "min": 0,
+          "max": 0.06849438495826228,
+          "step": 0.008561798119782785,
+          "snap": 0.0008561798119782785
+        }
+      }
+    },
+    {
+      "componentId": "cycler-rear-power-switch",
+      "nodePath": "Cycler power switch pivot",
+      "displayName": "Cycler rear power switch",
+      "aliases": [],
+      "interactionCapabilities": [
+        "select",
+        "open",
+        "rotate"
+      ],
+      "interactionTargets": [
+        {
+          "targetId": "NX-C05-POWER-SWITCH",
+          "nodePath": "Cycler power switch pivot/Cycler rear power rocker",
+          "displayName": "Cycler rear power switch",
+          "interactionType": "open",
+          "openRotationRadians": -0.24,
+          "openRotationSpace": "local",
+          "touchTapSlopPixels": 12,
+          "openVerb": "Set on",
+          "closeVerb": "Set off"
+        }
+      ],
+      "permittedTransforms": {
+        "rotationY": {
+          "min": -0.24,
+          "max": 0,
+          "step": 0.24,
+          "snap": 0.24
+        }
+      }
+    },
+    {
+      "componentId": "express-warmer-panel",
+      "nodePath": "Express warmer control panel",
+      "displayName": "Express warmer control panel",
+      "aliases": [],
+      "interactionCapabilities": [
+        "select",
+        "press"
+      ],
+      "interactionTargets": [
+        {
+          "targetId": "FW-C01-DOWN",
+          "nodePath": "Express warmer control panel/Warmer cooler",
+          "displayName": "Warmer temperature down",
+          "pressDepthMeters": 0.0003424719247913114,
+          "pressAxis": [
+            0,
+            0,
+            -1
+          ]
+        },
+        {
+          "targetId": "FW-C01-UP",
+          "nodePath": "Express warmer control panel/Warmer warmer",
+          "displayName": "Warmer temperature up",
+          "pressDepthMeters": 0.0003424719247913114,
+          "pressAxis": [
+            0,
+            0,
+            -1
+          ]
+        }
+      ]
+    },
+    {
+      "componentId": "pureflow-control-panel",
+      "nodePath": "PureFlow control panel",
+      "displayName": "PureFlow control panel",
+      "aliases": [],
+      "interactionCapabilities": [
+        "select",
+        "press"
+      ],
+      "interactionTargets": [
+        {
+          "targetId": "PF-C01-UP",
+          "nodePath": "PureFlow control panel/PureFlow up",
+          "displayName": "PureFlow up",
+          "pressDepthMeters": 0.0003424719247913114,
+          "pressAxis": [
+            0,
+            0,
+            -1
+          ]
+        },
+        {
+          "targetId": "PF-C01-DOWN",
+          "nodePath": "PureFlow control panel/PureFlow down",
+          "displayName": "PureFlow down",
+          "pressDepthMeters": 0.0003424719247913114,
+          "pressAxis": [
+            0,
+            0,
+            -1
+          ]
+        },
+        {
+          "targetId": "PF-C01-GO",
+          "nodePath": "PureFlow control panel/PureFlow GO",
+          "displayName": "PureFlow GO",
+          "pressDepthMeters": 0.0003424719247913114,
+          "pressAxis": [
+            0,
+            0,
+            -1
+          ]
+        },
+        {
+          "targetId": "PF-C01-STOP",
+          "nodePath": "PureFlow control panel/PureFlow STOP",
+          "displayName": "PureFlow STOP",
+          "pressDepthMeters": 0.0003424719247913114,
+          "pressAxis": [
+            0,
+            0,
+            -1
+          ]
+        }
+      ]
+    }
+  ],
+  "reconstructionSource": {
+    "type": "REFERENCE_PHOTO_SET",
+    "count": 20,
+    "rightsReview": "REVIEW_REQUIRED",
+    "files": [
+      {
+        "file": "output/nxstage-system-one-photos/20261020_130814.jpg",
+        "bytes": 2667915,
+        "sha256": "2ca138d71b8c42c803975d2b2755cfcd1ba1eeec6babe70d836abcf7dea40a29"
+      },
+      {
+        "file": "output/nxstage-system-one-photos/20261020_130828.jpg",
+        "bytes": 2640708,
+        "sha256": "629a8f80c581f4717b07ebf80064c858ce642791695592402fd6783b6098e6c0"
+      },
+      {
+        "file": "output/nxstage-system-one-photos/20261020_130843.jpg",
+        "bytes": 2915190,
+        "sha256": "fbb0bfd7c5689d287a2db9eb13959b3c2c71d4c3033bff2a53cc6574ec1d4df0"
+      },
+      {
+        "file": "output/nxstage-system-one-photos/20261020_130845.jpg",
+        "bytes": 2589306,
+        "sha256": "1346a7df4313382a135f81747f6158cd8da013001eb92b9668187175635a260e"
+      },
+      {
+        "file": "output/nxstage-system-one-photos/20261020_130849.jpg",
+        "bytes": 2523365,
+        "sha256": "05c865a37d7c2f6f801548bedeea429926dc0b302945ba69f809a4a898f73287"
+      },
+      {
+        "file": "output/nxstage-system-one-photos/20261020_130908.jpg",
+        "bytes": 2828487,
+        "sha256": "966bd84796149d5ea1a6ef5b638df661c4ec846c6fef6ed611a8f0a43dcc49ba"
+      },
+      {
+        "file": "output/nxstage-system-one-photos/20261020_130936.jpg",
+        "bytes": 2098167,
+        "sha256": "1e709da4b6b0a38a65250c475c5a3c375a10c5015196d24ac86ebbcb95126a1d"
+      },
+      {
+        "file": "output/nxstage-system-one-photos/20261020_130938.jpg",
+        "bytes": 2125280,
+        "sha256": "a16f4611b4ffff733b76882d6ac7f13b084cbadc5b4315d529ef3eb0553f518e"
+      },
+      {
+        "file": "output/nxstage-system-one-photos/20261020_130954.jpg",
+        "bytes": 2611532,
+        "sha256": "322c99f312057672738b25d85da05e18af47b54471f5aa9be75ec862cfd1ba5d"
+      },
+      {
+        "file": "output/nxstage-system-one-photos/20261020_131015.jpg",
+        "bytes": 2541569,
+        "sha256": "edf3c8af8dfa277cd76587576b76f1f448ad00253ad3a908714a078360673c1b"
+      },
+      {
+        "file": "output/nxstage-system-one-photos/20261020_131018.jpg",
+        "bytes": 2679794,
+        "sha256": "6ca919c1115a955c2fd003f47bb7f72e33b3a4e404620a8462c7ba666893c12f"
+      },
+      {
+        "file": "output/nxstage-system-one-photos/20261020_131048.jpg",
+        "bytes": 1766328,
+        "sha256": "0a72bc724009f2d22b5e2553f6148d992d4d3e7e4b2b221909bf938c89536d4d"
+      },
+      {
+        "file": "output/nxstage-system-one-photos/20261020_131051.jpg",
+        "bytes": 1563950,
+        "sha256": "22cfc04d764f042a296f6c2b0e844d2827c88f535ad3fd1bc798b3fd88162d8e"
+      },
+      {
+        "file": "output/nxstage-system-one-photos/20261020_131101.jpg",
+        "bytes": 1796321,
+        "sha256": "dff6db507a2cc6a1903b6f5e2cded9e1458965558595dcf7c9fc1355841999a3"
+      },
+      {
+        "file": "output/nxstage-system-one-photos/20261020_131233.jpg",
+        "bytes": 2052443,
+        "sha256": "7a6ceaf7fb0253053310700deb04547401b73e607961acb1c1d338f5e0fcc78a"
+      },
+      {
+        "file": "output/nxstage-system-one-photos/20261020_131241.jpg",
+        "bytes": 2529895,
+        "sha256": "3284b5ab41979ca67cca0781cb8de0744a0a0715faa4e516406a4ec76e06f87c"
+      },
+      {
+        "file": "output/nxstage-system-one-photos/20261020_131259.jpg",
+        "bytes": 2274016,
+        "sha256": "5f390091aa02b1f0deac4436a05950fc5b776f4713f1e00934c0724b62b28a67"
+      },
+      {
+        "file": "output/nxstage-system-one-photos/20261020_131328.jpg",
+        "bytes": 1934802,
+        "sha256": "8ba46dd585a1b41fa6ea300b085ce6996336d78a82e095e9a3300d70cdf69630"
+      },
+      {
+        "file": "output/nxstage-system-one-photos/20261020_131336.jpg",
+        "bytes": 2531714,
+        "sha256": "0c8646602be1a8a86c333b6c1bf86f26b47f749a36b8f44eda7f388df4cbce18"
+      },
+      {
+        "file": "output/nxstage-system-one-photos/20261020_131352.jpg",
+        "bytes": 1468647,
+        "sha256": "40047390d9c784b4951a83b71272eceb57a1cdd36c41bff832801296546c776f"
+      }
+    ]
+  },
+  "modelVersionId": "preview:nxstage-rear-vent-study-v1",
+  "releaseBindingId": "preview:nxstage-rear-vent-study-v1",
+  "fidelity": {
+    "status": "VISUAL_RECONSTRUCTION",
+    "sourceType": "REFERENCE_IMAGES",
+    "scaleStatus": "UNMEASURED",
+    "hiddenSurfaceUncertainty": "UNKNOWN",
+    "summary": "Scale study calibrated to an approximate published System One width; the photographed device is unmeasured and its geometry remains approximate.",
+    "evidenceRefs": [
+      "fixtures/nxstage-system-one-interaction-review/panel-review.png",
+      "fixtures/nxstage-system-one-interaction-review/front-review.png",
+      "fixtures/nxstage-system-one-interaction-review/lower-cabinet-review.png",
+      "fixtures/nxstage-system-one-interaction-review/rear-review.png"
+    ]
+  },
+  "performanceBudget": {
+    "minimumFps": 30,
+    "interactiveWithinMs": 5000,
+    "maxMemoryMb": 128
+  }
+}

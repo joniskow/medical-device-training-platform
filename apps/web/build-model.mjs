@@ -14,6 +14,8 @@ await build({
   legalComments: "none"
 });
 console.log("Bundled Babylon.js model player.");
+await build({entryPoints:[resolve(root,'dist/training-viewer.js')],bundle:true,minify:true,format:'esm',platform:'browser',target:'es2022',outfile:resolve(root,'dist/training-viewer.js'),allowOverwrite:true,sourcemap:false,legalComments:'none'});
+await build({entryPoints:[resolve(root,'dist/developer-starter.js')],bundle:true,minify:true,external:['./training-viewer.js'],format:'esm',platform:'browser',target:'es2022',outfile:resolve(root,'dist/developer-starter.js'),allowOverwrite:true,sourcemap:false,legalComments:'none'});
 await build({entryPoints:[resolve(root,"dist/learner.js")],bundle:true,external:['./author-model-runtime.js'],format:"esm",platform:"browser",target:"es2022",outfile:resolve(root,"dist/learner.js"),allowOverwrite:true,sourcemap:false,legalComments:"none"});
 console.log("Bundled learner wallet and QR renderer.");
 

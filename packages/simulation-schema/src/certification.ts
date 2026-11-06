@@ -6,6 +6,7 @@ export interface CertificationPolicy {
   maxAttempts: number; cooldownSeconds: number; attemptTtlSeconds: number;
   repeatedFailureReviewAfter: number | null; expirationDays: number | null;
   publicVerification?: {enabled:boolean;issuerName?:string;courseTitle?:string};
+  credentialIssuance?: 'ENABLED' | 'DISABLED';
 }
 export interface PolicyActivity { activityId: string; moduleId: string; kind: "assessment" | "simulation" | "content"; passScore: number; faultIds?:readonly string[] }
 export interface PolicyEvidence {
@@ -19,6 +20,7 @@ const identifier = (v: unknown): v is string => typeof v === "string" && /^[A-Za
 const range = (v: unknown,min:number,max:number) => Number.isSafeInteger(v) && Number(v)>=min && Number(v)<=max;
 const ids = (v: unknown): v is string[] => Array.isArray(v) && v.length<=200 && v.every(identifier) && new Set(v).size===v.length;
 export function validCertificationPolicy(value: unknown, activities: readonly PolicyActivity[]): value is CertificationPolicy {
+  if(object(value) && value.credentialIssuance!==undefined && !['ENABLED','DISABLED'].includes(String(value.credentialIssuance)))return false;
   if(object(value)&&value.publicVerification!==undefined){
     const config=value.publicVerification;
     if(!object(config)||typeof config.enabled!=='boolean'||Object.keys(config).some(key=>!['enabled','issuerName','courseTitle'].includes(key)))return false;
@@ -90,5 +92,6 @@ export function evaluateCertification(input: {policy: unknown; activities: reado
   });
   const score=totalMax>0?totalScore/totalMax:0;
   if(!missing.length && score<policy.passScore)missing.push("OVERALL_SCORE_REQUIRED");
+  if(policy.credentialIssuance==='DISABLED')missing.push('CREDENTIAL_ISSUANCE_DISABLED');
   return {eligible:missing.length===0 && totalMax>0,configurationValid:true,missing,activities:results,evidenceIds,score};
 }

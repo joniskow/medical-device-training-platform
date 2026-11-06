@@ -1,0 +1,27 @@
+# NxStage fine-motion review, corrected
+
+This candidate corrects the lower cabinet-door increment in `fixtures/nxstage-system-one-fine-motion-review`: it is one degree rather than 1.5 degrees. The upper door and tub retain approximately 0.86 mm increments, the motion limits and interlocks are unchanged, and the distinct version prevents confusion with earlier state. These are interaction choices, not measurements of the physical device.
+
+Blender surface checks compared the lower door with other exported meshes at all 91 permitted positions, the fully-open-door tub at all 531 permitted positions, and the upper door with fixed meshes at all 81 permitted positions. They found no intersections at those positions; the handle check found only expected pivot-fastener contacts. This does not prove clearance between sampled positions or for every independent-part combination.
+
+Additional checks sampled the midpoints between those positions: 181 lower-door poses with the tub in, 1,061 tub poses with the lower door open, and 161 upper-door poses with the handle raised. No unexpected surface intersections were detected in those configurations. The handle's two pivot-fastener contacts remained expected; continuous clearance and other combinations remain unverified.
+
+Office and model-viewer Chrome suites passed, including direct drags with release-position checks, buttons, named controls, interlocks and touch. Tests use browser emulation. To preview, set `NXSTAGE_OFFICE_REVIEW_FOLDER='fixtures/nxstage-system-one-fine-motion-v2-review'` and run `node tools/serve-nxstage-interaction-office.mjs`. The upper cartridge compartment remains simplified and treatment is not simulated; this fixture does not replace the application model.
+
+`tools/check-nxstage-version-isolation.mjs` can check this fixture by setting `NXSTAGE_REVIEW_MODEL_FOLDER` to its path and `NXSTAGE_FINE_DRAG_CHECK=1`. It verifies JSON round trips of valid fine positions, rejection of mismatched model versions, and both sides of the cabinet/tub dependency. `node tools/check-e4-postgres-session.mjs --nxstage-fine-motion` additionally passed against the local test database: a synthetic course and session persisted and resumed each fine position through a recreated service, replayed actions idempotently, and rejected the two cabinet/tub interlock violations. Its test data is scoped to a temporary organization and cleaned up. This is not a deployed or real learner session.
+
+A standalone office review is staged at `output/nxstage-fine-motion-v2/portable-review`; its integrity checks and non-test Chrome suite passed. Run `node server.mjs` in that folder to serve it locally.
+
+The updated standalone review is staged at `output/nxstage-fine-motion-v2-keyboard/portable-review`. With the model focused, use the arrow keys to select a door or tub and Shift+Up/Right or Shift+Down/Left to move it in increments. Enter or Space still opens or closes it fully. The same interlocks apply to these movements; the increments are interaction choices, not physical measurements. Chrome checks covered partial upper and lower door movement and the handle and tub interlocks.
+
+The built application offers a successor to this model at `/learner/model?preview=1&model=nxstage-review`; see `fixtures/nxstage-system-one-shelf-outline-review`. This explicit visual preview has its own static asset and is unavailable when session, release or model-version parameters are present. It does not replace the existing lesson or a release-bound session. `node tools/check-nxstage-native-preview.mjs` checks the real local API routes, visible model and reset, named controls, the ordinary preview, and release-session isolation.
+
+The sample model's creator screen links to that review. The same browser check follows the link and verifies the model and named controls at a 390-pixel phone viewport using emulated touch; it is not a physical-device test.
+
+The application review has close-up view buttons for the upper control panel, handle, upper door, lower door and tub. These views return to the front after inspecting the rear, and the lower-door view follows its opening angle. At the same phone viewport, the browser check directly touches Add Fluid and exercises both doors, the handle and tub, including their interlocks; the named-button path remains available as well.
+
+The application's “Magnify controls” menu frames the actual upper-panel meshes, lower-panel buttons, warmer buttons and rear power switch in the same 3D scene. The lower close-ups require the cabinet door to be fully open. At a 390-pixel viewport, the browser test directly touches one rendered button in each upper group, all four lower buttons, both warmer buttons and the rear switch. The switch positions are approximate and do not simulate power. This uses emulated touch and does not establish physical-device usability.
+
+In the application review, accepted warmer up/down presses also change an illustrative nine-bar display. A visible message identifies the bars as illustrative and states that power, temperature and heating are not simulated. Browser checks compare rendered frames before and after both presses and confirm that a canceled press does not update the display.
+
+The application phone check also drags the tub partway out, confirms that the lower door cannot close in that state, and verifies that canceling a separate partial drag does not submit a movement. The preview explains how to drag parts partway or tap them to move to an endpoint.

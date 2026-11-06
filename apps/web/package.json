@@ -3,10 +3,11 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "tsc --noEmit false && node ../../tools/generate-model-variants.mjs && node build-model.mjs && node copy-static.mjs",
+    "build": "tsc --noEmit false --declaration && node ../../tools/generate-model-variants.mjs && node build-model.mjs && node copy-static.mjs",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@medical-device/api-client": "workspace:*",
     "@azure/msal-browser": "5.27.0",
     "@babylonjs/core": "9.32.0",
     "@babylonjs/loaders": "9.32.0",

@@ -5,28 +5,32 @@ COPY package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.base.json tsconfig
 COPY apps/api/package.json apps/api/tsconfig.json ./apps/api/
 COPY apps/web/package.json apps/web/tsconfig.json ./apps/web/
 COPY packages/contracts/package.json packages/contracts/tsconfig.json ./packages/contracts/
+COPY packages/api-client/package.json packages/api-client/tsconfig.json ./packages/api-client/
 COPY packages/ai-gateway/package.json packages/ai-gateway/tsconfig.json ./packages/ai-gateway/
 COPY packages/db/package.json packages/db/tsconfig.json ./packages/db/
 COPY packages/storage/package.json packages/storage/tsconfig.json ./packages/storage/
 COPY packages/simulation-schema/package.json packages/simulation-schema/tsconfig.json ./packages/simulation-schema/
 COPY packages/model-runtime/package.json packages/model-runtime/tsconfig.json ./packages/model-runtime/
+RUN pnpm install --frozen-lockfile
 COPY apps/api ./apps/api
 COPY apps/web ./apps/web
 COPY packages/contracts ./packages/contracts
+COPY packages/api-client ./packages/api-client
 COPY packages/ai-gateway ./packages/ai-gateway
 COPY packages/db ./packages/db
 COPY packages/storage ./packages/storage
 COPY packages/simulation-schema ./packages/simulation-schema
 COPY packages/model-runtime ./packages/model-runtime
-COPY tools/generate-model-variants.mjs tools/model-variant-geometry.mjs ./tools/
+COPY tools/generate-model-variants.mjs tools/model-variant-geometry.mjs tools/nxstage-familiarization.mjs tools/build-nxstage-familiarization.mjs tools/package-developer-kit.mjs ./tools/
+COPY docs/developer-integration.md ./docs/
 COPY fixtures/reference/model ./fixtures/reference/model
 COPY fixtures/reference/video ./fixtures/reference/video
 COPY fixtures/aurora-training ./fixtures/aurora-training
 COPY fixtures/nxstage-system-one ./fixtures/nxstage-system-one
 COPY fixtures/nxstage-system-one-interactive ./fixtures/nxstage-system-one-interactive
+COPY fixtures/nxstage-system-one-rear-outlet-depth-review ./fixtures/nxstage-system-one-rear-outlet-depth-review
 COPY output/reconstruction-capture/images ./output/reconstruction-capture/images
-RUN pnpm install --frozen-lockfile
-RUN pnpm --filter @medical-device/contracts build && pnpm --filter @medical-device/simulation-schema build && pnpm --filter @medical-device/model-runtime build && pnpm --filter @medical-device/ai-gateway build && pnpm --filter @medical-device/db build && pnpm --filter @medical-device/storage build && pnpm --filter @medical-device/web build && pnpm --filter @medical-device/api build && pnpm deploy --legacy --filter @medical-device/api --prod /out
+RUN pnpm --filter @medical-device/contracts build && pnpm --filter @medical-device/api-client build && pnpm --filter @medical-device/simulation-schema build && pnpm --filter @medical-device/model-runtime build && pnpm --filter @medical-device/ai-gateway build && pnpm --filter @medical-device/db build && pnpm --filter @medical-device/storage build && pnpm --filter @medical-device/web build && pnpm --filter @medical-device/api build && pnpm developer:artifacts && pnpm deploy --legacy --filter @medical-device/api --prod /out
 
 FROM node:24-alpine AS runtime
 WORKDIR /app

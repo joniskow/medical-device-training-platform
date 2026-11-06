@@ -11,8 +11,8 @@
     "durationSeconds": 3
   },
   "model": {
-    "modelVersionId": "preview:nxstage-system-one-interaction-review-v1",
-    "sourceHash": "3f39654c055fca75e61c831ffc524b77ca1000ed43b1c411abece80cb1889846",
+    "modelVersionId": "preview:nxstage-system-one-interaction-review-v3",
+    "sourceHash": "8de552b1678915cd6c96eb16b275fcccc78703a9c54dc1f06ba69afd7927644b",
     "translationMeters": [
       0,
       0.554,

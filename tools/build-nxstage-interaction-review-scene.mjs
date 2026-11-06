@@ -17,6 +17,6 @@ for (const cue of checked.interaction?.cues ?? []) {
   const component = model.components.find(item => item.componentId === cue.componentId);
   assert(component?.interactionTargets?.some(target => target.targetId === cue.targetId), `Unknown review cue ${cue.targetId}`);
 }
-assert.equal(checked.video.sourceHash, hash(await readFile("fixtures/nxstage-system-one/nxstage-office-background-photo-openmontage.mp4")), "Background video must match the review scene");
+assert.equal(checked.video.sourceHash, hash(await readFile(`${folder}/office-background-review.mp4`)), "Background video must match the review scene");
 await writeFile(scenePath, `${JSON.stringify(checked, null, 2)}\n`);
 console.log(`Review scene bound to ${model.sourceHash}; cues and background video validated.`);

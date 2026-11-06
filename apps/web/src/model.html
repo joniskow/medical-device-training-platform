@@ -20,6 +20,7 @@
       canvas:active { cursor: grabbing; }
       canvas:focus-visible { outline: 3px solid #e5a93d; outline-offset: -4px; }
       .controls { display: flex; gap: .55rem; flex-wrap: wrap; margin-top: .7rem; }
+      .controls[hidden] { display: none; }
       button { min-height: 2.7rem; border-radius: 8px; border: 1px solid #9dbab7; padding: 0 .8rem; font: inherit; cursor: pointer; background: #fff; color: #0d6b68; font-weight: 650; }
       button:focus-visible { outline: 3px solid #e5a93d; outline-offset: 2px; }
       .component-button[aria-current="true"] { background: #0d6b68; color: #fff; border-color: #0d6b68; }
@@ -40,13 +41,15 @@
       <p><a href="/learner/courses">Return to my courses</a></p>
       <section class="shell" aria-labelledby="title">
         <h1 id="title">AIC-001 model activity</h1>
-        <p>Inspect the approved model, select each named component, and complete the permitted semantic actions. Buttons with approved interaction metadata give bounded local press feedback; score and completion still come only from the server-authoritative state projection.</p>
-        <p class="notice" role="note">Synthetic release-bound rehearsal: this fixture exercises the E4 runtime and action contract. Production delivery uses a private, short-lived URL issued only for an approved course release.</p>
+        <p id="model-introduction">Inspect the approved model, select each named component, and complete the permitted semantic actions. Buttons with approved interaction metadata give bounded local press feedback; score and completion still come only from the server-authoritative state projection.</p>
+        <p id="model-notice" class="notice" role="note">Synthetic release-bound rehearsal: this fixture exercises the E4 runtime and action contract. Production delivery uses a private, short-lived URL issued only for an approved course release.</p>
         <div class="layout">
           <section aria-labelledby="viewer-title">
             <h2 id="viewer-title">Interactive model</h2>
-            <div class="stage"><canvas id="model-canvas" aria-label="Interactive AIC-001 model. Drag the background to rotate the view, or drag a dial's edge to turn it. Use the wheel or pinch to zoom. Use arrow keys to choose a control, Enter or Space to activate it, Shift plus arrow keys to turn a dial, and Escape to cancel a held control or drag."></canvas></div>
+            <div class="stage"><canvas id="model-canvas" aria-label="Interactive AIC-001 model. Drag the background to rotate the view, or drag a dial's edge to turn it. Use the wheel or pinch to zoom. Use arrow keys to choose a control, Enter or Space to activate it, Shift plus arrow keys to turn a dial or move a door, and Escape to cancel a held control or drag."></canvas></div>
             <div class="controls"><button id="reset-view" type="button">Reset view</button><button id="focus-component" type="button" disabled>Focus selected part</button><button id="fit-view" type="button">Fit model</button><button id="show-controls" type="button" aria-pressed="false" hidden>Show interactive parts</button></div>
+            <div id="nxstage-quick-views" class="controls" aria-label="Close-up views" hidden><button type="button" data-view-component="nxstage-control-panel">View control panel</button><button type="button" data-view-component="nxstage-cycler-handle">View upper handle</button><button type="button" data-view-component="nxstage-cycler-door">View upper door</button><button type="button" data-view-component="nxstage-cabinet-door">View lower door</button><button type="button" data-view-component="pureflow-tub">View tub</button></div>
+            <details id="nxstage-magnifier" hidden><summary>Magnify controls</summary><p class="muted">Choose a group for a closer view of the same controls.</p><div class="controls"><button type="button" data-panel-region="left">Left buttons</button><button type="button" data-panel-region="decrease">Decrease arrows</button><button type="button" data-panel-region="increase">Increase arrows</button><button type="button" data-panel-region="right">Stop and mute</button><button type="button" data-panel-region="lower-arrows">Lower panel arrows</button><button type="button" data-panel-region="lower-actions">Lower panel GO and STOP</button><button type="button" data-panel-region="warmer">Warmer controls</button><button type="button" data-panel-region="rear-switch">Rear power switch</button></div></details>
             <p id="model-status" class="status" role="status" aria-live="polite">Preparing model runtime…</p>
             <p id="fallback" class="fallback" role="alert" hidden></p>
           </section>

@@ -7,3 +7,5 @@ export * from './openmontage-brief.js';
 export * from './openmontage-generation.js';
 export * from './speech.js';
 export * from './image-generation-prompt.js';
+export * from './model-session.js';
+export { learnerOpenApi } from './learner-openapi.js';

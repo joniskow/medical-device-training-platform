@@ -4,6 +4,7 @@ import { applyPermittedTransform, interactionStateViolation, validateBrowserMode
 import { createBabylonModelRuntime } from "./babylon-model-runtime.js";
 import { validateAuthoritativeActionResult } from "./model-authority.js";
 import { authenticatedFetch, getSessionIdentity, getOrganizationHeaders, getAccessToken } from "./auth-session.js";
+import { updateNxstageWarmerPreview } from "./nxstage-warmer-preview.js";
 
 const canvas = document.querySelector<HTMLCanvasElement>("#model-canvas")!;
 const status = document.querySelector<HTMLElement>("#model-status")!;
@@ -37,6 +38,12 @@ function interactionTargetLabel(targetId: string) {
     if (target) return target.displayName;
   }
   return targetId;
+}
+function interactionTargetHint(targetId: string) {
+  const target = manifest.components.flatMap(component => component.interactionTargets ?? []).find(item => item.targetId === targetId);
+  if (target?.interactionType === "open") return `Drag to move, or click to ${(target.openVerb ?? "open").toLowerCase()} or ${(target.closeVerb ?? "close").toLowerCase()}.`;
+  if (target?.interactionType === "turn") return "Drag to turn.";
+  return target?.interactionType === "press" || target?.pressDepthMeters !== undefined ? "Press and release." : "Click or drag to interact.";
 }
 
 function renderAuthoritativeState(authoritative: AuthoritativeModelState) {
@@ -93,10 +100,10 @@ function renderState(state: ModelRuntimeState) {
   lastHoveredTargetId = state.hoveredInteractionTargetId;
   if (announcementKey === lastRenderAnnouncementKey) return;
   lastRenderAnnouncementKey = announcementKey;
-  if (state.phase === "LOADING") announce("Loading the approved AIC-001 model…");
+  if (state.phase === "LOADING") announce(nxstageReview ? "Loading the NxStage visual review…" : "Loading the approved AIC-001 model…");
   if (state.pressedInteractionTargetId) announce(`Holding ${interactionTargetLabel(state.pressedInteractionTargetId)}. Release to finish.`);
-  if (!state.pressedInteractionTargetId && state.hoveredInteractionTargetId && state.hoveredInteractionTargetId !== state.focusedInteractionTargetId) announce(`Over ${interactionTargetLabel(state.hoveredInteractionTargetId)}. Click or drag to interact.`);
-  else if (state.focusedInteractionTargetId && !state.pressedInteractionTargetId) announce(`Keyboard focus on ${interactionTargetLabel(state.focusedInteractionTargetId)}. ${state.focusedInteractionType === "turn" ? "Hold Shift and use the arrow keys to turn." : "Press Enter or Space to activate."}`);
+  if (!state.pressedInteractionTargetId && state.hoveredInteractionTargetId && state.hoveredInteractionTargetId !== state.focusedInteractionTargetId) announce(`Over ${interactionTargetLabel(state.hoveredInteractionTargetId)}. ${interactionTargetHint(state.hoveredInteractionTargetId)}`);
+  else if (state.focusedInteractionTargetId && !state.pressedInteractionTargetId) announce(`Keyboard focus on ${interactionTargetLabel(state.focusedInteractionTargetId)}. ${state.focusedInteractionType === "turn" ? "Hold Shift and use the arrow keys to turn." : state.focusedInteractionType === "open" ? "Press Enter or Space to open or close; hold Shift and use the arrow keys to move gradually." : "Press Enter or Space to activate."}`);
   else if (!state.pressedInteractionTargetId && !state.hoveredInteractionTargetId && previousHover && /^(Over|Holding) /.test(status.textContent ?? "")) announce("Move over a control or select a component.");
   if (state.phase === "READY" && phaseChanged && !state.selectedComponentId) announce("Model ready. Select a component using the canvas or component list.");
   if (state.phase === "CONTEXT_LOST") announce("3D context lost. Use the equivalent text path or reload the preview.", true);
@@ -111,9 +118,29 @@ const sessionId = query.get("sessionId");
 const releaseId = query.get("releaseId");
 const modelVersionId = query.get("modelVersionId");
 const hasBoundSession = Boolean(sessionId && releaseId && modelVersionId);
+// This explicit visual review never substitutes assets into a bound session.
+const nxstageReview = previewMode && !sessionId && !releaseId && !modelVersionId && query.get("model") === "nxstage-review";
+let warmerPreviewNotice: HTMLElement | undefined;
+if (nxstageReview) {
+  document.title = "NxStage System One · interactive visual review";
+  document.querySelector<HTMLElement>("#title")!.textContent = "NxStage System One · interactive visual review";
+  document.querySelector<HTMLElement>("#model-introduction")!.textContent = "Press the controls on the model. Drag a door or tub to move it partway, or tap it to open or close fully. You can also select a component to use its named controls.";
+  document.querySelector<HTMLElement>("#model-notice")!.textContent = "Visual review: dimensions and hidden geometry are estimates. The upper cartridge chamber is simplified, and treatment and power are not simulated.";
+  canvas.setAttribute("aria-label", "Interactive NxStage System One model. Drag the background to rotate, use the wheel or pinch to zoom, and drag a door or tub to move it. Use arrow keys to choose a control, Enter or Space to activate it, Shift plus arrow keys to move a door or tub, and Escape to cancel a held control or drag.");
+  hint.hidden = true;
+  score.parentElement!.hidden = true;
+  warmerPreviewNotice = document.createElement("p");
+  warmerPreviewNotice.id = "nxstage-warmer-preview-feedback";
+  warmerPreviewNotice.className = "muted";
+  warmerPreviewNotice.setAttribute("role", "status");
+  warmerPreviewNotice.hidden = true;
+  status.insertAdjacentElement("afterend", warmerPreviewNotice);
+}
 const coarsePointer = typeof window.matchMedia === "function" && window.matchMedia("(pointer: coarse)").matches;
 const requestedVariant = coarsePointer ? "mobile" : "full";
-const staticAsset = requestedVariant === "mobile"
+const staticAsset = nxstageReview
+  ? { manifestUrl: "/learner/nxstage-review-manifest.json", modelUrl: "/learner/model/nxstage-review.glb", variantId: "full" }
+  : requestedVariant === "mobile"
   ? { manifestUrl: "/learner/model-manifest.mobile.json", modelUrl: "/learner/model/aurora-infusion-controller.mobile.glb", variantId: "mobile" }
   : { manifestUrl: "/learner/model-manifest.json", modelUrl: "/learner/model/aurora-infusion-controller.glb", variantId: "full" };
 type BoundModelAsset = { releaseId: string; releaseHash: string; modelVersionId: string; releaseBindingId: string; variantId: string; manifestHash: string; manifestUrl: string; modelUrl: string; fallbackManifest: unknown };
@@ -189,7 +216,7 @@ const previewTransport: SemanticActionTransport = {
     next.scorePoints = !visualOnlyPreview && Object.values(next.transforms).some((value) => value.rotationY === Math.PI / 2) && Object.values(next.transforms).some((value) => value.translationX === 0.2) ? 2 : 0;
     next.completed = !visualOnlyPreview && next.scorePoints === 2;
     serverState = next;
-    const feedback = visualOnlyPreview ? (action.type === "activate_target" ? "Preview only; treatment settings are not simulated." : "Updated in the local preview.") : next.completed ? "All required actions are complete." : "Accepted. Continue with the next permitted action.";
+    const feedback = visualOnlyPreview ? (action.type === "activate_target" ? "Preview only; treatment settings are not simulated." : action.type === "select_component" ? `Selected ${manifest.components.find(item => item.componentId === action.componentId)?.displayName ?? "component"}.` : "Updated in the local preview.") : next.completed ? "All required actions are complete." : "Accepted. Continue with the next permitted action.";
     return { status: "accepted", clientActionId: action.clientActionId, nextSequence: next.nextSequence, state: next, scoreDelta: next.scorePoints - previousScore, feedback };
   },
   async resume() { return { status: "accepted", nextSequence: serverState.nextSequence, state: serverState, feedback: "Authoritative session state restored." }; }
@@ -209,11 +236,15 @@ const actionClient = new BrowserSemanticActionClient(actionTransport, { releaseB
 });
 
 let runtime: InteractiveModelRuntime | undefined;
+const movingComponents = new Set<string>();
+let pendingMotionAnnouncement: { componentId: string; moving: string; completed: string } | undefined;
 if ((previewMode || (hasBoundSession && !assetLoadFailure && !manifestLoadFailure)) && !assetLoadFailure) try {
   runtime = await createBabylonModelRuntime({fetcher:fetchModelAsset,
     canvas,
     manifestUrl: asset.manifestUrl,
     modelUrl: asset.modelUrl,
+    ...(nxstageReview ? { selectedHighlightOpacity: 0.08, pixelRatioLimit: 1.5 } : {}),
+    camera: nxstageReview ? { alpha: Math.PI / 2, beta: 1.2, radius: 13.5, target: [0, 3.6, 0] } : undefined,
     interactionEnabled: previewMode,
     onStateChange: renderState,
     onSemanticAction: (action) => {
@@ -225,8 +256,17 @@ if ((previewMode || (hasBoundSession && !assetLoadFailure && !manifestLoadFailur
         void submit({ ...action, clientActionId: actionId(), expectedSequence: serverState.nextSequence });
       }
     },
-    onInteractionBlocked: ({ message }) => announce(message),
-    onInteractionTargetActivated: ({ targetId, componentId, interactionType, transform }) => {
+    onInteractionBlocked: ({ message }) => { pendingMotionAnnouncement = undefined; announce(message); },
+    onInteractionMotionFinished: (componentId) => {
+      movingComponents.delete(componentId);
+      if (pendingMotionAnnouncement?.componentId === componentId) {
+        if (status.textContent === pendingMotionAnnouncement.moving) announce(pendingMotionAnnouncement.completed);
+        pendingMotionAnnouncement = undefined;
+      }
+    },
+    onInteractionTargetActivated: ({ targetId, componentId, interactionType, moving, transform }) => {
+      if (moving && interactionType === "open") movingComponents.add(componentId);
+      else movingComponents.delete(componentId);
       const action: ModelSemanticAction = transform
         ? { type: "transform_component", componentId, transform, clientActionId: actionId(), expectedSequence: serverState.nextSequence }
         : { type: "activate_target", componentId, targetId, clientActionId: actionId(), expectedSequence: serverState.nextSequence };
@@ -248,6 +288,7 @@ if ((previewMode || (hasBoundSession && !assetLoadFailure && !manifestLoadFailur
       : "An approved learning session is required before the 3D model can load. Use the equivalent activity path or open the assigned course.";
   announce("Equivalent activity path available; model loading requires an approved session.", true);
 }
+if (nxstageReview) runtime?.fitModel();
 for (const component of manifest.components) {
   const listItem = document.createElement("div");
   listItem.setAttribute("role", "listitem");
@@ -369,6 +410,13 @@ function submit(action: ModelSemanticAction, targetId?: string, retry = false, p
   }
   const animateTargetId = !visualMovement && checked.status === "accepted" && queuedAction.type === "transform_component" ? targetId : undefined;
   const result = applyAuthoritativeResult(received, queuedAction.clientActionId, movementMatches, animateTargetId);
+  if (nxstageReview && result.status === "accepted" && queuedAction.type === "activate_target" && targetId) {
+    const level = updateNxstageWarmerPreview(targetId);
+    if (level !== undefined && warmerPreviewNotice) {
+      warmerPreviewNotice.hidden = false;
+      warmerPreviewNotice.textContent = `Illustrative warmer bars: ${level} of 9. Power, temperature and heating are not simulated.`;
+    }
+  }
   retryAction.hidden = !result.retryable;
   if (result.retryable) { unresolvedAction = true; announce("The network request can be retried without replaying the action.", true); return; }
   if (retry) unresolvedAction = false;
@@ -388,13 +436,22 @@ function submit(action: ModelSemanticAction, targetId?: string, retry = false, p
           : target.openVerb === "Pull out"
             ? (open ? (partial ? "partially pulled out" : "pulled out") : "pushed in")
             : (open ? (partial ? "partially open" : "open") : "closed");
-        description = `${target.displayName} is ${positionDescription}.`;
+        const actualPositionDescription = target.openVerb === "Set on" ? (open ? "in the on position (power not simulated)" : "in the off position (power not simulated)") : positionDescription;
+        description = `${target.displayName} is ${actualPositionDescription}.`;
       } else if (target.interactionType === "turn") {
         description = `${target.displayName} position ${before && Math.abs(before.rotationY - position.rotationY) > 1e-8 ? "updated" : "unchanged"}.`;
       } else description = `${target.displayName} pressed.`;
     }
   }
-  announce([description, result.feedback].filter(Boolean).join(" "), result.status !== "accepted");
+  const completed = [description, result.feedback].filter(Boolean).join(" ");
+  if (visualMovement && result.status === "accepted" && queuedAction.componentId && movingComponents.has(queuedAction.componentId) && description) {
+    const moving = `${description.replace(/ is in the (.+)\.$/, " is moving toward the $1.").replace(/ is (?!moving toward)(.+)\.$/, " is moving toward $1.")} ${result.feedback ?? ""}`.trim();
+    pendingMotionAnnouncement = { componentId: queuedAction.componentId, moving, completed };
+    announce(moving);
+  } else {
+    pendingMotionAnnouncement = undefined;
+    announce(completed, result.status !== "accepted");
+  }
   };
   pendingSubmissionCount += 1;
   const pending = submissionTail.then(run, run).finally(() => { pendingSubmissionCount -= 1; if (action.clientActionId) { pendingSelections.delete(action.clientActionId); pendingVisualMovements.delete(action.clientActionId); invalidatedVisualMovements.delete(action.clientActionId); } });
@@ -544,6 +601,51 @@ if (runtime) {
   showControls.hidden = runtime.listInteractionTargets().length === 0;
   const originalSelect = runtime.selectComponent;
   runtime.selectComponent = (componentId, source = "COMPONENT_LIST") => { selectedComponentId = componentId; originalSelect.call(runtime, componentId, source); renderActions(); };
+  const quickViews = document.querySelector<HTMLElement>("#nxstage-quick-views");
+  if (nxstageReview && quickViews) {
+    quickViews.hidden = false;
+    quickViews.addEventListener("click", (event) => {
+      const button = (event.target as HTMLElement).closest<HTMLButtonElement>("button[data-view-component]");
+      const componentId = button?.dataset.viewComponent;
+      if (!componentId || !runtime) return;
+      if (componentId === "pureflow-tub") {
+        const tub = manifest.components.find(component => component.componentId === componentId)?.interactionTargets?.find(target => target.targetId === "PF-C02-TUB");
+        const blocked = tub?.openTranslationMeters === undefined ? undefined : runtime.interactionBlockReason(tub.targetId, { translationX: tub.openTranslationMeters });
+        if (blocked) { announce(/^Open the cabinet door/i.test(blocked) ? "Open the cabinet door fully to see the PureFlow tub." : blocked); return; }
+      }
+      const doorAngle = componentId === "nxstage-cabinet-door" ? runtime.getState().transforms[componentId]?.rotationY ?? 0 : 0;
+      runtime.frameComponent(componentId, { alpha: Math.PI / 2 - doorAngle, beta: 1.4 });
+      canvas.scrollIntoView({ block: "center", behavior: "instant" });
+      announce(`Focused ${manifest.components.find(component => component.componentId === componentId)?.displayName ?? "selected part"}. Drag the background to rotate, or use the controls on the model.`);
+    });
+  }
+  const magnifier = document.querySelector<HTMLDetailsElement>("#nxstage-magnifier");
+  if (nxstageReview && magnifier) {
+    const regions: Record<string, string[]> = {
+      left: ["NX-C01-ADD-FLUID", "NX-C01-VOLUME-TOGGLE", "NX-C01-TREATMENT"],
+      decrease: ["NX-C01-ROW1-DOWN", "NX-C01-ROW2-DOWN", "NX-C01-ROW3-DOWN"],
+      increase: ["NX-C01-ROW1-UP", "NX-C01-ROW2-UP", "NX-C01-ROW3-UP"],
+      right: ["NX-C01-STOP", "NX-C01-MUTE"],
+      "lower-arrows": ["PF-C01-UP", "PF-C01-DOWN"],
+      "lower-actions": ["PF-C01-GO", "PF-C01-STOP"],
+      warmer: ["FW-C01-UP", "FW-C01-DOWN"],
+      "rear-switch": ["NX-C05-POWER-SWITCH"]
+    };
+    magnifier.hidden = false;
+    magnifier.addEventListener("click", (event) => {
+      const button = (event.target as HTMLElement).closest<HTMLButtonElement>("button[data-panel-region]");
+      const ids = button?.dataset.panelRegion && regions[button.dataset.panelRegion];
+      if (button?.dataset.panelRegion?.startsWith("lower-") && runtime) {
+        const tub = manifest.components.find(component => component.componentId === "pureflow-tub")?.interactionTargets?.find(target => target.targetId === "PF-C02-TUB");
+        const blocked = tub?.openTranslationMeters === undefined ? undefined : runtime.interactionBlockReason(tub.targetId, { translationX: tub.openTranslationMeters });
+        if (blocked) { announce(/^Open the cabinet door/i.test(blocked) ? "Open the cabinet door fully to see the lower panel." : blocked); return; }
+      }
+      const rear = button?.dataset.panelRegion === "rear-switch";
+      if (!ids || !runtime?.frameInteractionTargets(ids, { alpha: rear ? -Math.PI / 2 : Math.PI / 2, beta: rear ? 1.2 : 1.4 })) return;
+      canvas.scrollIntoView({ block: "center", behavior: "instant" });
+      announce(`Showing ${button.textContent?.toLowerCase() ?? "panel controls"}. Touch a control on the model.`);
+    });
+  }
 }
 showControls.addEventListener("click", () => {
   if (!runtime) return;
@@ -553,7 +655,7 @@ showControls.addEventListener("click", () => {
   showControls.textContent = visible ? "Hide interactive parts" : "Show interactive parts";
   announce(visible ? "Interactive parts highlighted. Select or touch a highlighted part to use it." : "Interactive part highlights hidden.");
 });
-reset.addEventListener("click", () => { runtime?.resetView(); announce("Camera reset to fit the approved model."); });
+reset.addEventListener("click", () => { runtime?.resetView(); announce("Camera reset to fit the approved model."); if (nxstageReview) runtime?.fitModel(); });
 fit.addEventListener("click", () => { runtime?.fitModel(); announce("Model fitted to the viewport."); });
 function updateFocusButton() {
   const phase = runtime?.getState().phase;

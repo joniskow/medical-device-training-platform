@@ -19,15 +19,20 @@ export interface BabylonModelRuntimeOptions {
   fetcher?: typeof fetch;
   onStateChange?: (state: ModelRuntimeState) => void;
   onSemanticAction?: (action: ModelSemanticAction) => void;
-  onInteractionTargetActivated?: (input: { targetId: string; targetName: string; componentId: string; interactionType?: "press" | "turn" | "open"; transform?: Partial<{ rotationY: number; translationX: number }> }) => void;
+  onInteractionTargetActivated?: (input: { targetId: string; targetName: string; componentId: string; interactionType?: "press" | "turn" | "open"; moving?: boolean; transform?: Partial<{ rotationY: number; translationX: number }> }) => void;
+  onInteractionMotionFinished?: (componentId: string) => void;
   onInteractionBlocked?: (input: { targetId: string; message: string }) => void;
   transparentBackground?: boolean;
   interactiveCamera?: boolean;
   interactionEnabled?: boolean;
   selectedHighlightOpacity?: number;
+  /** Optional cap for rendering on high-density displays; defaults to one pixel per CSS pixel. */
+  pixelRatioLimit?: number;
   camera?: { alpha: number; beta: number; radius: number; target?: [number, number, number] };
   lighting?: { direction?: [number, number, number]; exposure?: number; whiteBalanceKelvin?: number };
   modelTransform?: { translationMeters: [number, number, number]; rotationRadians: [number, number, number]; scale: number };
+  /** Preserve a GLB loader's coordinate conversion under the placement transform. */
+  preserveImportedRoot?: boolean;
   contactShadow?: { enabled: boolean; opacity: number; softness: number; offsetMeters: number; direction?: [number, number] };
 }
 
@@ -93,7 +98,17 @@ export async function createBabylonModelRuntime(options: BabylonModelRuntimeOpti
     if (!options.canvas.getContext("webgl2", { alpha: options.transparentBackground === true, premultipliedAlpha: false })) throw new BabylonModelRuntimeError("WEBGL2_UNAVAILABLE", "This browser does not provide the required WebGL2 baseline.");
 
     partialEngine = new Engine(options.canvas, true, { preserveDrawingBuffer: false, stencil: true, alpha: options.transparentBackground === true });
+    const pixelRatioLimit = Number.isFinite(options.pixelRatioLimit) ? Math.max(1, Math.min(2, options.pixelRatioLimit!)) : 1;
+    let reducedPixelRatio = false;
+    const updatePixelRatio = () => {
+      const ratio = reducedPixelRatio ? 1 : Math.min(pixelRatioLimit, Math.max(1, window.devicePixelRatio || 1));
+      if (Math.abs(partialEngine!.getHardwareScalingLevel() - 1 / ratio) > 1e-6) partialEngine!.setHardwareScalingLevel(1 / ratio);
+    };
+    updatePixelRatio();
     partialScene = new Scene(partialEngine); partialScene.clearColor = new Color4(0.035, 0.09, 0.11, options.transparentBackground ? 0 : 1);
+    // Focus is acquired on pointer-down below. Babylon otherwise focuses the
+    // canvas on every pointer-up, including the synthetic release on blur.
+    partialScene.preventDefaultOnPointerUp = false;
     const engine = partialEngine; const scene = partialScene;
     const cameraConfig = options.camera;
     const camera = new ArcRotateCamera("model-camera", cameraConfig?.alpha ?? -0.8, cameraConfig?.beta ?? Math.PI / 2.8, cameraConfig?.radius ?? 3, cameraConfig?.target ? Vector3.FromArray(cameraConfig.target) : Vector3.Zero(), scene);
@@ -155,7 +170,9 @@ export async function createBabylonModelRuntime(options: BabylonModelRuntimeOpti
     if (!cameraConfig) { camera.setTarget(bounds.center); camera.radius = bounds.radius * 2.8; }
     const importedNodes: TransformNode[] = [...imported.transformNodes, ...imported.meshes];
     const existingRoot = importedNodes.find((node) => node.name === "__root__");
-    const placementRoot = existingRoot ?? new TransformNode("__root__", scene);
+    const preserveRoot = Boolean(existingRoot && options.modelTransform && options.preserveImportedRoot);
+    const placementRoot = preserveRoot ? new TransformNode("__placement__", scene) : existingRoot ?? new TransformNode("__root__", scene);
+    if (preserveRoot) existingRoot!.parent = placementRoot;
     if (!existingRoot) {
       // Some GLB exports have no explicit scene root. Wrap every top-level
       // imported node so placement applies to the complete device instead of
@@ -237,9 +254,14 @@ export async function createBabylonModelRuntime(options: BabylonModelRuntimeOpti
     type Requirement = { componentId: string; transform: "rotationY" | "translationX"; value: number; message: string };
     const interactionTargetSettings = new Map<string, { interactionType: "press" | "turn" | "open" | "activate"; pressDepthMeters: number; pressAxis: Vector3; turnSensitivity: number; turnMinRadians?: number; turnMaxRadians?: number; openRotationRadians?: number; openRotationSpace?: "local"; touchTapSlopPixels?: number; openLiftMeters?: number; openTranslationMeters?: number; openDragDirection?: [number, number]; openVerb?: string; closeVerb?: string; openRequires?: Requirement; closeRequires?: Requirement }>();
     const nodes: TransformNode[] = [...imported.transformNodes, ...imported.meshes];
+    const matchesImportedPath = (node: TransformNode, expected: string) => {
+      const raw = sceneNodePath(node);
+      const path = preserveRoot && raw.startsWith('__placement__/') ? raw.slice('__placement__/'.length) : raw;
+      return path === expected || path === `__root__/${expected}`;
+    };
     for (const component of manifest.components) {
       const leaf = component.nodePath.split("/").pop() ?? component.displayName;
-      const exactMatches = nodes.filter(node => { const path=sceneNodePath(node); return path===component.nodePath || path===`__root__/${component.nodePath}`; });
+      const exactMatches = nodes.filter(node => matchesImportedPath(node, component.nodePath));
       const roots = exactMatches.length ? exactMatches : nodes.filter(node=>node.name===leaf);
       if(roots.length!==1)throw new BabylonModelRuntimeError('MODEL_COMPONENT_MISMATCH',`Component ${component.componentId} has no unique scene node.`);
       const root=roots[0];
@@ -272,7 +294,7 @@ export async function createBabylonModelRuntime(options: BabylonModelRuntimeOpti
     for (const component of manifest.components) if (!componentMeshes.get(component.componentId)?.length) throw new BabylonModelRuntimeError('MODEL_COMPONENT_MISMATCH', `Component ${component.componentId} has no meshes of its own.`);
     for (const component of manifest.components) {
       for (const target of component.interactionTargets ?? []) {
-        const exactMatches = nodes.filter((node) => { const path = sceneNodePath(node); return path === target.nodePath || path === `__root__/${target.nodePath}`; });
+        const exactMatches = nodes.filter((node) => matchesImportedPath(node, target.nodePath));
         if (exactMatches.length !== 1) throw new BabylonModelRuntimeError("MODEL_INTERACTION_TARGET_MISMATCH", `Interaction target ${target.targetId} has no unique scene node.`);
         const root = exactMatches[0];
         const matches = meshes.filter((mesh) => mesh === root || mesh.isDescendantOf(root));
@@ -321,6 +343,7 @@ export async function createBabylonModelRuntime(options: BabylonModelRuntimeOpti
     const selectComponent = (componentId: string, source: ModelSelectionSource = "COMPONENT_LIST", emitAction = true) => { const selected = componentMeshes.get(componentId); if (!selected) return; if (source !== "KEYBOARD") { focusedInteractionTargetId = undefined; state.focusedInteractionTargetId = undefined; state.focusedInteractionTargetName = undefined; state.focusedInteractionType = undefined; } if (selectedComponentId) for (const mesh of componentMeshes.get(selectedComponentId) ?? []) setHighlight(mesh, "selected", false); selectedComponentId = componentId; state.selectedComponentId = componentId; for (const mesh of selected) setHighlight(mesh, "selected", true); emit({ ...state }); if (emitAction) options.onSemanticAction?.({ type: "select_component", componentId, source }); };
     const setHover = (targetId: string | undefined, componentId: string | undefined) => {
       if (hoveredInteractionTargetId === targetId && hoveredComponentId === componentId) return;
+      if (targetId && targetId !== hoveredInteractionTargetId) state.interactionMessage = undefined;
       if (hoveredInteractionTargetId) for (const mesh of interactionTargetMeshes.get(hoveredInteractionTargetId) ?? []) setHighlight(mesh, "hovered", false);
       hoveredInteractionTargetId = targetId;
       hoveredComponentId = componentId;
@@ -330,11 +353,20 @@ export async function createBabylonModelRuntime(options: BabylonModelRuntimeOpti
       state.hoveredComponentId = hoveredComponentId;
       if (!disposed) emit({ ...state });
     };
+    // Babylon's pick coordinates use the rendering buffer and hardware scale;
+    // the visible canvas can temporarily have a different size after layout or
+    // be scaled by CSS. Map the actual displayed position into that space.
+    const pickCoordinates = (clientX: number, clientY: number) => {
+      const rect = options.canvas.getBoundingClientRect();
+      const scale = engine.getHardwareScalingLevel();
+      return { x: (clientX - rect.left) * engine.getRenderWidth() * scale / (rect.width || 1), y: (clientY - rect.top) * engine.getRenderHeight() * scale / (rect.height || 1) };
+    };
     const targetAt = (pointerEvent: Pick<PointerEvent, "clientX" | "clientY"> | undefined) => {
       if (!pointerEvent) return undefined;
       const rect = options.canvas.getBoundingClientRect();
       if (pointerEvent.clientX < rect.left || pointerEvent.clientX >= rect.right || pointerEvent.clientY < rect.top || pointerEvent.clientY >= rect.bottom) return undefined;
-      const hits = scene.multiPick(pointerEvent.clientX - rect.left, pointerEvent.clientY - rect.top)?.filter((pick) => pick.hit && pick.pickedMesh).sort((a, b) => a.distance - b.distance) ?? [];
+      const point = pickCoordinates(pointerEvent.clientX, pointerEvent.clientY);
+      const hits = scene.multiPick(point.x, point.y)?.filter((pick) => pick.hit && pick.pickedMesh).sort((a, b) => a.distance - b.distance) ?? [];
       const first = hits[0];
       if (!first) return undefined;
       const direct = first.pickedMesh?.metadata?.interactionTargetId;
@@ -350,11 +382,22 @@ export async function createBabylonModelRuntime(options: BabylonModelRuntimeOpti
       const decorativeOverlay = first.pickedMesh?.metadata?.decorative === true
         || first.pickedMesh?.metadata?.gltf?.extras?.decorative === true
         || first.pickedMesh?.name === "Photo-derived control fascia";
-      const allowedOverlayGap = decorativeOverlay ? 0.25 : 0.01;
       for (const hit of hits.slice(1)) {
-        if (hit.distance - first.distance > allowedOverlayGap || hit.pickedMesh?.metadata?.componentId !== componentId) break;
+        if (hit.pickedMesh?.metadata?.componentId !== componentId) break;
         const targetId = hit.pickedMesh?.metadata?.interactionTargetId;
-        if (typeof targetId === "string") return targetId;
+        if (typeof targetId === "string") {
+          // A marking belongs to the target only when it lies very close to
+          // that target relative to its size. A fixed world-space allowance
+          // becomes a large, invisible hit-through region on metric models.
+          const box = hit.pickedMesh!.getBoundingInfo().boundingBox;
+          const targetSize = Vector3.Distance(box.minimumWorld, box.maximumWorld);
+          const limit = Math.min(targetSize * (decorativeOverlay ? 0.25 : 0.04), bounds.radius * 0.03);
+          return hit.distance - first.distance <= limit ? targetId : undefined;
+        }
+        const decoration = hit.pickedMesh?.metadata?.decorative === true
+          || hit.pickedMesh?.metadata?.gltf?.extras?.decorative === true
+          || hit.pickedMesh?.name === "Photo-derived control fascia";
+        if (!decoration) break;
       }
       return undefined;
     };
@@ -382,7 +425,7 @@ export async function createBabylonModelRuntime(options: BabylonModelRuntimeOpti
     let hingePointerOffset = { x: 0, y: 0 };
     let pressedBaselineTransforms: Record<string, { rotationY: number; translationX: number }> | undefined;
     let dialPreviousY: number | undefined;
-    let circularDial: { x: number; y: number; angle: number | undefined; rotation: number } | undefined;
+    let circularDial: { x: number; y: number; deadZone: number; angle: number | undefined; rotation: number } | undefined;
     let pressedPointerMoved = false;
     let pressedInteractionChanged = false;
     let pressedInterruptedAnimation = false;
@@ -392,6 +435,8 @@ export async function createBabylonModelRuntime(options: BabylonModelRuntimeOpti
     let pressedVisualStartTranslation: number | undefined;
     let pressFrame = 0;
     let accessibleActivationTimer: number | undefined;
+    let accessibleRequestedOpen: boolean | undefined;
+    let pressedComponent: { pointerId: number; componentId: string; x: number; y: number; moved: boolean } | undefined;
     const queuedNamedActions: Array<{ targetId: string; direction?: -1 | 1 }> = [];
     const visualRotations = new Map<string, number>();
     const rotationAnimations = new Map<string, { frame: number; target: number }>();
@@ -410,7 +455,7 @@ export async function createBabylonModelRuntime(options: BabylonModelRuntimeOpti
       if (!disposed && animate && !window.matchMedia('(prefers-reduced-motion: reduce)').matches && Math.abs(value - start) > 1e-5) {
         visualTranslations.set(componentId, start);
         const started = performance.now(), animation = { frame: 0, target: value };
-        const tick = (now: number) => { if (disposed || translationAnimations.get(componentId) !== animation) return; const progress = Math.min(1, (now - started) / 350); draw(start + (value - start) * progress * progress * (3 - 2 * progress)); if (progress < 1) animation.frame = window.requestAnimationFrame(tick); else translationAnimations.delete(componentId); };
+        const tick = (now: number) => { if (disposed || translationAnimations.get(componentId) !== animation) return; const progress = Math.min(1, (now - started) / 350); draw(start + (value - start) * progress * progress * (3 - 2 * progress)); if (progress < 1) animation.frame = window.requestAnimationFrame(tick); else { translationAnimations.delete(componentId); options.onInteractionMotionFinished?.(componentId); } };
         translationAnimations.set(componentId, animation);
         animation.frame = window.requestAnimationFrame(tick);
       } else draw(value);
@@ -445,7 +490,7 @@ export async function createBabylonModelRuntime(options: BabylonModelRuntimeOpti
           // coupled also preserves the visible position when it is reversed.
           draw(start + (value - start) * eased);
           if (progress < 1) animation.frame = window.requestAnimationFrame(tick);
-          else rotationAnimations.delete(componentId);
+          else { rotationAnimations.delete(componentId); options.onInteractionMotionFinished?.(componentId); }
         };
         rotationAnimations.set(componentId, animation);
         animation.frame = window.requestAnimationFrame(tick);
@@ -533,7 +578,7 @@ export async function createBabylonModelRuntime(options: BabylonModelRuntimeOpti
       return requested;
     };
     const interactionCallback = (targetId: string, componentId: string, interactionType: "press" | "turn" | "open" | "activate", transform?: Partial<{ rotationY: number; translationX: number }>) => {
-      if (!disposed) options.onInteractionTargetActivated?.({ targetId, targetName: interactionTargetNames.get(targetId) ?? targetId, componentId, interactionType: interactionType === "activate" ? undefined : interactionType, ...(transform ? { transform } : {}) });
+      if (!disposed) options.onInteractionTargetActivated?.({ targetId, targetName: interactionTargetNames.get(targetId) ?? targetId, componentId, interactionType: interactionType === "activate" ? undefined : interactionType, ...(rotationAnimations.has(componentId) || translationAnimations.has(componentId) ? { moving: true } : {}), ...(transform ? { transform } : {}) });
     };
     const reportDoorLimit = (targetId: string, open: number, requested: number, applied: number, lift: boolean) => {
       if (Math.abs(requested - applied) <= 1e-8) { state.interactionMessage = undefined; return; }
@@ -547,6 +592,7 @@ export async function createBabylonModelRuntime(options: BabylonModelRuntimeOpti
       // particular, they must not release a keyboard or named-control press.
       if (pointerId !== undefined && pressedPointerId !== pointerId) return;
       if (accessibleActivationTimer !== undefined) { window.clearTimeout(accessibleActivationTimer); accessibleActivationTimer = undefined; }
+      accessibleRequestedOpen = undefined;
       const targetId = pressedTargetId;
       const componentId = interactionTargetComponents.get(targetId);
       const interactionType = pressedInteractionType;
@@ -683,8 +729,8 @@ export async function createBabylonModelRuntime(options: BabylonModelRuntimeOpti
       if (settings.interactionType === "open" && settings.openTranslationMeters !== undefined && !settings.openDragDirection && start) {
         const componentId = interactionTargetComponents.get(targetId) ?? "";
         const componentRoot = componentRoots.get(componentId);
-        const rect = options.canvas.getBoundingClientRect();
-        const picked = scene.pick(start.x - rect.left, start.y - rect.top);
+        const point = pickCoordinates(start.x, start.y);
+        const picked = scene.pick(point.x, point.y);
         const acceptedSurface = picked?.pickedMesh?.metadata?.interactionTargetId === targetId ||
           (picked?.pickedMesh?.metadata?.componentId === componentId && targetAt({ clientX: start.x, clientY: start.y }) === targetId);
         if (componentRoot && picked?.pickedPoint && acceptedSurface) {
@@ -699,8 +745,8 @@ export async function createBabylonModelRuntime(options: BabylonModelRuntimeOpti
         const componentId = interactionTargetComponents.get(targetId) ?? "";
         const componentRoot = componentRoots.get(componentId);
         const base = componentRoot && baseTransforms.get(componentRoot);
-        const rect = options.canvas.getBoundingClientRect();
-        const picked = scene.pick(start.x - rect.left, start.y - rect.top);
+        const point = pickCoordinates(start.x, start.y);
+        const picked = scene.pick(point.x, point.y);
         const open = settings.openRotationRadians ?? manifest.components.find((item) => item.componentId === componentId)?.permittedTransforms?.rotationY?.max ?? Math.PI / 2;
         const acceptedSurface = picked?.pickedMesh?.metadata?.interactionTargetId === targetId ||
           (picked?.pickedMesh?.metadata?.componentId === componentId && targetAt({ clientX: start.x, clientY: start.y }) === targetId);
@@ -715,12 +761,18 @@ export async function createBabylonModelRuntime(options: BabylonModelRuntimeOpti
         if (meshes?.length) {
           for (const mesh of meshes) mesh.computeWorldMatrix(true);
           const rect = options.canvas.getBoundingClientRect();
-          const picked = scene.pick(start.x - rect.left, start.y - rect.top)?.pickedMesh;
-          const center = (picked?.metadata?.interactionTargetId === targetId ? picked : meshes[0]).getBoundingInfo().boundingBox.centerWorld;
-          const point = Vector3.Project(center, Matrix.Identity(), scene.getTransformMatrix(), camera.viewport.toGlobal(engine.getRenderWidth(), engine.getRenderHeight()));
+          const pickPoint = pickCoordinates(start.x, start.y);
+          const picked = scene.pick(pickPoint.x, pickPoint.y)?.pickedMesh;
+          const box = (picked?.metadata?.interactionTargetId === targetId ? picked : meshes[0]).getBoundingInfo().boundingBox;
+          const viewport = camera.viewport.toGlobal(engine.getRenderWidth(), engine.getRenderHeight());
+          const point = Vector3.Project(box.centerWorld, Matrix.Identity(), scene.getTransformMatrix(), viewport);
           const x = rect.left + point.x * rect.width / engine.getRenderWidth();
           const y = rect.top + point.y * rect.height / engine.getRenderHeight();
-          if (Math.hypot(start.x - x, start.y - y) >= 8) circularDial = { x, y, angle: Math.atan2(start.y - y, start.x - x), rotation: 0 };
+          const projected = box.vectorsWorld.map((corner) => Vector3.Project(corner, Matrix.Identity(), scene.getTransformMatrix(), viewport));
+          const width = (Math.max(...projected.map((corner) => corner.x)) - Math.min(...projected.map((corner) => corner.x))) * rect.width / engine.getRenderWidth();
+          const height = (Math.max(...projected.map((corner) => corner.y)) - Math.min(...projected.map((corner) => corner.y))) * rect.height / engine.getRenderHeight();
+          const deadZone = Math.max(3, Math.min(8, Math.min(width, height) * 0.22));
+          if (Math.hypot(start.x - x, start.y - y) >= deadZone) circularDial = { x, y, deadZone, angle: Math.atan2(start.y - y, start.x - x), rotation: 0 };
         }
       }
       pressedPointerMoved = false;
@@ -746,11 +798,12 @@ export async function createBabylonModelRuntime(options: BabylonModelRuntimeOpti
         // A second finger (or a pointer while a key is held) must not capture
         // another control or replace the feedback for the active gesture.
         if (pressedTargetId && (pressedPointerId === undefined || pointerEvent?.pointerId !== pressedPointerId)) return;
-        let targetId = event.pickInfo?.pickedMesh?.metadata?.interactionTargetId;
-        // A printed label or decorative overlay can be the top visual hit while the
-        // physical control beneath it is still the intended press target. Search the
-        // full hit stack for the nearest tagged target before giving up.
-        if (typeof targetId !== "string") targetId = targetAt(pointerEvent);
+        const targetId = pointerEvent ? targetAt(pointerEvent) : event.pickInfo?.pickedMesh?.metadata?.interactionTargetId;
+        if (pointerEvent && typeof targetId !== "string") {
+          const point = pickCoordinates(pointerEvent.clientX, pointerEvent.clientY);
+          const componentId = scene.pick(point.x, point.y)?.pickedMesh?.metadata?.componentId;
+          if (typeof componentId === "string") pressedComponent = { pointerId: pointerEvent.pointerId, componentId, x: pointerEvent.clientX, y: pointerEvent.clientY, moved: false };
+        }
         if (typeof targetId === "string") {
           // Pointer interaction takes over from prior keyboard/named-control
           // focus; otherwise stale focus feedback can replace its result.
@@ -760,7 +813,9 @@ export async function createBabylonModelRuntime(options: BabylonModelRuntimeOpti
           state.focusedInteractionType = undefined;
           const began = pressTarget(targetId, pointerEvent?.pointerId, pointerEvent ? { x: pointerEvent.clientX, y: pointerEvent.clientY } : undefined);
           if (began || (pointerEvent?.pointerType !== "touch" && pointerEvent?.pointerType !== "pen")) setHover(targetId, componentAtTarget(targetId));
-          if (began && pointerEvent?.isTrusted && typeof options.canvas.setPointerCapture === "function") options.canvas.setPointerCapture(pointerEvent.pointerId);
+          if (began && pointerEvent?.isTrusted && typeof options.canvas.setPointerCapture === "function") {
+            try { options.canvas.setPointerCapture(pointerEvent.pointerId); } catch { /* A canceled pointer may no longer be capturable. */ }
+          }
         }
         return;
       }
@@ -768,9 +823,12 @@ export async function createBabylonModelRuntime(options: BabylonModelRuntimeOpti
         if (pressedTargetId && pressedPointerId !== undefined && pointerEvent?.pointerId === pressedPointerId && pressedPointerStart) {
           const distance = Math.hypot(pointerEvent.clientX - pressedPointerStart.x, pointerEvent.clientY - pressedPointerStart.y);
           const settings = interactionTargetSettings.get(pressedTargetId);
-          // Open/close controls also support taps. Allow a small finger wobble
-          // without reducing the precision of dial gestures.
-          if (distance > (pointerEvent.pointerType === "touch" ? settings?.touchTapSlopPixels ?? 6 : 6)) pressedPointerMoved = true;
+          // A circular gesture on a small dial can travel less than the usual
+          // six-pixel tap tolerance even during a deliberate quarter turn.
+          const moveThreshold = settings?.interactionType === "turn" && circularDial
+            ? Math.min(6, circularDial.deadZone * 1.1)
+            : pointerEvent.pointerType === "touch" ? settings?.touchTapSlopPixels ?? 6 : 6;
+          if (distance > moveThreshold) pressedPointerMoved = true;
           const componentId = interactionTargetComponents.get(pressedTargetId);
           if (settings?.interactionType === "press" && pressedTargetBasePosition) {
             const root = interactionTargetRoots.get(pressedTargetId);
@@ -784,7 +842,7 @@ export async function createBabylonModelRuntime(options: BabylonModelRuntimeOpti
             dialPreviousY = pointerEvent.clientY;
             if (circularDial) {
               const dx = pointerEvent.clientX - circularDial.x, dy = pointerEvent.clientY - circularDial.y;
-              if (Math.hypot(dx, dy) >= 8) {
+              if (Math.hypot(dx, dy) >= circularDial.deadZone) {
                 const angle = Math.atan2(dy, dx);
                 if (circularDial.angle !== undefined) {
                   let delta = angle - circularDial.angle;
@@ -840,11 +898,11 @@ export async function createBabylonModelRuntime(options: BabylonModelRuntimeOpti
         // Babylon may report a pointer-up notification for a move event when the
         // pointer leaves the originally picked mesh. Keep dragging until DOM release.
         if (pointerEvent && pointerEvent.type !== "pointerup") return;
-        const targetId = event.pickInfo?.pickedMesh?.metadata?.interactionTargetId ?? targetAt(pointerEvent);
+        const targetId = pointerEvent ? targetAt(pointerEvent) : event.pickInfo?.pickedMesh?.metadata?.interactionTargetId;
         releasePressedTarget(true, typeof targetId === "string" ? targetId : undefined, pointerEvent?.pointerId);
         return;
       }
-      if (event.type !== PointerEventTypes.POINTERPICK || !event.pickInfo?.hit) return;
+      if (event.type !== PointerEventTypes.POINTERPICK || pointerEvent || !event.pickInfo?.hit) return;
       // A control click already emits its own action on release. Treating the
       // same click as a component selection would submit a second, competing
       // action to the learner session.
@@ -874,6 +932,37 @@ export async function createBabylonModelRuntime(options: BabylonModelRuntimeOpti
         emit({ ...state });
       }
     };
+    const moveOpenWithKeyboard = (targetId: string, componentId: string, direction: number) => {
+      const settings = interactionTargetSettings.get(targetId)!;
+      const component = manifest.components.find((item) => item.componentId === componentId);
+      if (!component || pressedTargetId) return;
+      const axis = settings.openTranslationMeters !== undefined ? "translationX" : "rotationY";
+      const open = settings.openTranslationMeters ?? settings.openRotationRadians ?? component.permittedTransforms?.rotationY?.max ?? Math.PI / 2;
+      const rule = component.permittedTransforms?.[axis];
+      if (!rule || !open) return;
+      const previous = state.transforms[componentId][axis];
+      const increment = rule.step ?? rule.snap ?? Math.abs(open) / 10;
+      const requested = Math.max(Math.min(0, open), Math.min(Math.max(0, open), previous + direction * Math.sign(open) * increment));
+      const normalized = applyPermittedTransform(component, state.transforms[componentId], { [axis]: requested });
+      if (!normalized || Math.abs(normalized[axis] - previous) < 1e-8) {
+        state.interactionMessage = `${interactionTargetNames.get(targetId) ?? targetId} is fully ${direction > 0 ? "open" : "closed"}.`;
+        emit({ ...state });
+        return;
+      }
+      const transform = { [axis]: normalized[axis] };
+      const blocked = interactionBlockReason(targetId, transform);
+      if (blocked) {
+        state.interactionMessage = blocked;
+        emit({ ...state });
+        options.onInteractionBlocked?.({ targetId, message: blocked });
+        return;
+      }
+      const applied = axis === "translationX" ? setComponentTranslation(componentId, normalized.translationX, true) : setComponentRotation(componentId, normalized.rotationY, settings, true);
+      if (applied === undefined) return;
+      state.interactionMessage = undefined;
+      emit({ ...state });
+      interactionCallback(targetId, componentId, "open", transform);
+    };
     const listInteractionTargets = () => interactionTargetIds.map((targetId) => {
       const componentId = interactionTargetComponents.get(targetId)!, settings = interactionTargetSettings.get(targetId)!;
       const position = state.transforms[componentId];
@@ -899,11 +988,13 @@ export async function createBabylonModelRuntime(options: BabylonModelRuntimeOpti
       if (settings.interactionType === "turn") { turnWithKeyboard(targetId, componentId, direction ?? 1); return true; }
       const openValue = settings.openTranslationMeters ?? settings.openRotationRadians ?? manifest.components.find(item => item.componentId === componentId)?.permittedTransforms?.rotationY?.max ?? Math.PI / 2;
       const destination = settings.interactionType === "open" && direction !== undefined ? (settings.openTranslationMeters !== undefined ? { translationX: direction > 0 ? openValue : 0 } : { rotationY: direction > 0 ? openValue : 0 }) : undefined;
-      if (pressTarget(targetId, undefined, undefined, destination)) accessibleActivationTimer = window.setTimeout(() => {
-        accessibleActivationTimer = undefined;
-        if (!disposed && pressedTargetId === targetId && pressedPointerId === undefined) releasePressedTarget(true, targetId, undefined, destination ? direction! > 0 : undefined);
-        drainNamedActions();
-      }, 100);
+      if (pressTarget(targetId, undefined, undefined, destination)) {
+        accessibleRequestedOpen = destination ? direction! > 0 : undefined;
+        accessibleActivationTimer = window.setTimeout(() => {
+          if (!disposed && pressedTargetId === targetId && pressedPointerId === undefined) releasePressedTarget(true, targetId, undefined, accessibleRequestedOpen);
+          drainNamedActions();
+        }, 100);
+      }
       return true;
     };
     const keydown = (event: KeyboardEvent) => {
@@ -930,6 +1021,12 @@ export async function createBabylonModelRuntime(options: BabylonModelRuntimeOpti
           event.preventDefault();
           const direction = event.key === "ArrowLeft" || event.key === "ArrowDown" ? -1 : 1;
           turnWithKeyboard(focusedInteractionTargetId, componentId, direction);
+          return;
+        }
+        if (settings?.interactionType === "open" && componentId) {
+          event.preventDefault();
+          const direction = event.key === "ArrowRight" || event.key === "ArrowUp" ? 1 : -1;
+          moveOpenWithKeyboard(focusedInteractionTargetId, componentId, direction);
           return;
         }
       }
@@ -959,12 +1056,33 @@ export async function createBabylonModelRuntime(options: BabylonModelRuntimeOpti
       if (pressedPointerId === undefined) releasePressedTarget(true, pressedTargetId);
     };
     const finishPointer = (event: PointerEvent, activate: boolean) => {
-      const clearTransientHover = pressedPointerId === event.pointerId && (event.pointerType === "touch" || event.pointerType === "pen");
-      releasePressedTarget(activate, activate ? targetAt(event) : undefined, event.pointerId);
+      const rect = options.canvas.getBoundingClientRect();
+      const inside = event.clientX >= rect.left && event.clientX < rect.right && event.clientY >= rect.top && event.clientY < rect.bottom;
+      const clearTransientHover = pressedPointerId === event.pointerId && (!inside || event.pointerType === "touch" || event.pointerType === "pen");
+      if (pressedComponent?.pointerId === event.pointerId) {
+        const component = pressedComponent;
+        pressedComponent = undefined;
+        if (activate && inside && !component.moved && Math.hypot(event.clientX - component.x, event.clientY - component.y) <= 6 && !targetAt(event)) {
+          const point = pickCoordinates(event.clientX, event.clientY);
+          if (scene.pick(point.x, point.y)?.pickedMesh?.metadata?.componentId === component.componentId) selectComponent(component.componentId, "CANVAS");
+        }
+      }
+      let releaseTarget = activate && inside ? targetAt(event) : undefined;
+      // A touch on an open/close control can drift slightly onto its bezel.
+      // Preserve the explicitly configured tap tolerance without making the
+      // bezel itself a target when the gesture starts.
+      if (!releaseTarget && activate && inside && event.pointerType === "touch" && pressedPointerId === event.pointerId && pressedInteractionType === "open" && pressedPointerStart && pressedTargetId) {
+        const slop = interactionTargetSettings.get(pressedTargetId)?.touchTapSlopPixels ?? 6;
+        if (Math.hypot(event.clientX - pressedPointerStart.x, event.clientY - pressedPointerStart.y) <= slop) releaseTarget = pressedTargetId;
+      }
+      releasePressedTarget(activate, releaseTarget, event.pointerId);
       if (clearTransientHover) setHover(undefined, undefined);
     };
     const releaseFromDom = (event: PointerEvent) => finishPointer(event, false);
     const finishFromDom = (event: PointerEvent) => finishPointer(event, true);
+    const trackComponentMovement = (event: PointerEvent) => {
+      if (pressedComponent?.pointerId === event.pointerId && Math.hypot(event.clientX - pressedComponent.x, event.clientY - pressedComponent.y) > 6) pressedComponent.moved = true;
+    };
     // A second touch can be a resting finger. Treat it as a pinch only after
     // the spacing changes, then keep the gesture until every finger lifts.
     const activeTouches = new Map<number, { x: number; y: number }>();
@@ -973,6 +1091,7 @@ export async function createBabylonModelRuntime(options: BabylonModelRuntimeOpti
       if (event.pointerType !== "touch" || !cameraInteractive || !interactionEnabled) return;
       activeTouches.set(event.pointerId, { x: event.clientX, y: event.clientY });
       if (!controlPinch && activeTouches.size === 2) {
+        pressedComponent = undefined;
         const ids = [...activeTouches.keys()] as [number, number];
         const a = activeTouches.get(ids[0])!, b = activeTouches.get(ids[1])!;
         const distance = Math.hypot(a.x - b.x, a.y - b.y);
@@ -1017,11 +1136,30 @@ export async function createBabylonModelRuntime(options: BabylonModelRuntimeOpti
       activeTouches.delete(event.pointerId);
       if (!controlPinch) return;
       if (activeTouches.size === 0 || (!controlPinch.engaged && activeTouches.size < 2)) {
+        const finishedPinch = controlPinch.engaged && activeTouches.size === 0;
         controlPinch = undefined;
         if (!pressedTargetId) setCameraInteraction(true);
+        // End touch focus after a completed pinch so a later tap on page UI
+        // does not cause mobile Chrome to scroll back to the canvas.
+        if (finishedPinch && document.activeElement === options.canvas) options.canvas.blur();
       }
     };
-    const interruptInteraction = () => { const wasPinching = Boolean(controlPinch); pressedKey = undefined; queuedNamedActions.length = 0; activeTouches.clear(); controlPinch = undefined; releasePressedTarget(false); if (wasPinching) setCameraInteraction(true); setHover(undefined, undefined); };
+    const interruptInteraction = (finishNamed = false) => {
+      const wasPinching = Boolean(controlPinch);
+      const namedTarget = finishNamed && accessibleActivationTimer !== undefined ? pressedTargetId : undefined;
+      const requestedOpen = accessibleRequestedOpen;
+      pressedKey = undefined;
+      pressedComponent = undefined;
+      if (!namedTarget) queuedNamedActions.length = 0;
+      activeTouches.clear(); controlPinch = undefined;
+      releasePressedTarget(Boolean(namedTarget), namedTarget, undefined, requestedOpen);
+      if (wasPinching) setCameraInteraction(true);
+      setHover(undefined, undefined);
+      if (namedTarget) drainNamedActions();
+    };
+    // A click on a named control has already been completed, unlike a pointer
+    // gesture on the model. Environmental changes must not discard it.
+    const interruptForEnvironment = () => interruptInteraction(true);
     const focusCanvasOnPointerDown = (event: PointerEvent) => { if (interactionEnabled && event.button === 0) options.canvas.focus({ preventScroll: true }); };
     const setInteractionEnabled = (enabled: boolean) => {
       if (disposed || enabled === interactionEnabled) return;
@@ -1039,7 +1177,7 @@ export async function createBabylonModelRuntime(options: BabylonModelRuntimeOpti
       if (enabled && interactionEnabled) camera.attachControl(options.canvas, true);
       else camera.detachControl();
     };
-    const visibilityChanged = () => { if (document.hidden) interruptInteraction(); };
+    const visibilityChanged = () => { if (document.hidden) interruptForEnvironment(); };
     const clearHoverFromDom = () => { if (!pressedTargetId) setHover(undefined, undefined); };
     options.canvas.addEventListener("keydown", keydown);
     options.canvas.addEventListener("pointerdown", touchDown, true);
@@ -1050,15 +1188,32 @@ export async function createBabylonModelRuntime(options: BabylonModelRuntimeOpti
     window.addEventListener("pointercancel", touchEnd);
     options.canvas.addEventListener("pointerdown", focusCanvasOnPointerDown, true);
     options.canvas.addEventListener("keyup", keyup);
-    options.canvas.addEventListener("blur", interruptInteraction);
+    // Babylon synthesizes pointer-up events on blur. Cancel our gesture in
+    // capture phase before those synthetic releases can commit it or refocus.
+    options.canvas.addEventListener("blur", interruptForEnvironment, true);
     options.canvas.addEventListener("pointerleave", clearHoverFromDom);
     // Cancel before Babylon processes the event as a pointer release.
     options.canvas.addEventListener("pointercancel", releaseFromDom, true);
     options.canvas.addEventListener("pointerup", finishFromDom, true);
     options.canvas.addEventListener("lostpointercapture", releaseFromDom);
-    window.addEventListener("blur", interruptInteraction);
+    // If capture fails, the pointer can be released elsewhere in this page.
+    window.addEventListener("pointerup", finishFromDom);
+    window.addEventListener("pointercancel", releaseFromDom);
+    window.addEventListener("pointermove", trackComponentMovement, true);
+    window.addEventListener("blur", interruptForEnvironment);
     document.addEventListener("visibilitychange", visibilityChanged);
-    const resize = () => engine.resize(); window.addEventListener("resize", resize); let phaseBeforeContextLoss: "READY" | "REDUCED_COMPLEXITY" = state.phase === "REDUCED_COMPLEXITY" ? "REDUCED_COMPLEXITY" : "READY"; let fallbackBeforeContextLoss = state.fallbackReason; const contextLost = engine.onContextLostObservable.add(() => { interruptInteraction(); phaseBeforeContextLoss = state.phase === "REDUCED_COMPLEXITY" ? "REDUCED_COMPLEXITY" : "READY"; fallbackBeforeContextLoss = state.fallbackReason; state.phase = "CONTEXT_LOST"; state.fallbackReason = "WebGL context lost. Use the equivalent text path or reload."; emit({ ...state }); }); const contextRestored = engine.onContextRestoredObservable.add(() => { state.phase = phaseAfterContextRestore(phaseBeforeContextLoss, loadDurationMs, state.measuredFps, budget); state.fallbackReason = state.phase === "REDUCED_COMPLEXITY" ? fallbackBeforeContextLoss ?? "The approved model remains on the equivalent path after context recovery." : undefined; emit({ ...state }); });
+    let canvasWidth = options.canvas.clientWidth, canvasHeight = options.canvas.clientHeight;
+    const resize = () => { if (pressedTargetId || activeTouches.size || controlPinch) interruptForEnvironment(); canvasWidth = options.canvas.clientWidth; canvasHeight = options.canvas.clientHeight; updatePixelRatio(); engine.resize(); };
+    let renderDevicePixelRatio = window.devicePixelRatio || 1;
+    window.addEventListener("resize", resize);
+    const resizeObserver = typeof ResizeObserver === "undefined" ? undefined : new ResizeObserver(() => {
+      const width = options.canvas.clientWidth, height = options.canvas.clientHeight;
+      if (width === canvasWidth && height === canvasHeight) return;
+      canvasWidth = width; canvasHeight = height;
+      resize();
+    });
+    resizeObserver?.observe(options.canvas);
+    let phaseBeforeContextLoss: "READY" | "REDUCED_COMPLEXITY" = state.phase === "REDUCED_COMPLEXITY" ? "REDUCED_COMPLEXITY" : "READY"; let fallbackBeforeContextLoss = state.fallbackReason; const contextLost = engine.onContextLostObservable.add(() => { interruptInteraction(); phaseBeforeContextLoss = state.phase === "REDUCED_COMPLEXITY" ? "REDUCED_COMPLEXITY" : "READY"; fallbackBeforeContextLoss = state.fallbackReason; state.phase = "CONTEXT_LOST"; state.fallbackReason = "WebGL context lost. Use the equivalent text path or reload."; emit({ ...state }); }); const contextRestored = engine.onContextRestoredObservable.add(() => { state.phase = phaseAfterContextRestore(phaseBeforeContextLoss, loadDurationMs, state.measuredFps, budget); state.fallbackReason = state.phase === "REDUCED_COMPLEXITY" ? fallbackBeforeContextLoss ?? "The approved model remains on the equivalent path after context recovery." : undefined; emit({ ...state }); });
     let frames = 0;
     let sampleReported = false;
     const sampleStarted = performance.now();
@@ -1066,6 +1221,11 @@ export async function createBabylonModelRuntime(options: BabylonModelRuntimeOpti
       if (disposed || sampleReported) return;
       sampleReported = true;
       state.measuredFps = Math.round(frames / Math.max((performance.now() - sampleStarted) / 1000, 1));
+      if (pixelRatioLimit > 1 && state.measuredFps < budget.minimumFps && engine.getHardwareScalingLevel() < 1) {
+        if (pressedTargetId || activeTouches.size || controlPinch) interruptForEnvironment();
+        reducedPixelRatio = true;
+        updatePixelRatio();
+      }
       if (state.measuredFps < budget.minimumFps && state.phase === "READY") {
         state.phase = "REDUCED_COMPLEXITY";
         state.fallbackReason = `The device measured ${state.measuredFps} FPS, below the ${budget.minimumFps} FPS target; use the equivalent path.`;
@@ -1080,7 +1240,12 @@ export async function createBabylonModelRuntime(options: BabylonModelRuntimeOpti
     };
     const sampleTimeout = window.setTimeout(reportSample, 1_250);
     requestAnimationFrame(sample);
-    engine.runRenderLoop(() => { if (!disposed) scene.render(); });
+    engine.runRenderLoop(() => {
+      if (disposed) return;
+      const density = window.devicePixelRatio || 1;
+      if (pixelRatioLimit > 1 && density !== renderDevicePixelRatio) { renderDevicePixelRatio = density; resize(); }
+      scene.render();
+    });
     emit({ ...state });
     const rotationModeForComponent = (componentId: string): "euler" | "quaternion" => {
       // A component may expose buttons before its rotational target.
@@ -1159,18 +1324,9 @@ export async function createBabylonModelRuntime(options: BabylonModelRuntimeOpti
     const resetView = () => { camera.setTarget(cameraConfig?.target ? Vector3.FromArray(cameraConfig.target) : bounds.center); camera.radius = cameraConfig?.radius ?? bounds.radius * 2.8; camera.alpha = cameraConfig?.alpha ?? -0.8; camera.beta = cameraConfig?.beta ?? Math.PI / 2.8; camera.inertialAlphaOffset = 0; camera.inertialBetaOffset = 0; camera.inertialRadiusOffset = 0; camera.inertialPanningX = 0; camera.inertialPanningY = 0; };
     const fitModel = () => {
       if (disposed || !cameraInteractive || !interactionEnabled) return;
-      const current = modelBounds(meshes);
-      const aspect = Math.max(engine.getRenderWidth() / Math.max(engine.getRenderHeight(), 1), 0.1);
-      const halfFov = Math.atan(Math.tan(camera.fov / 2) * Math.min(aspect, 1));
-      const alpha = camera.alpha, beta = camera.beta;
-      camera.setTarget(current.center);
-      camera.alpha = alpha; camera.beta = beta;
-      camera.radius = Math.min(camera.upperRadiusLimit ?? Infinity, Math.max(camera.lowerRadiusLimit ?? 0, current.radius / Math.sin(halfFov) * 1.08));
-      camera.inertialAlphaOffset = 0; camera.inertialBetaOffset = 0; camera.inertialRadiusOffset = 0; camera.inertialPanningX = 0; camera.inertialPanningY = 0;
+      frameMeshes(meshes);
     };
-    const frameComponent = (componentId: string) => {
-      const selected = componentMeshes.get(componentId);
-      if (!selected?.length || disposed || !cameraInteractive || !interactionEnabled) return;
+    const frameMeshes = (selected: Mesh[]) => {
       for (const mesh of selected) mesh.computeWorldMatrix(true);
       const componentBounds = modelBounds(selected);
       const aspect = Math.max(engine.getRenderWidth() / Math.max(engine.getRenderHeight(), 1), 0.1);
@@ -1187,9 +1343,26 @@ export async function createBabylonModelRuntime(options: BabylonModelRuntimeOpti
       camera.setTarget(componentBounds.center, false, false, true);
       camera.radius = Math.min(camera.upperRadiusLimit ?? Infinity, Math.max(camera.lowerRadiusLimit ?? 0, distance * 1.15));
       camera.inertialAlphaOffset = 0; camera.inertialBetaOffset = 0; camera.inertialRadiusOffset = 0; camera.inertialPanningX = 0; camera.inertialPanningY = 0;
-      selectComponent(componentId, "COMPONENT_LIST", selectedComponentId !== componentId);
     };
-     return { getState: () => ({ ...state, transforms: Object.fromEntries(Object.entries(state.transforms).map(([id, transform]) => [id, { ...transform }])) }), selectComponent, frameComponent, fitModel, setInteractionHintsVisible, interactionBlockReason, listInteractionTargets, activateInteractionTarget, applyAuthoritativeState, setInteractionEnabled, setCameraInteractive, resetView, dispose: () => { disposed = true; window.cancelAnimationFrame(pressFrame); for (const animation of [...rotationAnimations.values(), ...translationAnimations.values()]) window.cancelAnimationFrame(animation.frame); rotationAnimations.clear(); translationAnimations.clear(); releasePressedTarget(); options.canvas.removeEventListener("keydown", keydown); options.canvas.removeEventListener("pointerdown", touchDown, true); options.canvas.removeEventListener("pointermove", touchMove, true); options.canvas.removeEventListener("pointerup", touchEnd, true); options.canvas.removeEventListener("pointercancel", touchEnd, true); window.removeEventListener("pointerup", touchEnd); window.removeEventListener("pointercancel", touchEnd); options.canvas.removeEventListener("pointerdown", focusCanvasOnPointerDown, true); options.canvas.removeEventListener("keyup", keyup); options.canvas.removeEventListener("blur", interruptInteraction); options.canvas.removeEventListener("pointerleave", clearHoverFromDom); options.canvas.removeEventListener("pointercancel", releaseFromDom, true); options.canvas.removeEventListener("pointerup", finishFromDom, true); options.canvas.removeEventListener("lostpointercapture", releaseFromDom); window.removeEventListener("blur", interruptInteraction); document.removeEventListener("visibilitychange", visibilityChanged); window.clearTimeout(sampleTimeout); window.removeEventListener("resize", resize); scene.onPointerObservable.remove(pointerObserver); engine.onContextLostObservable.remove(contextLost); engine.onContextRestoredObservable.remove(contextRestored); camera.detachControl(); scene.dispose(); engine.dispose(); options.canvas.style.touchAction = originalTouchAction; } };
+    const frameComponent = (componentId: string, view?: { alpha: number; beta: number }) => {
+      const selected = componentMeshes.get(componentId);
+      if (!selected?.length || disposed || !cameraInteractive || !interactionEnabled) return;
+      if (view) { camera.alpha = view.alpha; camera.beta = view.beta; }
+      frameMeshes(selected);
+      selectComponent(componentId, "COMPONENT_LIST", selectedComponentId !== componentId);
+      if (view) scene.render();
+    };
+    const frameInteractionTargets = (targetIds: string[], view?: { alpha: number; beta: number }) => {
+      if (!targetIds.length || disposed || !cameraInteractive || !interactionEnabled || targetIds.some(id => !interactionTargetMeshes.get(id)?.length)) return false;
+      const selected = targetIds.flatMap(id => interactionTargetMeshes.get(id)!);
+      if (view) { camera.alpha = view.alpha; camera.beta = view.beta; }
+      frameMeshes(selected);
+      const componentId = interactionTargetComponents.get(targetIds[0]);
+      if (componentId) selectComponent(componentId, "COMPONENT_LIST", selectedComponentId !== componentId);
+      scene.render();
+      return true;
+    };
+     return { getState: () => ({ ...state, transforms: Object.fromEntries(Object.entries(state.transforms).map(([id, transform]) => [id, { ...transform }])) }), selectComponent, frameComponent, frameInteractionTargets, fitModel, setInteractionHintsVisible, interactionBlockReason, listInteractionTargets, activateInteractionTarget, applyAuthoritativeState, setInteractionEnabled, setCameraInteractive, resetView, dispose: () => { disposed = true; window.cancelAnimationFrame(pressFrame); for (const animation of [...rotationAnimations.values(), ...translationAnimations.values()]) window.cancelAnimationFrame(animation.frame); rotationAnimations.clear(); translationAnimations.clear(); releasePressedTarget(); options.canvas.removeEventListener("keydown", keydown); options.canvas.removeEventListener("pointerdown", touchDown, true); options.canvas.removeEventListener("pointermove", touchMove, true); options.canvas.removeEventListener("pointerup", touchEnd, true); options.canvas.removeEventListener("pointercancel", touchEnd, true); window.removeEventListener("pointerup", touchEnd); window.removeEventListener("pointercancel", touchEnd); options.canvas.removeEventListener("pointerdown", focusCanvasOnPointerDown, true); options.canvas.removeEventListener("keyup", keyup); options.canvas.removeEventListener("blur", interruptForEnvironment, true); options.canvas.removeEventListener("pointerleave", clearHoverFromDom); options.canvas.removeEventListener("pointercancel", releaseFromDom, true); options.canvas.removeEventListener("pointerup", finishFromDom, true); options.canvas.removeEventListener("lostpointercapture", releaseFromDom); window.removeEventListener("pointerup", finishFromDom); window.removeEventListener("pointercancel", releaseFromDom); window.removeEventListener("pointermove", trackComponentMovement, true); window.removeEventListener("blur", interruptForEnvironment); document.removeEventListener("visibilitychange", visibilityChanged); window.clearTimeout(sampleTimeout); resizeObserver?.disconnect(); window.removeEventListener("resize", resize); scene.onPointerObservable.remove(pointerObserver); engine.onContextLostObservable.remove(contextLost); engine.onContextRestoredObservable.remove(contextRestored); camera.detachControl(); scene.dispose(); engine.dispose(); options.canvas.style.touchAction = originalTouchAction; } };
   } catch (error) {
     partialScene?.dispose(); partialEngine?.dispose(); options.canvas.style.touchAction = originalTouchAction;
     const failure = error instanceof BabylonModelRuntimeError ? error : new BabylonModelRuntimeError("MODEL_RUNTIME_FAILED", error instanceof Error ? error.message : "The Babylon.js runtime failed.");

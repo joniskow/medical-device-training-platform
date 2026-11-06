@@ -20,6 +20,10 @@ try {
   assert.equal(modelResponse.headers.get('content-encoding'), 'gzip', 'The office review should use lossless compression when supported');
   const modelHash = createHash('sha256').update(Buffer.from(await modelResponse.arrayBuffer())).digest('hex');
   const modelManifest = await manifestResponse.json(), sceneManifest = await sceneResponse.json();
+  const doorTravel = modelManifest.components.find(c => c.componentId === 'nxstage-cycler-door').interactionTargets.find(t => t.targetId === 'NX-C03-CYCLER-DOOR').openTranslationMeters;
+  const tubTravel = modelManifest.components.find(c => c.componentId === 'pureflow-tub').interactionTargets.find(t => t.targetId === 'PF-C02-TUB').openTranslationMeters;
+  const tubStep = modelManifest.components.find(c => c.componentId === 'pureflow-tub').permittedTransforms.translationX.step;
+  const partialTubTravel = Math.round(tubTravel * 2 / 7 / tubStep) * tubStep;
   assert.equal(modelHash, modelManifest.sourceHash, 'The office must serve the candidate model bound by its manifest');
   assert.equal(modelHash, sceneManifest.model.sourceHash, 'The office scene must bind the same candidate');
   let port;
@@ -37,13 +41,44 @@ try {
   assert.match(await evaluate('document.querySelector("#narration-text").value'), /System One.*PureFlow cabinet/i, 'Review narration must describe the model being viewed');
   assert.doesNotMatch(await evaluate('document.querySelector("#narration-text").value'), /safety cover|line sensor/i, 'Review narration must not describe the unrelated synthetic model');
   assert.equal(await evaluate('document.querySelector(\'a[href="#demo-scene-canvas"]\') !== null'), true, 'The review must offer a direct link to the model');
+  assert.match(await evaluate('document.querySelector("#demo-scene-canvas").getAttribute("aria-label")'), /arrow keys.*Enter or Space.*Escape/i, 'The scene must explain its keyboard controls to assistive technology');
   assert.doesNotMatch(await evaluate('document.body.textContent'), /The output is ready to teach\./, 'A draft review must not claim content is ready to teach');
   assert.equal(await evaluate('Boolean(document.querySelector(".background-review-artifacts"))'), false, 'The review must not present composite thumbnails from an older model');
   await evaluate('document.querySelector(\'a[href="#demo-scene-canvas"]\').click()');
   await waitFor('(()=>{const r=document.querySelector("#demo-scene-canvas").getBoundingClientRect();return r.top < innerHeight && r.bottom > 0})()');
-  assert(await evaluate('Boolean(document.querySelector(".training-scene.photo-plate"))'), 'The review must use the office photo backdrop');
-  await waitFor('document.querySelector("#training-photo")?.naturalWidth > 0 && getComputedStyle(document.querySelector("#training-photo")).opacity === "1"');
-  assert.equal(await evaluate('document.querySelector("#training-photo").closest(".training-scene").classList.contains("photo-ready")'), true, 'The loaded photo must be visible instead of the fallback artwork');
+  const walkthrough = await evaluate('Boolean(document.querySelector(".training-scene.photoreal-walkthrough"))');
+  const backdropSelector = walkthrough ? '#training-room-photo' : '#training-photo';
+  if (walkthrough) {
+    await waitFor('document.querySelector("#training-room-photo")?.naturalWidth > 0 && document.querySelector("#training-video")?.readyState >= 1');
+    assert.equal(await evaluate('Boolean(document.querySelector(".training-scene.photoreal-walkthrough"))'), true, 'The office walkthrough must be present');
+    await evaluate(`(()=>{const video=document.querySelector('#training-video');window.__originalWalkthroughPlay=video.play;video.play=()=>Promise.reject(new DOMException('Blocked','NotAllowedError'));document.querySelector('.scene-playback').click()})()`);
+    await waitFor('/Playback was blocked/.test(document.querySelector("#demo-model-status").textContent)');
+    assert.equal(await evaluate('Boolean(document.querySelector(".scene-playback"))'), true, 'A blocked walkthrough must leave its retry button available');
+    await evaluate(`(()=>{const video=document.querySelector('#training-video');video.play=window.__originalWalkthroughPlay;document.querySelector('.scene-playback').click()})()`);
+    await waitFor('document.querySelector("#training-video").currentTime > 0.1');
+    await waitFor('document.querySelector(".training-scene").classList.contains("room-reveal") && document.querySelector("#training-video").paused');
+    assert(await evaluate('document.querySelector("#training-video").currentTime >= 3.5'), 'The walkthrough must reach the room before revealing the model');
+    assert.equal(await evaluate('document.querySelector(".scene-playback").textContent'), 'Replay walkthrough', 'A completed walkthrough must be replayable');
+    await evaluate('document.querySelector(".scene-playback").click()');
+    await waitFor('!document.querySelector(".training-scene").classList.contains("room-reveal") && document.querySelector("#training-video").currentTime < 3.5');
+    await waitFor('document.querySelector(".training-scene").classList.contains("room-reveal") && document.querySelector("#training-video").paused');
+    if (process.env.OFFICE_REVIEW_TEST === '1') {
+      const overlap = await evaluate(`(()=>{const c=document.querySelector('#demo-scene-canvas').getBoundingClientRect(),b=window.__officeComponentBounds('nxstage-control-panel'),r=document.querySelector('.scene-playback').getBoundingClientRect();const p={left:c.left+b.left*c.width,right:c.left+b.right*c.width,top:c.top+b.top*c.height,bottom:c.top+b.bottom*c.height};return {p,button:{left:r.left,right:r.right,top:r.top,bottom:r.bottom},overlap:!(r.right<=p.left||r.left>=p.right||r.bottom<=p.top||r.top>=p.bottom)}})()`);
+      assert(!overlap.overlap, `Replay must not cover the revealed control panel: ${JSON.stringify(overlap)}`);
+      await command('Emulation.setDeviceMetricsOverride', {width:390,height:844,deviceScaleFactor:1,mobile:true});
+      await new Promise(resolveWait => setTimeout(resolveWait, 400));
+      const phoneOverlap = await evaluate(`(()=>{const c=document.querySelector('#demo-scene-canvas').getBoundingClientRect(),b=window.__officeComponentBounds('nxstage-control-panel'),r=document.querySelector('.scene-playback').getBoundingClientRect();const p={left:c.left+b.left*c.width,right:c.left+b.right*c.width,top:c.top+b.top*c.height,bottom:c.top+b.bottom*c.height};return {p,button:{left:r.left,right:r.right,top:r.top,bottom:r.bottom},overlap:!(r.right<=p.left||r.left>=p.right||r.bottom<=p.top||r.top>=p.bottom)}})()`);
+      assert(!phoneOverlap.overlap, `Replay must not cover the control panel on a phone: ${JSON.stringify(phoneOverlap)}`);
+      await command('Emulation.clearDeviceMetricsOverride');
+      await new Promise(resolveWait => setTimeout(resolveWait, 800));
+      await evaluate('window.dispatchEvent(new Event("resize"))');
+      await new Promise(resolveWait => setTimeout(resolveWait, 300));
+    }
+  } else {
+    assert(await evaluate('Boolean(document.querySelector(".training-scene.photo-plate"))'), 'The review must use the office photo backdrop');
+    await waitFor('document.querySelector("#training-photo")?.naturalWidth > 0 && getComputedStyle(document.querySelector("#training-photo")).opacity === "1"');
+    assert.equal(await evaluate('document.querySelector("#training-photo").closest(".training-scene").classList.contains("photo-ready")'), true, 'The loaded photo must be visible instead of the fallback artwork');
+  }
   const modelScreenshot = await command('Page.captureScreenshot', { format: 'png' });
   await writeFile('output/nxstage-interaction-review-office/office-model-review.png', Buffer.from(modelScreenshot.data, 'base64'));
   await evaluate('document.querySelector("[data-action=toggle-scene-interaction]").click()');
@@ -54,9 +89,25 @@ try {
   const click = label => evaluate(`[...document.querySelectorAll('.scene-named-controls button')].find(button => button.textContent === ${JSON.stringify(label)}).click()`);
   if (process.env.OFFICE_REVIEW_TEST === '1') {
     await waitFor('Boolean(window.__officeReviewRuntime && window.__officeWarmerLights)');
+    if (process.env.NXSTAGE_REAR_CABINET_SCREENSHOT) {
+      await evaluate('document.querySelector("[data-review-explore]").click();document.querySelector("#demo-scene-canvas").scrollIntoView({block:"center"})');
+      const enlarge = await evaluate(`(()=>{const r=document.querySelector('[data-review-enlarge]').getBoundingClientRect();return {x:r.left+r.width/2,y:r.top+r.height/2}})()`);
+      await command('Input.dispatchMouseEvent',{type:'mousePressed',...enlarge,button:'left',buttons:1,clickCount:1});
+      await command('Input.dispatchMouseEvent',{type:'mouseReleased',...enlarge,button:'left',buttons:0,clickCount:1});
+      await waitFor('Boolean(document.fullscreenElement)');
+      await evaluate('window.__officeRearCabinetView()');
+      const rear = await command('Page.captureScreenshot', {format:'png'});
+      await writeFile(process.env.NXSTAGE_REAR_CABINET_SCREENSHOT, Buffer.from(rear.data, 'base64'));
+      await evaluate('document.exitFullscreen();document.querySelector("[data-review-explore]").click();window.__officeReviewRuntime.resetView()');
+      await waitFor('!document.fullscreenElement');
+      await new Promise(resolveWait => setTimeout(resolveWait, 300));
+    }
     assert.match(await evaluate('document.querySelector("[role=note]").textContent'), /warmer bars are illustrative.*temperature and heating are not simulated/i);
     await click('Set on Cycler rear power switch');
+    await waitFor('/Cycler rear power switch is moving toward the on position.*power not simulated/i.test(document.querySelector("#demo-model-status")?.textContent ?? "")');
     await waitFor('/Cycler rear power switch is in the on position.*power not simulated/i.test(document.querySelector("#demo-model-status")?.textContent ?? "")');
+    await new Promise(resolveWait => setTimeout(resolveWait, 600));
+    assert.match(await evaluate('document.querySelector("#demo-model-status").textContent'), /Cycler rear power switch is in the on position/i, 'The completed switch feedback must survive the motion animation');
     await click('Set off Cycler rear power switch');
     await waitFor('/Cycler rear power switch is in the off position.*power not simulated/i.test(document.querySelector("#demo-model-status")?.textContent ?? "")');
     const lit = async () => (await evaluate('window.__officeWarmerLights()')).filter(value => value > .1).length;
@@ -67,12 +118,219 @@ try {
     await waitFor('window.__officeWarmerLights().filter(value => value > .1).length === 2');
     await click('Press Warmer temperature down');
     await waitFor('window.__officeWarmerLights().filter(value => value > .1).length === 1');
+    await evaluate(`(()=>{const buttons=[...document.querySelectorAll('.scene-named-controls button')],up=buttons.find(button => button.textContent === 'Press Warmer temperature up'),down=buttons.find(button => button.textContent === 'Press Warmer temperature down');up.click();up.click();down.click();window.dispatchEvent(new Event('resize'));})()`);
+    await waitFor('window.__officeWarmerLights().filter(value => value > .1).length === 2');
+    await click('Press Warmer temperature down');
+    await waitFor('window.__officeWarmerLights().filter(value => value > .1).length === 1');
     const originalCamera = await evaluate('window.__officeCamera()');
     await evaluate('document.querySelector("[data-review-explore]").click()');
     assert.equal(await evaluate('document.querySelector("[data-review-explore]").getAttribute("aria-pressed")'), 'true', `Explore mode must turn on; runtime=${await evaluate('typeof window.__officeReviewRuntime?.setCameraInteractive')}; errors=${JSON.stringify(errors)}`);
     assert((await evaluate('window.__officeCamera().radius')) < originalCamera.radius, 'Exploration must bring the model closer than the aligned office camera');
-    assert.equal(await evaluate('getComputedStyle(document.querySelector("#training-photo")).visibility'), 'hidden', 'Exploring must not imply the moving model remains aligned to the photo');
+    assert.equal(await evaluate(`getComputedStyle(document.querySelector(${JSON.stringify(backdropSelector)})).visibility`), 'hidden', 'Exploring must hide the office backdrop');
     await new Promise(resolveWait => setTimeout(resolveWait, 400));
+    const focusState=await evaluate('(()=>{const focus=document.querySelector("[data-review-focus-handle]");return {exists:!!focus,hidden:focus?.hidden,panel:document.querySelector(".scene-named-controls")?.innerHTML.slice(0,1500),status:document.querySelector("#demo-model-status")?.textContent}})()');
+    assert(focusState.exists && !focusState.hidden,`The handle shortcut must appear in exploration: ${JSON.stringify(focusState)}`);
+    assert.equal(await evaluate('document.querySelector("[data-review-panel-magnifier]").hidden'),false,'Panel magnification must be available in exploration');
+    await evaluate('document.querySelector("#demo-scene-canvas").focus()');
+    for (let i = 0; i < 30 && await evaluate('window.__officeReviewRuntime.getState().focusedInteractionTargetId') !== 'NX-C01-ADD-FLUID'; i++) {
+      await command('Input.dispatchKeyEvent', {type:'keyDown',key:'ArrowRight',code:'ArrowRight',windowsVirtualKeyCode:39});
+      await command('Input.dispatchKeyEvent', {type:'keyUp',key:'ArrowRight',code:'ArrowRight',windowsVirtualKeyCode:39});
+    }
+    assert.equal(await evaluate('window.__officeReviewRuntime.getState().focusedInteractionTargetId'), 'NX-C01-ADD-FLUID', 'Keyboard navigation must reach the Add Fluid control');
+    await waitFor('/Keyboard focus on Add Fluid/.test(document.querySelector("#demo-model-status").textContent)');
+    const panelHighlight = await evaluate('window.__officeComponentHighlight("nxstage-control-panel")');
+    assert(panelHighlight && Math.abs(panelHighlight.alpha - .08) < 1e-6, `The selected fascia should keep its photo colors while remaining highlighted: ${JSON.stringify(panelHighlight)}`);
+    await command('Input.dispatchKeyEvent', {type:'keyDown',key:'Enter',code:'Enter',windowsVirtualKeyCode:13});
+    await waitFor('/Holding Add Fluid/.test(document.querySelector("#demo-model-status").textContent)');
+    await command('Input.dispatchKeyEvent', {type:'keyUp',key:'Enter',code:'Enter',windowsVirtualKeyCode:13});
+    await waitFor('/Add Fluid pressed/.test(document.querySelector("#demo-model-status").textContent)');
+    await command('Input.dispatchKeyEvent', {type:'keyDown',key:'Enter',code:'Enter',windowsVirtualKeyCode:13});
+    await command('Input.dispatchKeyEvent', {type:'keyDown',key:'Escape',code:'Escape',windowsVirtualKeyCode:27});
+    await command('Input.dispatchKeyEvent', {type:'keyUp',key:'Enter',code:'Enter',windowsVirtualKeyCode:13});
+    assert.equal(await evaluate('window.__officeReviewRuntime.getState().pressedInteractionTargetId ?? null'), null, 'Escape must release the control without leaving it held');
+    assert(!/Add Fluid pressed/.test(await evaluate('document.querySelector("#demo-model-status").textContent')), 'Cancelling a keyboard press must not report an activation');
+    await evaluate('document.querySelector("[data-review-panel-magnifier] summary").click();document.querySelector("[data-review-panel-region=left]").click()');
+    await waitFor('/Magnified left buttons/.test(document.querySelector("#demo-model-status")?.textContent ?? "")');
+    await new Promise(resolveWait => setTimeout(resolveWait, 250));
+    if (process.env.OFFICE_MAGNIFIER_STRESS === '1') {
+      for (let i = 0; i < 30; i++) {
+        const width = [1400, 1100, 800, 600][i % 4], height = [1000, 900, 750][i % 3];
+        await command('Emulation.setDeviceMetricsOverride', {width, height, deviceScaleFactor: 1, mobile: false});
+        await evaluate('document.querySelector("[data-review-panel-region=left]").click()');
+        await new Promise(resolveWait => setTimeout(resolveWait, 200));
+        let result;
+        for(let attempt=0;attempt<20;attempt++) {
+          result = await evaluate(`(()=>{const p=window.__officeTargetPoint('NX-C01-VOLUME-TOGGLE'),canvas=document.querySelector('#demo-scene-canvas'),rect=canvas.getBoundingClientRect(),ancestors=[];for(let e=canvas;e;e=e.parentElement){const s=getComputedStyle(e);if(s.transform!=='none'||s.zoom!=='1')ancestors.push({tag:e.tagName,className:e.className,transform:s.transform,zoom:s.zoom})}return {point:p,hit:window.__officeHitAt(p.x,p.y),canvas:{width:canvas.width,height:canvas.height,clientWidth:canvas.clientWidth,clientHeight:canvas.clientHeight,rect:{x:rect.x,y:rect.y,width:rect.width,height:rect.height}},ancestors,camera:window.__officeCamera()}})()`);
+          if(result.hit==='NX-C01-VOLUME-TOGGLE')break;
+          await new Promise(resolveWait=>setTimeout(resolveWait,250));
+        }
+        assert.equal(result.hit, 'NX-C01-VOLUME-TOGGLE', `Magnified target mismatch after viewport change ${i}: ${JSON.stringify(result)}`);
+      }
+      await command('Emulation.clearDeviceMetricsOverride');
+      await new Promise(resolveWait => setTimeout(resolveWait, 300));
+      await evaluate('document.querySelector("[data-review-panel-region=left]").click()');
+      await new Promise(resolveWait => setTimeout(resolveWait, 250));
+    }
+    await evaluate(`(()=>{const c=document.querySelector('#demo-scene-canvas');c.style.transformOrigin='left top';c.style.transform='scale(1.12)';document.querySelector('[data-review-explore]').style.visibility='hidden'})()`);
+    const scaledPoint = await evaluate('window.__officeTargetPoint("NX-C01-VOLUME-TOGGLE")');
+    const scaledEvidence = await evaluate(`(()=>{const p=${JSON.stringify(scaledPoint)},c=document.querySelector('#demo-scene-canvas'),r=c.getBoundingClientRect(),e=document.elementFromPoint(p.x,p.y);return {point:p,add:window.__officeTargetPoint('NX-C01-ADD-FLUID'),hit:window.__officeHitAt(p.x,p.y),diagnostic:window.__officePickDiagnostic(p.x,p.y),element:e?.outerHTML.slice(0,300),rect:{x:r.x,y:r.y,width:r.width,height:r.height}}})()`);
+    assert.match(scaledEvidence.element ?? '', /id="demo-scene-canvas"/, `Scaled target must be reachable: ${JSON.stringify(scaledEvidence)}`);
+    assert.equal(scaledEvidence.hit, 'NX-C01-VOLUME-TOGGLE', `Scaled target must pick correctly: ${JSON.stringify(scaledEvidence)}`);
+    await command('Input.dispatchMouseEvent',{type:'mouseMoved',...scaledPoint});
+    await waitFor('/Over Volume Toggle.*press and release/i.test(document.querySelector("#demo-model-status").textContent)');
+    await command('Input.dispatchMouseEvent',{type:'mousePressed',...scaledPoint,button:'left',buttons:1,clickCount:1});
+    await waitFor('/Holding Volume Toggle/.test(document.querySelector("#demo-model-status").textContent)');
+    await command('Input.dispatchMouseEvent',{type:'mouseReleased',...scaledPoint,button:'left',buttons:0,clickCount:1});
+    await waitFor('/Volume Toggle pressed/.test(document.querySelector("#demo-model-status").textContent)');
+    await evaluate(`(()=>{const c=document.querySelector('#demo-scene-canvas');c.style.transform='';c.style.transformOrigin='';document.querySelector('[data-review-explore]').style.visibility=''})()`);
+    await command('Input.dispatchMouseEvent',{type:'mouseMoved',x:0,y:0});
+    let zoomPoint, zoomPicked;
+    for (let i=0; i<100; i++) {
+      zoomPoint=await evaluate('window.__officeTargetPoint("NX-C01-VOLUME-TOGGLE")');
+      zoomPicked=await evaluate(`window.__officeHitAt(${zoomPoint.x},${zoomPoint.y})`);
+      if (zoomPicked === 'NX-C01-VOLUME-TOGGLE') break;
+      await new Promise(resolveWait => setTimeout(resolveWait, 50));
+    }
+    const zoomHit=await evaluate(`(()=>{const e=document.elementFromPoint(${zoomPoint.x},${zoomPoint.y});return {tag:e?.tagName,id:e?.id,className:e?.className,point:${JSON.stringify(zoomPoint)}}})()`);
+    assert.equal(zoomHit.id,'demo-scene-canvas', `The magnified control must be reachable: ${JSON.stringify(zoomHit)}`);
+    assert.equal(zoomPicked, 'NX-C01-VOLUME-TOGGLE', `The projected button must match the 3D hit after resizing: ${JSON.stringify({point:zoomPoint, camera:await evaluate('window.__officeCamera()'), atomic:await evaluate(`(()=>{const p=window.__officeTargetPoint('NX-C01-VOLUME-TOGGLE'),c=document.querySelector('#demo-scene-canvas'),r=c.getBoundingClientRect();return {point:p,hit:window.__officeHitAt(p.x,p.y),width:c.width,height:c.height,rect:{x:r.x,y:r.y,width:r.width,height:r.height}}})()`)})}`);
+    await command('Input.dispatchMouseEvent',{type:'mouseMoved',...zoomPoint});
+    await waitFor('/Over Volume Toggle.*press and release/i.test(document.querySelector("#demo-model-status").textContent)');
+    await command('Input.dispatchMouseEvent',{type:'mousePressed',...zoomPoint,button:'left',buttons:1,clickCount:1});
+    await waitFor('/Holding Volume Toggle/.test(document.querySelector("#demo-model-status").textContent)');
+    await evaluate('window.dispatchEvent(new Event("resize"))');
+    assert.equal(await evaluate('window.__officeReviewRuntime.getState().pressedInteractionTargetId ?? null'), null, 'A resize must cancel a held control');
+    await command('Input.dispatchMouseEvent',{type:'mouseReleased',...zoomPoint,button:'left',buttons:0,clickCount:1});
+    assert(!/Volume Toggle pressed/.test(await evaluate('document.querySelector("#demo-model-status").textContent')), 'Releasing after a resize must not activate the control');
+    const backingBefore = await evaluate('document.querySelector("#demo-scene-canvas").width');
+    await command('Input.dispatchMouseEvent',{type:'mousePressed',...zoomPoint,button:'left',buttons:1,clickCount:1});
+    await waitFor('/Holding Volume Toggle/.test(document.querySelector("#demo-model-status").textContent)');
+    await evaluate('document.querySelector("#demo-scene-canvas").style.width="80%"');
+    await waitFor('window.__officeReviewRuntime.getState().pressedInteractionTargetId == null');
+    await waitFor(`document.querySelector("#demo-scene-canvas").width < ${backingBefore} * .9`);
+    await command('Input.dispatchMouseEvent',{type:'mouseReleased',...zoomPoint,button:'left',buttons:0,clickCount:1});
+    assert(!/Volume Toggle pressed/.test(await evaluate('document.querySelector("#demo-model-status").textContent')), 'A layout resize must not activate the held control');
+    await evaluate('document.querySelector("#demo-scene-canvas").style.width=""');
+    await waitFor(`document.querySelector("#demo-scene-canvas").width >= ${backingBefore} * .99`);
+    await command('Input.dispatchMouseEvent',{type:'mousePressed',...zoomPoint,button:'left',buttons:1,clickCount:1});
+    await command('Input.dispatchMouseEvent',{type:'mouseReleased',...zoomPoint,button:'left',buttons:0,clickCount:1});
+    await waitFor('/Volume Toggle pressed/.test(document.querySelector("#demo-model-status")?.textContent ?? "")');
+    assert(await evaluate(`(()=>{const status=document.querySelector('#demo-model-status').getBoundingClientRect();return [...document.querySelectorAll('.training-scene button')].filter(button=>!button.hidden).every(button=>{const r=button.getBoundingClientRect();return status.right<=r.left || status.left>=r.right || status.bottom<=r.top || status.top>=r.bottom})})()`), 'Status feedback must not be covered by scene controls');
+    await evaluate('window.__officeReviewRuntime.selectComponent("pureflow-tub", "COMPONENT_LIST")');
+    assert.equal(await evaluate('window.__officeReviewRuntime.getState().selectedComponentId'), 'pureflow-tub', 'The new component must actually be selected');
+    assert(!/Volume Toggle pressed/.test(await evaluate('document.querySelector("#demo-model-status").textContent')), 'Selecting another component must clear the previous control confirmation');
+    assert.equal(await lit(),1,'Magnifying the panel must preserve warmer state');
+    await evaluate('document.querySelector(".scene-named-controls button").click()');
+    await new Promise(resolveWait => setTimeout(resolveWait, 300));
+    const beforeHandleFocus=await evaluate('window.__officeCamera().radius');
+    await evaluate('document.querySelector("[data-review-focus-handle]").click()');
+    assert((await evaluate('window.__officeCamera().radius'))<beforeHandleFocus,'The handle shortcut must bring the handle closer');
+    await new Promise(resolveWait=>setTimeout(resolveWait,350));
+    const handleDrag = await evaluate('window.__officeHandlePoint()');
+    assert(handleDrag && await evaluate(`document.elementFromPoint(${handleDrag.x},${handleDrag.y})?.id`)==='demo-scene-canvas', `The handle must be reachable for direct dragging: ${JSON.stringify(handleDrag)}`);
+    await command('Input.dispatchMouseEvent',{type:'mouseMoved',...handleDrag});
+    await command('Input.dispatchMouseEvent',{type:'mousePressed',...handleDrag,button:'left',buttons:1,clickCount:1});
+    await waitFor('/Holding Cycler door handle/.test(document.querySelector("#demo-model-status").textContent)');
+    await command('Input.dispatchMouseEvent',{type:'mouseMoved',x:handleDrag.x,y:handleDrag.y-60,button:'left',buttons:1});
+    await waitFor('Math.abs(window.__officeReviewRuntime.getState().transforms["nxstage-cycler-handle"].rotationY) > .1');
+    await command('Input.dispatchKeyEvent',{type:'keyDown',key:'Escape',code:'Escape',windowsVirtualKeyCode:27});
+    await command('Input.dispatchKeyEvent',{type:'keyUp',key:'Escape',code:'Escape',windowsVirtualKeyCode:27});
+    await command('Input.dispatchMouseEvent',{type:'mouseReleased',x:handleDrag.x,y:handleDrag.y-60,button:'left',buttons:0,clickCount:1});
+    assert.equal(await evaluate('window.__officeReviewRuntime.getState().transforms["nxstage-cycler-handle"].rotationY'),0,'Canceling a direct handle drag must restore its starting position');
+    await new Promise(resolveWait=>setTimeout(resolveWait,450));
+    const restoredHandle = await evaluate('window.__officeHandlePoint()');
+    assert(Math.hypot(restoredHandle.x-handleDrag.x,restoredHandle.y-handleDrag.y)<2,`The visible handle must return after cancellation: ${JSON.stringify({handleDrag,restoredHandle})}`);
+    await command('Input.dispatchMouseEvent',{type:'mouseMoved',...handleDrag});
+    await command('Input.dispatchMouseEvent',{type:'mousePressed',...handleDrag,button:'left',buttons:1,clickCount:1});
+    await waitFor('/Holding Cycler door handle/.test(document.querySelector("#demo-model-status").textContent)');
+    await command('Input.dispatchMouseEvent',{type:'mouseMoved',x:handleDrag.x,y:handleDrag.y-60,button:'left',buttons:1});
+    await command('Input.dispatchKeyEvent',{type:'keyDown',key:'Escape',code:'Escape',windowsVirtualKeyCode:27});
+    await command('Input.dispatchKeyEvent',{type:'keyUp',key:'Escape',code:'Escape',windowsVirtualKeyCode:27});
+    await command('Input.dispatchMouseEvent',{type:'mouseReleased',x:handleDrag.x,y:handleDrag.y-60,button:'left',buttons:0,clickCount:1});
+    await new Promise(resolveWait=>setTimeout(resolveWait,80));
+    const regrab=await evaluate('window.__officeRegrabReturningHandle()');
+    assert(Math.hypot(regrab.before.x-handleDrag.x,regrab.before.y-handleDrag.y)>2,`The re-grab must occur before the visible return finishes: ${JSON.stringify({handleDrag,regrab})}`);
+    assert.equal(regrab.hit,'NX-C04-CYCLER-HANDLE',`The visible returning handle must remain pickable: ${JSON.stringify(regrab)}`);
+    assert.equal(regrab.held,'NX-C04-CYCLER-HANDLE',`The returning handle must be grabbable: ${JSON.stringify(regrab)}`);
+    assert(Math.hypot(regrab.before.x-regrab.after.x,regrab.before.y-regrab.after.y)<1,`Re-grabbing must not move the handle by itself: ${JSON.stringify(regrab)}`);
+    assert(Math.abs(regrab.moved)>.1,`Dragging after re-grabbing must move the handle: ${JSON.stringify(regrab)}`);
+    await waitFor('/Cycler door handle is raised/.test(document.querySelector("#demo-model-status").textContent)');
+    await new Promise(resolveWait=>setTimeout(resolveWait,450));
+    await click('Lower Cycler door handle');
+    await waitFor('/Cycler door handle is lowered/.test(document.querySelector("#demo-model-status").textContent)');
+    await click('Lift Cycler door handle');
+    await waitFor('/Cycler door handle is moving to its raised position/i.test(document.querySelector("#demo-model-status")?.textContent ?? "")');
+    await waitFor('/Cycler door handle is raised/i.test(document.querySelector("#demo-model-status")?.textContent ?? "")');
+    await new Promise(resolveWait => setTimeout(resolveWait, 600));
+    const handleBounds=await evaluate('window.__officeComponentBounds("nxstage-cycler-handle")');
+    assert(handleBounds && handleBounds.left>=0 && handleBounds.right<=1 && handleBounds.top>=0 && handleBounds.bottom<=1,`The raised handle must remain in view: ${JSON.stringify(handleBounds)}`);
+    await evaluate('window.__officeFrameDoorOblique()');
+    const dragStart = await evaluate('window.__officeFindVisibleMesh("Central recessed face")');
+    assert(dragStart, 'The visible center of the recessed door face must be directly reachable from the oblique view');
+    const dragMotion = await evaluate(`window.__officeDoorMotion(${JSON.stringify(dragStart)})`);
+    assert(dragMotion && Math.hypot(dragMotion.x,dragMotion.y)>12, `The upper door must have a visible drag direction: ${JSON.stringify({dragStart,dragMotion})}`);
+    const fraction = process.env.NXSTAGE_FINE_DRAG_CHECK==='1' ? .437 : .5;
+    const dragEnd = {x:dragStart.x+dragMotion.x*fraction,y:dragStart.y+dragMotion.y*fraction};
+    await command('Input.dispatchMouseEvent',{type:'mouseMoved',...dragStart});
+    await command('Input.dispatchMouseEvent',{type:'mousePressed',...dragStart,button:'left',buttons:1,clickCount:1});
+    await waitFor('/Holding Upper cycler door/.test(document.querySelector("#demo-model-status").textContent)');
+    await command('Input.dispatchMouseEvent',{type:'mouseMoved',...dragEnd,button:'left',buttons:1});
+    const upperBeforeRelease = await evaluate('window.__officeReviewRuntime.getState().transforms["nxstage-cycler-door"].translationX');
+    await command('Input.dispatchMouseEvent',{type:'mouseReleased',...dragEnd,button:'left',buttons:0,clickCount:1});
+    const draggedDoor = await evaluate('window.__officeReviewRuntime.getState().transforms["nxstage-cycler-door"].translationX');
+    if(process.env.NXSTAGE_FINE_DRAG_CHECK==='1') {
+      const snap=modelManifest.components.find(c=>c.componentId==='nxstage-cycler-door').permittedTransforms.translationX.snap;
+      assert(snap && Math.abs(draggedDoor-upperBeforeRelease)<=snap*.51+1e-7,`Upper door must settle close to the released position: ${JSON.stringify({upperBeforeRelease,draggedDoor,snap})}`);
+    }
+    assert(draggedDoor>0 && draggedDoor<doorTravel, `A partial drag must leave the upper door partly open: ${JSON.stringify({dragStart,dragMotion,draggedDoor,doorTravel})}`);
+    await new Promise(resolveWait=>setTimeout(resolveWait,450));
+    if(process.env.NXSTAGE_UPPER_COMPARISON_SCREENSHOT){const screenshot=await command('Page.captureScreenshot',{format:'png'});await writeFile(process.env.NXSTAGE_UPPER_COMPARISON_SCREENSHOT,Buffer.from(screenshot.data,'base64'));}
+    const reverseStart = await evaluate('window.__officeFindVisibleTarget("NX-C03-CYCLER-DOOR")');
+    assert(reverseStart, 'The partly open upper door must remain directly reachable');
+    const reverseMotion = await evaluate(`window.__officeDoorMotion(${JSON.stringify(reverseStart)})`);
+    assert(reverseMotion && Math.hypot(reverseMotion.x,reverseMotion.y)>.01, 'The upper door must retain a projected drag direction');
+    const reverseEnd = {x:reverseStart.x-reverseMotion.x*.6,y:reverseStart.y-reverseMotion.y*.6};
+    await command('Input.dispatchMouseEvent',{type:'mouseMoved',...reverseStart});
+    await command('Input.dispatchMouseEvent',{type:'mousePressed',...reverseStart,button:'left',buttons:1,clickCount:1});
+    await waitFor('/Holding Upper cycler door/.test(document.querySelector("#demo-model-status").textContent)');
+    await command('Input.dispatchMouseEvent',{type:'mouseMoved',...reverseEnd,button:'left',buttons:1});
+    await command('Input.dispatchMouseEvent',{type:'mouseReleased',...reverseEnd,button:'left',buttons:0,clickCount:1});
+    const reversedDoor = await evaluate('window.__officeReviewRuntime.getState().transforms["nxstage-cycler-door"].translationX');
+    assert(reversedDoor<draggedDoor, `Dragging back must close the upper door: ${JSON.stringify({reverseStart,reverseMotion,draggedDoor,reversedDoor})}`);
+    if(reversedDoor>0) {
+    await click('Close Upper cycler door');
+    await waitFor('window.__officeReviewRuntime.getState().transforms["nxstage-cycler-door"].translationX === 0');
+    }
+    await new Promise(resolveWait=>setTimeout(resolveWait,450));
+    if(process.env.NXSTAGE_TEST_VENT_DRAG==='1') {
+      assert(await evaluate('window.__officeFrameVent()'),'The vent must be available to frame');
+      const point=await evaluate('window.__officeFindMeshTriangle("Cycler arched front vent 09")');
+      assert(point,'A visible portion of the central vent marking must be reachable');
+      const motion=await evaluate(`window.__officeDoorMotion(${JSON.stringify(point)})`);
+      assert(motion && Math.hypot(motion.x,motion.y)>12,'Door motion must be visible from the vent');
+      await command('Input.dispatchMouseEvent',{type:'mouseMoved',...point});
+      await command('Input.dispatchMouseEvent',{type:'mousePressed',...point,button:'left',buttons:1,clickCount:1});
+      await waitFor('/Holding Upper cycler door/.test(document.querySelector("#demo-model-status").textContent)');
+      await command('Input.dispatchMouseEvent',{type:'mouseMoved',x:point.x+motion.x*.5,y:point.y+motion.y*.5,button:'left',buttons:1});
+      await command('Input.dispatchMouseEvent',{type:'mouseReleased',x:point.x+motion.x*.5,y:point.y+motion.y*.5,button:'left',buttons:0,clickCount:1});
+      const position=await evaluate('window.__officeReviewRuntime.getState().transforms["nxstage-cycler-door"].translationX');
+      assert(position>0 && position<doorTravel,`Dragging the vent must move the door partway: ${position}`);
+      await click('Close Upper cycler door');
+      await waitFor('window.__officeReviewRuntime.getState().transforms["nxstage-cycler-door"].translationX === 0');
+      await new Promise(resolveWait=>setTimeout(resolveWait,450));
+    }
+    await click('Lower Cycler door handle');
+    await waitFor('/Cycler door handle is lowered/i.test(document.querySelector("#demo-model-status")?.textContent ?? "")');
+    await command('Emulation.setEmulatedMedia', {features:[{name:'prefers-reduced-motion',value:'reduce'}]});
+    await click('Lift Cycler door handle');
+    await waitFor('/Cycler door handle is raised/i.test(document.querySelector("#demo-model-status")?.textContent ?? "")');
+    assert.doesNotMatch(await evaluate('document.querySelector("#demo-model-status").textContent'), /moving/i, 'Reduced-motion feedback must report the final position immediately');
+    await click('Lower Cycler door handle');
+    await waitFor('/Cycler door handle is lowered/i.test(document.querySelector("#demo-model-status")?.textContent ?? "")');
+    await command('Emulation.setEmulatedMedia', {features:[]});
+    assert.equal(await lit(),1,'Focusing the handle must preserve the warmer state');
+    await evaluate('document.querySelector(".scene-named-controls button").click()');
+    await new Promise(resolveWait => setTimeout(resolveWait, 300));
     const exploreCamera = await evaluate('window.__officeCamera()');
     const exploreControl = await evaluate('window.__officeTargetPoint("NX-C01-ADD-FLUID")');
     await command('Input.dispatchMouseEvent', {type:'mouseMoved', ...exploreControl});
@@ -80,6 +338,26 @@ try {
     await command('Input.dispatchMouseEvent', {type:'mouseReleased', ...exploreControl, button:'left', buttons:0, clickCount:1});
     await waitFor('/Add Fluid pressed/.test(document.querySelector("#demo-model-status")?.textContent ?? "")');
     assert(Math.abs((await evaluate('window.__officeCamera().alpha'))-exploreCamera.alpha)<1e-6, 'Pressing a control in exploration must not rotate the camera');
+    // A same-component decoration well in front of a key is a physical
+    // obstruction, not a thin printed marking on that key.
+    await command('Input.dispatchMouseEvent', {type:'mouseMoved', x:exploreControl.x+100, y:exploreControl.y+100});
+    assert(await evaluate('window.__officePlaceTestOverlay("NX-C01-ADD-FLUID", .04)'));
+    assert.equal(await evaluate(`window.__officeFirstMesh(${exploreControl.x},${exploreControl.y})`), '__test_overlay', 'The test obstruction must be the first visible surface');
+    await command('Input.dispatchMouseEvent', {type:'mouseMoved', ...exploreControl});
+    assert.notEqual(await evaluate('window.__officeReviewRuntime.getState().hoveredInteractionTargetId'), 'NX-C01-ADD-FLUID', 'A distant surface must not reveal the button through it');
+    await command('Input.dispatchMouseEvent', {type:'mousePressed', ...exploreControl, button:'left', buttons:1, clickCount:1});
+    assert.notEqual(await evaluate('window.__officeReviewRuntime.getState().pressedInteractionTargetId'), 'NX-C01-ADD-FLUID', 'A distant surface must block the press');
+    await command('Input.dispatchMouseEvent', {type:'mouseReleased', ...exploreControl, button:'left', buttons:0, clickCount:1});
+    await evaluate('window.__officeRemoveTestOverlay()');
+    assert(await evaluate('window.__officePlaceTestOverlay("NX-C01-ADD-FLUID", .0002)'));
+    assert.equal(await evaluate(`window.__officeFirstMesh(${exploreControl.x},${exploreControl.y})`), '__test_overlay', 'The thin marking must be the first visible surface');
+    await command('Input.dispatchMouseEvent', {type:'mouseMoved', ...exploreControl});
+    assert.equal(await evaluate('window.__officeReviewRuntime.getState().hoveredInteractionTargetId'), 'NX-C01-ADD-FLUID', 'A thin marking on the button must preserve access');
+    await command('Input.dispatchMouseEvent', {type:'mousePressed', ...exploreControl, button:'left', buttons:1, clickCount:1});
+    await waitFor('/Holding Add Fluid/.test(document.querySelector("#demo-model-status").textContent)');
+    await command('Input.dispatchMouseEvent', {type:'mouseReleased', ...exploreControl, button:'left', buttons:0, clickCount:1});
+    await waitFor('/Add Fluid pressed/.test(document.querySelector("#demo-model-status").textContent)');
+    await evaluate('window.__officeRemoveTestOverlay()');
     const orbitStart = await evaluate('(()=>{const r=document.querySelector("#demo-scene-canvas").getBoundingClientRect();return {x:r.left+15,y:r.top+r.height*.45}})()');
     await command('Input.dispatchMouseEvent', {type:'mouseMoved', ...orbitStart});
     await command('Input.dispatchMouseEvent', {type:'mousePressed', ...orbitStart, button:'left', buttons:1, clickCount:1});
@@ -94,13 +372,16 @@ try {
     assert(Math.abs(resetCamera.alpha-originalCamera.alpha)<1e-6 && resetCamera.radius<originalCamera.radius, 'Reset in exploration must restore the front orientation while keeping the model fitted');
     assert.equal(await lit(), 1, 'Resetting the view must preserve the live warmer state');
     await evaluate('document.querySelector("[data-review-explore]").click()');
+    assert.equal(await evaluate('document.querySelector("[data-review-focus-handle]").hidden'),true,'The shortcut must hide in the aligned office view');
+    assert.equal(await evaluate('document.querySelector("[data-review-panel-magnifier]").hidden'),true,'Panel magnification must hide in the aligned office view');
     const restoredCamera = await evaluate('window.__officeCamera()');
     assert(Math.abs(restoredCamera.alpha-originalCamera.alpha)<1e-6 && Math.abs(restoredCamera.beta-originalCamera.beta)<1e-6 && Math.abs(restoredCamera.radius-originalCamera.radius)<1e-6, 'Returning to the office must restore its aligned camera');
-    assert.equal(await evaluate('getComputedStyle(document.querySelector("#training-photo")).visibility'), 'visible', 'Returning must restore the office photo');
+    assert.equal(await evaluate(`getComputedStyle(document.querySelector(${JSON.stringify(backdropSelector)})).visibility`), 'visible', 'Returning must restore the office backdrop');
     assert.equal(await lit(), 1, 'Returning to the office must retain the live model state');
     await evaluate('document.querySelector("[data-review-explore]").click();document.querySelector("[data-action=toggle-scene-interaction]").click()');
     assert.equal(await evaluate('document.querySelector("[data-review-explore]").hidden'), true, 'Exiting interaction must hide the exploration control');
-    assert.equal(await evaluate('getComputedStyle(document.querySelector("#training-photo")).visibility'), 'visible', 'Exiting interaction must restore the photo');
+    if (walkthrough) assert.notEqual(await evaluate('getComputedStyle(document.querySelector(".scene-playback")).display'), 'none', 'Walkthrough playback must return when interaction is exited');
+    assert.equal(await evaluate(`getComputedStyle(document.querySelector(${JSON.stringify(backdropSelector)})).visibility`), 'visible', 'Exiting interaction must restore the office backdrop');
     assert(Math.abs((await evaluate('window.__officeCamera().alpha')) - originalCamera.alpha)<1e-6, 'Exiting interaction must restore the aligned camera');
     await evaluate('document.querySelector("[data-action=toggle-scene-interaction]").click()');
     await waitFor('Boolean(document.querySelector(".scene-named-controls .named-model-control-list button"))');
@@ -121,8 +402,23 @@ try {
     await waitFor(`document.querySelector('#demo-scene-canvas').width > ${expandedWidth * 1.5}`);
     assert.equal(await evaluate('document.querySelector("[data-review-zoom]").getAttribute("aria-pressed")'), 'true');
     assert.equal(await lit(), 1, 'Close view must preserve the live warmer state');
+    if (walkthrough) {
+      const crop = await evaluate(`(()=>{const c=document.querySelector('#demo-scene-canvas').getBoundingClientRect(), b=document.querySelector('#training-room-photo').getBoundingClientRect();return {canvas:{left:c.left,top:c.top,width:c.width,height:c.height},backdrop:{left:b.left,top:b.top,width:b.width,height:b.height}}})()`);
+      for (const dimension of ['left','top','width','height']) assert(Math.abs(crop.canvas[dimension]-crop.backdrop[dimension]) < 1, `Close view must keep the room aligned with the model: ${JSON.stringify(crop)}`);
+    }
     const closeScreenshot = await command('Page.captureScreenshot', {format:'png'});
     await writeFile('output/nxstage-interaction-review-office/office-close-review.png', Buffer.from(closeScreenshot.data, 'base64'));
+    if(process.env.NXSTAGE_SHELF_SCREENSHOT){
+      const cameraBeforeShelf=await evaluate('window.__officeCamera()');
+      assert(await evaluate('window.__officeShelfStudy()'),'The shelf must be available for inspection');
+      await new Promise(resolveWait=>setTimeout(resolveWait,300));
+      await writeFile(process.env.NXSTAGE_SHELF_SCREENSHOT,Buffer.from((await command('Page.captureScreenshot',{format:'png'})).data,'base64'));
+      await evaluate('window.__officeRestoreShelfStudy()');
+      await new Promise(resolveWait=>setTimeout(resolveWait,300));
+      const cameraAfterShelf=await evaluate('window.__officeCamera()');
+      for(const key of ['alpha','beta','radius'])assert(Math.abs(cameraBeforeShelf[key]-cameraAfterShelf[key])<1e-6,`Shelf inspection must restore ${key}: ${JSON.stringify({cameraBeforeShelf,cameraAfterShelf})}`);
+      assert(cameraBeforeShelf.target.every((value,index)=>Math.abs(value-cameraAfterShelf.target[index])<1e-6),'Shelf inspection must restore the camera target');
+    }
     const controlPoint = await evaluate('window.__officeTargetPoint("NX-C01-ADD-FLUID")');
     assert(controlPoint, 'The Add Fluid control must have a projected position');
     await command('Input.dispatchMouseEvent', {type:'mousePressed', ...controlPoint, button:'left', buttons:1, clickCount:1});
@@ -130,6 +426,8 @@ try {
     await waitFor('/Add Fluid pressed/.test(document.querySelector("#demo-model-status")?.textContent ?? "")');
     const doorPoint = await evaluate('window.__officeTargetPoint("NX-C02-CABINET-DOOR")');
     assert(doorPoint, 'The cabinet door must have a projected position');
+    await command('Input.dispatchMouseEvent', {type:'mouseMoved', ...doorPoint});
+    await waitFor('/Over Lower cabinet door.*drag to move.*click to open or close/i.test(document.querySelector("#demo-model-status").textContent)');
     await command('Input.dispatchMouseEvent', {type:'mousePressed', ...doorPoint, button:'left', buttons:1, clickCount:1});
     await command('Input.dispatchMouseEvent', {type:'mouseReleased', ...doorPoint, button:'left', buttons:0, clickCount:1});
     await waitFor('Math.abs(window.__officeReviewRuntime.getState().transforms["nxstage-cabinet-door"].rotationY) > 1');
@@ -138,11 +436,30 @@ try {
     assert(tubMotion && Math.hypot(tubMotion.delta.x,tubMotion.delta.y)>14, `The tub must have a visible drag direction: ${JSON.stringify(tubMotion)}`);
     const tubEnd = {x:tubMotion.point.x+tubMotion.delta.x*.5,y:tubMotion.point.y+tubMotion.delta.y*.5};
     await command('Input.dispatchMouseEvent', {type:'mouseMoved', ...tubMotion.point});
+    await waitFor('/Over PureFlow tub.*drag to move.*click to pull out or push in/i.test(document.querySelector("#demo-model-status").textContent)');
+    await command('Input.dispatchMouseEvent', {type:'mousePressed', ...tubMotion.point, button:'left', buttons:1, clickCount:1});
+    await command('Input.dispatchMouseEvent', {type:'mouseMoved', ...tubEnd, button:'left', buttons:1});
+    await waitFor(`window.__officeReviewRuntime.getState().transforms["pureflow-tub"].translationX > ${tubTravel * .02}`);
+    await evaluate('window.dispatchEvent(new Event("resize"))');
+    await command('Input.dispatchMouseEvent', {type:'mouseReleased', ...tubEnd, button:'left', buttons:0, clickCount:1});
+    await waitFor('window.__officeReviewRuntime.getState().transforms["pureflow-tub"].translationX === 0');
+    await new Promise(resolveWait => setTimeout(resolveWait, 500));
+    await command('Input.dispatchMouseEvent', {type:'mouseMoved', ...tubMotion.point});
     await command('Input.dispatchMouseEvent', {type:'mousePressed', ...tubMotion.point, button:'left', buttons:1, clickCount:1});
     await waitFor('/Holding PureFlow tub/.test(document.querySelector("#demo-model-status")?.textContent ?? "")');
     await command('Input.dispatchMouseEvent', {type:'mouseMoved', ...tubEnd, button:'left', buttons:1});
+    const tubBeforeRelease = await evaluate('window.__officeReviewRuntime.getState().transforms["pureflow-tub"].translationX');
     await command('Input.dispatchMouseEvent', {type:'mouseReleased', ...tubEnd, button:'left', buttons:0, clickCount:1});
     await waitFor('/PureFlow tub is partially pulled out/i.test(document.querySelector("#demo-model-status")?.textContent ?? "")');
+    if(process.env.NXSTAGE_FINE_DRAG_CHECK==='1') {
+      const snap=modelManifest.components.find(c=>c.componentId==='pureflow-tub').permittedTransforms.translationX.snap;
+      const after=await evaluate('window.__officeReviewRuntime.getState().transforms["pureflow-tub"].translationX');
+      assert(snap && Math.abs(after-tubBeforeRelease)<=snap*.51+1e-7,`Tub must settle close to the released position: ${JSON.stringify({tubBeforeRelease,after,snap})}`);
+    }
+    if (process.env.NXSTAGE_TUB_CLEARANCE_SCREENSHOT) {
+      const screenshot = await command('Page.captureScreenshot', {format:'png'});
+      await writeFile(process.env.NXSTAGE_TUB_CLEARANCE_SCREENSHOT, Buffer.from(screenshot.data, 'base64'));
+    }
     await click('Push in PureFlow tub');
     await waitFor('window.__officeReviewRuntime.getState().transforms["pureflow-tub"].translationX === 0');
     await new Promise(resolveWait => setTimeout(resolveWait, 500));
@@ -155,37 +472,44 @@ try {
     await clickEnlarge();
     await waitFor('!document.fullscreenElement');
     assert.equal(await lit(), 1, 'Leaving full screen must preserve the live warmer state');
-    await evaluate('document.querySelector(".scene-named-controls summary").click()');
-    await evaluate(`(()=>{const runtime=window.__officeReviewRuntime,state=runtime.getState();const transforms=Object.fromEntries(state.componentIds.map(id=>[id,{rotationY:id==='nxstage-cycler-handle'?-Math.PI/2:0,translationX:id==='nxstage-cycler-door' ? .4 : 0}]));runtime.applyAuthoritativeState({modelVersionId:'preview:nxstage-system-one-interaction-review-v1',releaseBindingId:'preview:nxstage-system-one-interaction-review-v1',sequence:5,nextSequence:6,transforms,scorePoints:0,completed:false,allowedActions:[]});})()`);
+    await evaluate('document.querySelector(".named-model-controls summary").click()');
+    await evaluate(`(()=>{const runtime=window.__officeReviewRuntime,state=runtime.getState();const transforms=Object.fromEntries(state.componentIds.map(id=>[id,{rotationY:id==='nxstage-cycler-handle'?-Math.PI/2:0,translationX:id==='nxstage-cycler-door' ? ${doorTravel / 2} : 0}]));runtime.applyAuthoritativeState({modelVersionId:${JSON.stringify(modelManifest.modelVersionId)},releaseBindingId:${JSON.stringify(modelManifest.releaseBindingId)},sequence:5,nextSequence:6,transforms,scorePoints:0,completed:false,allowedActions:[]});})()`);
     const continueSelector = '[data-continue-target-id="NX-C03-CYCLER-DOOR"]';
     assert.equal(await evaluate(`document.querySelector('${continueSelector}')?.hidden`), false, 'A partially open door must offer a way to finish opening');
+    await evaluate(`(()=>{const button=document.querySelector('${continueSelector}');window.__continueTrace=[];for(const type of ['focusin','focusout','keydown','keyup','click'])button.addEventListener(type,event=>window.__continueTrace.push({type,key:event.key,hidden:button.hidden,active:document.activeElement?.dataset?.continueTargetId??document.activeElement?.id,state:window.__officeReviewRuntime.getState().transforms['nxstage-cycler-door'].translationX}));button.addEventListener('click',()=>window.dispatchEvent(new Event('resize')),{once:true});})()`);
     await evaluate(`document.querySelector('${continueSelector}').focus()`);
+    assert.equal(await evaluate('document.activeElement?.dataset?.continueTargetId'), 'NX-C03-CYCLER-DOOR', 'The continue button must receive keyboard focus');
     await command('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13, text: '\r', unmodifiedText: '\r' });
     await command('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13 });
-    await waitFor('window.__officeReviewRuntime.getState().transforms["nxstage-cycler-door"].translationX === .8');
+    try { await waitFor(`Math.abs(window.__officeReviewRuntime.getState().transforms["nxstage-cycler-door"].translationX - ${doorTravel}) < 1e-8`); }
+    catch (error) { throw Error(`${error.message}; continue=${JSON.stringify(await evaluate(`({trace:window.__continueTrace,active:document.activeElement?.outerHTML,state:window.__officeReviewRuntime.getState(),blocked:window.__officeReviewRuntime.interactionBlockReason('NX-C03-CYCLER-DOOR',{translationX:${doorTravel}})})`))}`); }
     assert.equal(await evaluate(`document.querySelector('${continueSelector}').hidden`), true, 'The continue action must disappear when fully open');
     assert.equal(await evaluate('document.activeElement?.textContent'), 'Close Upper cycler door', 'Focus must move to the remaining door action');
     await click('Lower Cycler door handle');
     await waitFor('/Close the cycler door before lowering/.test(document.querySelector("#demo-model-status")?.textContent ?? "")');
     assert.equal(await evaluate('window.__officeReviewRuntime.getState().transforms["nxstage-cycler-handle"].rotationY'), -Math.PI / 2, 'An interlocked handle must stay raised');
-    await evaluate(`(()=>{const runtime=window.__officeReviewRuntime,state=runtime.getState();const transforms=Object.fromEntries(state.componentIds.map(id=>[id,{rotationY:id==='nxstage-cabinet-door'?-Math.PI/2:0,translationX:id==='pureflow-tub' ? .6 : 0}]));runtime.applyAuthoritativeState({modelVersionId:'preview:nxstage-system-one-interaction-review-v1',releaseBindingId:'preview:nxstage-system-one-interaction-review-v1',sequence:6,nextSequence:7,transforms,scorePoints:0,completed:false,allowedActions:[]});})()`);
+    await evaluate(`(()=>{const runtime=window.__officeReviewRuntime,state=runtime.getState();const transforms=Object.fromEntries(state.componentIds.map(id=>[id,{rotationY:id==='nxstage-cabinet-door'?-Math.PI/2:0,translationX:id==='pureflow-tub' ? ${partialTubTravel} : 0}]));runtime.applyAuthoritativeState({modelVersionId:${JSON.stringify(modelManifest.modelVersionId)},releaseBindingId:${JSON.stringify(modelManifest.releaseBindingId)},sequence:6,nextSequence:7,transforms,scorePoints:0,completed:false,allowedActions:[]});})()`);
     assert.equal(await evaluate('document.querySelector(\'[data-continue-target-id="PF-C02-TUB"]\')?.hidden'), false, 'A partially extended tub must offer a way to finish pulling it out');
     await click('Pull out PureFlow tub fully');
-    await waitFor('window.__officeReviewRuntime.getState().transforms["pureflow-tub"].translationX === 2.1');
+    await waitFor(`Math.abs(window.__officeReviewRuntime.getState().transforms["pureflow-tub"].translationX - ${tubTravel}) < 1e-8`);
     await waitFor('/PureFlow tub is pulled out/i.test(document.querySelector("#demo-model-status")?.textContent ?? "")');
     await click('Push in PureFlow tub');
     await waitFor('window.__officeReviewRuntime.getState().transforms["pureflow-tub"].translationX === 0');
     await waitFor('/PureFlow tub is pushed in/i.test(document.querySelector("#demo-model-status")?.textContent ?? "")');
     await click('Pull out PureFlow tub');
-    await waitFor('window.__officeReviewRuntime.getState().transforms["pureflow-tub"].translationX === 2.1');
+    await waitFor(`Math.abs(window.__officeReviewRuntime.getState().transforms["pureflow-tub"].translationX - ${tubTravel}) < 1e-8`);
     await click('Close Lower cabinet door');
     await waitFor('/Push the tub in before closing/.test(document.querySelector("#demo-model-status")?.textContent ?? "")');
     assert.equal(await evaluate('window.__officeReviewRuntime.getState().transforms["nxstage-cabinet-door"].rotationY'), -Math.PI / 2, 'The cabinet must stay open while the tub is extended');
-    await evaluate(`(()=>{const runtime=window.__officeReviewRuntime,state=runtime.getState();const transforms=Object.fromEntries(state.componentIds.map(id=>[id,{rotationY:0,translationX:0}]));runtime.applyAuthoritativeState({modelVersionId:'preview:nxstage-system-one-interaction-review-v1',releaseBindingId:'preview:nxstage-system-one-interaction-review-v1',sequence:7,nextSequence:8,transforms,scorePoints:0,completed:false,allowedActions:[]});})()`);
+    await evaluate(`(()=>{const runtime=window.__officeReviewRuntime,state=runtime.getState();const transforms=Object.fromEntries(state.componentIds.map(id=>[id,{rotationY:0,translationX:0}]));runtime.applyAuthoritativeState({modelVersionId:${JSON.stringify(modelManifest.modelVersionId)},releaseBindingId:${JSON.stringify(modelManifest.releaseBindingId)},sequence:7,nextSequence:8,transforms,scorePoints:0,completed:false,allowedActions:[]});})()`);
     await command('Emulation.setDeviceMetricsOverride', {width:390,height:844,deviceScaleFactor:1,mobile:true});
     await command('Emulation.setTouchEmulationEnabled', {enabled:true,maxTouchPoints:2});
     await evaluate('document.querySelector("#demo-scene-canvas").scrollIntoView({block:"center"})');
     await new Promise(resolveWait => setTimeout(resolveWait, 400));
+    await click('Pull out PureFlow tub');
+    await waitFor('/Open the cabinet door fully/.test(document.querySelector("#demo-model-status").textContent)');
+    assert(await evaluate(`(()=>{const s=document.querySelector('#demo-model-status').getBoundingClientRect(), scene=document.querySelector('.training-scene').getBoundingClientRect();return s.left>=scene.left && s.right<=scene.right && s.top>=scene.top && s.bottom<=scene.bottom})()`), 'The complete interlock message must fit inside the scene on a phone');
+    assert(await evaluate(`(()=>{const status=document.querySelector('#demo-model-status').getBoundingClientRect();return [...document.querySelectorAll('.training-scene button')].filter(button=>!button.hidden).every(button=>{const r=button.getBoundingClientRect();return status.right<=r.left || status.left>=r.right || status.bottom<=r.top || status.top>=r.bottom})})()`), 'Status feedback must not be covered by scene controls on a phone');
     const exploreButton = await evaluate(`(()=>{const e=document.querySelector('[data-review-explore]'),r=e.getBoundingClientRect(),x=r.left+r.width/2,y=r.top+r.height/2;return {x,y,right:r.right,hit:document.elementFromPoint(x,y)===e,edge:document.elementFromPoint(r.right-3,y)===e};})()`);
     assert(exploreButton.hit, 'The exploration control must be reachable on a phone');
     assert(exploreButton.right <= 390, `The exploration control must fit on screen: ${JSON.stringify(exploreButton)}`);
@@ -197,6 +521,126 @@ try {
     await command('Input.dispatchTouchEvent', {type:'touchStart',touchPoints:[{x:exploreButton.x,y:exploreButton.y,id:51}]});
     await command('Input.dispatchTouchEvent', {type:'touchEnd',touchPoints:[]});
     await waitFor('document.querySelector("[data-review-explore]").getAttribute("aria-pressed")==="true"');
+    await new Promise(resolveWait => setTimeout(resolveWait, 400));
+    const mobilePanelBase={};
+    for(const id of ['NX-C01-VOLUME-TOGGLE','NX-C01-ROW2-DOWN','NX-C01-ROW2-UP','NX-C01-MUTE'])mobilePanelBase[id]=await evaluate(`window.__officeTargetSize(${JSON.stringify(id)})`);
+    await evaluate('(()=>{const d=document.querySelector("[data-review-panel-magnifier]");if(!d.open)d.querySelector("summary").click()})()');
+    const mobileRegionTargets={
+      left:[['NX-C01-ADD-FLUID','Add Fluid'],['NX-C01-VOLUME-TOGGLE','Volume Toggle'],['NX-C01-TREATMENT','Treatment']],
+      decrease:[['NX-C01-ROW1-DOWN','Dialysate decrease'],['NX-C01-ROW2-DOWN','Ultrafiltration decrease'],['NX-C01-ROW3-DOWN','Blood flow decrease']],
+      increase:[['NX-C01-ROW1-UP','Dialysate increase'],['NX-C01-ROW2-UP','Ultrafiltration increase'],['NX-C01-ROW3-UP','Blood flow increase']],
+      right:[['NX-C01-STOP','Stop control'],['NX-C01-MUTE','Mute control']]
+    };
+    for(const [region,id,label] of [['left','NX-C01-VOLUME-TOGGLE','Volume Toggle'],['decrease','NX-C01-ROW2-DOWN','Ultrafiltration decrease'],['increase','NX-C01-ROW2-UP','Ultrafiltration increase'],['right','NX-C01-MUTE','Mute control']]){
+      await evaluate(`document.querySelector('[data-review-panel-region="${region}"]').scrollIntoView({block:"center"})`);
+      const button=await evaluate(`(()=>{const e=document.querySelector('[data-review-panel-region="${region}"]'),r=e.getBoundingClientRect(),x=r.left+r.width/2,y=r.top+r.height/2;return {x,y,hit:document.elementFromPoint(x,y)===e};})()`);
+      assert(button.hit,`The ${region} magnifier must be reachable by touch`);
+      await command('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[{x:button.x,y:button.y,id:59}]});
+      await command('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]});
+      await new Promise(resolveWait => setTimeout(resolveWait, 250));
+      const size=await evaluate(`window.__officeTargetSize(${JSON.stringify(id)})`);
+      assert(size.width>mobilePanelBase[id].width*1.5,`${label} must be larger in the office magnifier: ${JSON.stringify({before:mobilePanelBase[id],size})}`);
+      if(region==='left') {
+        const add=await evaluate('window.__officeTargetPoint("NX-C01-ADD-FLUID")'),volume=await evaluate('window.__officeTargetPoint("NX-C01-VOLUME-TOGGLE")');
+        assert(add.x<volume.x,`The upper panel must match the photographed left-to-right order: ${JSON.stringify({add,volume})}`);
+        const image=await command('Page.captureScreenshot',{format:'png'});
+        await writeFile('output/nxstage-interaction-review-office/office-mobile-magnified.png',Buffer.from(image.data,'base64'));
+      }
+      for(const [memberId,memberLabel] of mobileRegionTargets[region]) {
+        const point=await evaluate(`window.__officeTargetPoint(${JSON.stringify(memberId)})`);
+        const hitElement=await evaluate(`(()=>{const e=document.elementFromPoint(${point.x},${point.y});return {isCanvas:e===document.querySelector("#demo-scene-canvas"),element:e?.outerHTML.slice(0,300),x:${point.x},y:${point.y}}})()`);
+        assert(hitElement.isCanvas,`${memberLabel} must not be covered by page controls: ${JSON.stringify(hitElement)}`);
+        assert.equal(await evaluate(`window.__officeHitAt(${point.x},${point.y})`),memberId,`${memberLabel} must remain directly reachable`);
+        await command('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[{...point,id:60}]});
+        await waitFor(`document.querySelector("#demo-model-status").textContent.includes(${JSON.stringify('Holding '+memberLabel)})`);
+        const heldHit=await evaluate(`window.__officeHitAt(${point.x},${point.y})`);
+        assert.equal(heldHit,memberId,`${memberLabel} must remain under the finger while depressed`);
+        await command('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]});
+        await waitFor(`document.querySelector("#demo-model-status").textContent.includes(${JSON.stringify(memberLabel+' pressed')})`);
+      }
+    }
+    const blockedRadius=await evaluate('window.__officeCamera().radius');
+    await evaluate('document.querySelector("[data-review-panel-region=lower-arrows]").click()');
+    await waitFor('/Open the cabinet door fully/.test(document.querySelector("#demo-model-status")?.textContent ?? "")');
+    assert.equal(await evaluate('window.__officeCamera().radius'),blockedRadius,'The closed cabinet must block the lower close-up');
+    await evaluate(`(()=>{const runtime=window.__officeReviewRuntime,state=runtime.getState();const transforms=Object.fromEntries(state.componentIds.map(id=>[id,{...state.transforms[id],rotationY:id==='nxstage-cabinet-door'?-Math.PI/4:state.transforms[id].rotationY}]));runtime.applyAuthoritativeState({modelVersionId:${JSON.stringify(modelManifest.modelVersionId)},releaseBindingId:${JSON.stringify(modelManifest.releaseBindingId)},sequence:8,nextSequence:9,transforms,scorePoints:0,completed:false,allowedActions:[]});})()`);
+    await evaluate('document.querySelector("[data-review-panel-region=lower-actions]").click()');
+    await waitFor('/Open the cabinet door fully/.test(document.querySelector("#demo-model-status")?.textContent ?? "")');
+    assert.equal(await evaluate('window.__officeCamera().radius'),blockedRadius,'A partially open cabinet must also block the lower close-up');
+    await evaluate(`(()=>{const runtime=window.__officeReviewRuntime,state=runtime.getState();const transforms=Object.fromEntries(state.componentIds.map(id=>[id,{...state.transforms[id],rotationY:id==='nxstage-cabinet-door'?0:state.transforms[id].rotationY}]));runtime.applyAuthoritativeState({modelVersionId:${JSON.stringify(modelManifest.modelVersionId)},releaseBindingId:${JSON.stringify(modelManifest.releaseBindingId)},sequence:9,nextSequence:10,transforms,scorePoints:0,completed:false,allowedActions:[]});})()`);
+    await click('Open Lower cabinet door');
+    await waitFor('/Lower cabinet door is open/.test(document.querySelector("#demo-model-status")?.textContent ?? "")');
+    await new Promise(resolveWait => setTimeout(resolveWait, 650));
+    await evaluate('window.__officeReviewRuntime.frameComponent("pureflow-control-panel")');
+    await new Promise(resolveWait => setTimeout(resolveWait, 250));
+    const lowerBase={};
+    for(const id of ['PF-C01-UP','PF-C01-DOWN','PF-C01-GO','PF-C01-STOP'])lowerBase[id]=await evaluate(`window.__officeTargetSize(${JSON.stringify(id)})`);
+    for(const [region,members] of [['lower-arrows',[['PF-C01-UP','PureFlow up'],['PF-C01-DOWN','PureFlow down']]],['lower-actions',[['PF-C01-GO','PureFlow GO'],['PF-C01-STOP','PureFlow STOP']]]]){
+      await evaluate(`document.querySelector('[data-review-panel-region="${region}"]').scrollIntoView({block:"center"})`);
+      const button=await evaluate(`(()=>{const e=document.querySelector('[data-review-panel-region="${region}"]'),r=e.getBoundingClientRect(),x=r.left+r.width/2,y=r.top+r.height/2;return {x,y,hit:document.elementFromPoint(x,y)===e};})()`);
+      assert(button.hit,`The ${region} magnifier must be reachable by touch`);
+      await command('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[{x:button.x,y:button.y,id:63}]});
+      await command('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]});
+      await new Promise(resolveWait => setTimeout(resolveWait, 250));
+      if(region==='lower-arrows') {
+        const up=await evaluate('window.__officeTargetPoint("PF-C01-UP")'),down=await evaluate('window.__officeTargetPoint("PF-C01-DOWN")');
+        assert(up.x<down.x,`The lower arrows must match the photographed left-to-right order: ${JSON.stringify({up,down})}`);
+      }
+      if(region==='lower-actions') {
+        const go=await evaluate('window.__officeTargetPoint("PF-C01-GO")'),stop=await evaluate('window.__officeTargetPoint("PF-C01-STOP")');
+        assert(go.x<stop.x,`The lower panel must match the photographed left-to-right order: ${JSON.stringify({go,stop,camera:await evaluate('window.__officeCamera()'),goWorld:await evaluate('window.__officeWorld("PF-C01-GO")'),stopWorld:await evaluate('window.__officeWorld("PF-C01-STOP")')})}`);
+        const image=await command('Page.captureScreenshot',{format:'png'});
+        await writeFile('output/nxstage-interaction-review-office/office-mobile-lower-magnified.png',Buffer.from(image.data,'base64'));
+      }
+      for(const [id,label] of members){
+        const size=await evaluate(`window.__officeTargetSize(${JSON.stringify(id)})`);
+        assert(size.width>lowerBase[id].width*1.5,`${label} must be larger in the close-up: ${JSON.stringify({before:lowerBase[id],size})}`);
+        const point=await evaluate(`window.__officeTargetPoint(${JSON.stringify(id)})`);
+        assert(await evaluate(`document.elementFromPoint(${point.x},${point.y})===document.querySelector("#demo-scene-canvas")`),`${label} must not be covered`);
+        assert.equal(await evaluate(`window.__officeHitAt(${point.x},${point.y})`),id,`${label} must be the visible target`);
+        await command('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[{...point,id:64}]});
+        await waitFor(`document.querySelector("#demo-model-status").textContent.includes(${JSON.stringify('Holding '+label)})`);
+        await command('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]});
+        await waitFor(`document.querySelector("#demo-model-status").textContent.includes(${JSON.stringify(label+' pressed')})`);
+      }
+    }
+    await click('Close Lower cabinet door');
+    await waitFor('/Lower cabinet door is closed/.test(document.querySelector("#demo-model-status")?.textContent ?? "")');
+    await evaluate('document.querySelector(".scene-named-controls button").click();document.querySelector("#demo-scene-canvas").scrollIntoView({block:"center"})');
+    await new Promise(resolveWait => setTimeout(resolveWait, 350));
+    await evaluate('document.querySelector("[data-review-focus-handle]").scrollIntoView({block:"center"})');
+    const mobileFocus=await evaluate(`(()=>{const e=document.querySelector('[data-review-focus-handle]'),r=e.getBoundingClientRect(),x=r.left+r.width/2,y=r.top+r.height/2;return {x,y,right:r.right,hit:document.elementFromPoint(x,y)===e};})()`);
+    assert(mobileFocus.hit && mobileFocus.right<=390,`The handle shortcut must be reachable on a phone: ${JSON.stringify(mobileFocus)}`);
+    const mobileRadiusBefore=await evaluate('window.__officeCamera().radius');
+    await command('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[{x:mobileFocus.x,y:mobileFocus.y,id:58}]});
+    await command('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]});
+    assert((await evaluate('window.__officeCamera().radius'))<mobileRadiusBefore,'Touching the shortcut must focus the handle');
+    await new Promise(resolveWait => setTimeout(resolveWait, 300));
+    const mobileHandle = await evaluate('window.__officeHandlePoint()');
+    assert(mobileHandle && mobileHandle.x >= 0 && mobileHandle.x < 390 && mobileHandle.y >= 0 && mobileHandle.y < 844, `The focused handle must be on screen: ${JSON.stringify(mobileHandle)}`);
+    assert.equal(await evaluate(`document.elementFromPoint(${mobileHandle.x},${mobileHandle.y})?.id`), 'demo-scene-canvas', 'The focused handle must not be covered by page controls');
+    assert.equal(await evaluate(`window.__officeHitAt(${mobileHandle.x},${mobileHandle.y})`), 'NX-C04-CYCLER-HANDLE', 'The visible bar must resolve to the handle');
+    await command('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[{...mobileHandle,id:58}]});
+    await waitFor('/Holding Cycler door handle/.test(document.querySelector("#demo-model-status").textContent)');
+    await command('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]});
+    await waitFor('/Cycler door handle is raised/.test(document.querySelector("#demo-model-status").textContent)');
+    await new Promise(resolveWait => setTimeout(resolveWait, 500));
+    const mobileDoor = await evaluate('window.__officeFindVisibleTarget("NX-C03-CYCLER-DOOR")');
+    assert(mobileDoor && mobileDoor.x >= 0 && mobileDoor.x < 390 && mobileDoor.y >= 0 && mobileDoor.y < 844, `The upper door must be on screen: ${JSON.stringify(mobileDoor)}`);
+    assert.equal(await evaluate(`document.elementFromPoint(${mobileDoor.x},${mobileDoor.y})?.id`), 'demo-scene-canvas', 'The upper door must not be covered by page controls');
+    assert.equal(await evaluate(`window.__officeHitAt(${mobileDoor.x},${mobileDoor.y})`), 'NX-C03-CYCLER-DOOR', 'The visible upper door must be directly reachable');
+    await command('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[{...mobileDoor,id:58}]});
+    await command('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]});
+    await waitFor('/Upper cycler door is open/.test(document.querySelector("#demo-model-status").textContent)');
+    await click('Close Upper cycler door');
+    await waitFor('/Upper cycler door is moving to its closed position/.test(document.querySelector("#demo-model-status").textContent)');
+    await click('Lower Cycler door handle');
+    await waitFor('/Wait for Upper cycler door to finish moving/.test(document.querySelector("#demo-model-status").textContent)');
+    await new Promise(resolveWait => setTimeout(resolveWait, 600));
+    assert.match(await evaluate('document.querySelector("#demo-model-status").textContent'), /Wait for Upper cycler door to finish moving/, 'A later interlock message must not be overwritten by an earlier animation');
+    await click('Lower Cycler door handle');
+    await waitFor('/Cycler door handle is lowered/.test(document.querySelector("#demo-model-status").textContent)');
+    await evaluate('document.querySelector(".scene-named-controls button").click();document.querySelector("#demo-scene-canvas").scrollIntoView({block:"center"})');
     await new Promise(resolveWait => setTimeout(resolveWait, 400));
     await evaluate('window.__mobileAccidentalPresses=0;new MutationObserver(()=>{if(/Add Fluid pressed/.test(document.querySelector("#demo-model-status").textContent))window.__mobileAccidentalPresses++}).observe(document.querySelector("#demo-model-status"),{childList:true,characterData:true,subtree:true})');
     const mobileButtonPoint = await evaluate('window.__officeTargetPoint("NX-C01-ADD-FLUID")');
@@ -237,9 +681,10 @@ try {
     const mobileScreenshot = await command('Page.captureScreenshot', {format:'png'});
     await writeFile('output/nxstage-interaction-review-office/office-explore-mobile.png', Buffer.from(mobileScreenshot.data, 'base64'));
     await evaluate('document.querySelector("[data-review-explore]").click()');
-    assert.equal(await evaluate('getComputedStyle(document.querySelector("#training-photo")).visibility'), 'visible', 'Returning from phone exploration must restore the photo');
+    assert.equal(await evaluate(`getComputedStyle(document.querySelector(${JSON.stringify(backdropSelector)})).visibility`), 'visible', 'Returning from phone exploration must restore the office backdrop');
     await command('Emulation.setTouchEmulationEnabled', {enabled:false});
     await command('Emulation.clearDeviceMetricsOverride');
+    await new Promise(resolveWait => setTimeout(resolveWait, 500));
   }
   await click('Press Add Fluid');
   await waitFor('/Add Fluid pressed/.test(document.querySelector("#demo-model-status")?.textContent ?? "")');
@@ -253,15 +698,17 @@ try {
     await new Promise(resolveWait => setTimeout(resolveWait, 250));
   }
   await waitFor('[...document.querySelectorAll(".scene-named-controls button")].some(button=>button.textContent==="Push in PureFlow tub")');
-  await command('Network.enable');
-  await command('Network.setCacheDisabled', {cacheDisabled:true});
-  await command('Network.setBlockedURLs', {urls:['*nxstage-clinical-photo-v4.png*']});
-  await command('Page.reload', {ignoreCache:true});
-  await waitFor('document.querySelector("#training-photo")?.complete && document.querySelector("#training-photo").naturalWidth === 0');
-  assert.equal(await evaluate('document.querySelector("#training-photo").closest(".training-scene").classList.contains("photo-ready")'),false,'A failed image must leave the fallback visible');
-  assert.equal(await evaluate('getComputedStyle(document.querySelector("#training-photo")).opacity'),'0','A failed image must not obscure the fallback');
+  if (!walkthrough) {
+    await command('Network.enable');
+    await command('Network.setCacheDisabled', {cacheDisabled:true});
+    await command('Network.setBlockedURLs', {urls:['*nxstage-clinical-photo-v4.png*']});
+    await command('Page.reload', {ignoreCache:true});
+    await waitFor('document.querySelector("#training-photo")?.complete && document.querySelector("#training-photo").naturalWidth === 0');
+    assert.equal(await evaluate('document.querySelector("#training-photo").closest(".training-scene").classList.contains("photo-ready")'),false,'A failed image must leave the fallback visible');
+    assert.equal(await evaluate('getComputedStyle(document.querySelector("#training-photo")).opacity'),'0','A failed image must not obscure the fallback');
+  }
   assert.equal(errors.length, 0, JSON.stringify(errors));
-  console.log('Office review Chrome passed: photo-backed main demo, corrected control labels, Add Fluid and warmer presses, cabinet door and tub.');
+  console.log(`Office review Chrome passed (${walkthrough ? 'walkthrough' : 'photo'}): control labels, Add Fluid, cabinet door and tub${process.env.OFFICE_REVIEW_TEST === '1' ? ', plus keyboard, touch and warmer checks' : ''}.`);
 } finally {
   socket?.close(); browser.kill();
   if (browser.exitCode === null) await new Promise(resolveClose => browser.once('close', resolveClose));

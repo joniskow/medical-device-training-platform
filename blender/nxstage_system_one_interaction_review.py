@@ -721,8 +721,30 @@ def build_device():
         slot = cube("Cycler arched front vent %02d" % (i + 1), (x, -1.37, z), (.038, .018, .17), BLACK, head, .014, rotation=(0, -x * .32, 0))
         slot["decorative"] = True
         front_vents.append(slot)
-    pull = cube("Cycler door pull", (0, -1.58, 2.10), (3.80, .12, .16), BLACK, head, .07)
-    handle_arms = [curve(f"Cycler handle arm {side}", [(x, -1.18, 3.05), (x, -1.58, 2.10)], .07, BLACK, head) for side, x in (("left", -1.90), ("right", 1.90))]
+    # One crossbar spans the lower front in the closed reference photos. Its
+    # placement is approximate, as its raised position was not photographed.
+    pull = cube("Cycler door pull", (0, -1.58, 1.42), (4.50, .18, .18), BLACK, head, .08)
+    # The two visible side links have a broad pivot end and taper toward the
+    # lower crossbar. Their profile is a visual estimate from the closed views.
+    handle_arms = []
+    profile = [(-1.50, 3.20), (-1.28, 3.34), (-.99, 3.25), (-.86, 3.04),
+               (-.96, 2.85), (-1.18, 2.78), (-1.48, 1.43), (-1.67, 1.42),
+               (-1.53, 2.81), (-1.58, 3.02)]
+    for side, x in (("left", -2.25), ("right", 2.25)):
+        vertices = [(x + dx, y, z) for dx in (-.075, .075) for y, z in profile]
+        n = len(profile)
+        faces = [tuple(reversed(range(n))), tuple(range(n, 2*n))]
+        faces.extend((i, (i+1) % n, (i+1) % n+n, i+n) for i in range(n))
+        mesh = bpy.data.meshes.new("Cycler handle arm " + side + " mesh")
+        mesh.from_pydata(vertices, [], faces)
+        mesh.materials.append(BLACK)
+        arm = bpy.data.objects.new("Cycler handle arm " + side, mesh)
+        head.objects.link(arm)
+        bevel = arm.modifiers.new("Rounded handle edge", "BEVEL")
+        bevel.width = .035
+        bevel.segments = 3
+        arm.modifiers.new("Weighted handle normals", "WEIGHTED_NORMAL")
+        handle_arms.append(arm)
     panel = face_panel(root, -1.28)
     panel_base = bpy.data.objects["System One control fascia"]
     bpy.context.view_layer.update()
@@ -808,13 +830,21 @@ def build_device():
     for x in (-2.25, 2.25):
         curve("Vertical black side rail", [(x, -1.10, 1.45), (x, -1.12, 3.15), (x, -1.04, 5.70)], .10, BLACK, rails)
         curve("Angled rail mount", [(x, -1.04, 5.70), (x * .96, -.82, 5.95), (x * .96, -.76, 6.10)], .095, BLACK, rails)
-    curve("Front black safety crossbar", [(-2.25, -1.20, 1.42), (0, -1.32, 1.30), (2.25, -1.20, 1.42)], .105, BLACK, rails)
-    # Side pivot plates/handles, seen prominently in the oblique photographs.
+    # The pivot centers stay fixed relative to the door while the links rotate;
+    # they must travel with the door and its handle assembly when it opens.
     for x in (-2.34, 2.34):
-        cube("Side pivot plate", (x, -.32, 3.05), (.20, .50, 1.45), BLACK, rails, .10, rotation=(0, math.radians(-22 if x < 0 else 22), 0))
-        cylinder("Side pivot fastener", (x * 1.02, -.62, 3.18), .09, .04, METAL, rails, rotation=(0, math.pi / 2, 0))
-    curve("Left side carry handle", [(-2.48, -.72, 4.55), (-2.90, -.76, 4.30), (-2.92, -.78, 3.40), (-2.48, -.73, 3.18)], .13, BLACK, rails)
-    curve("Right side carry handle", [(2.48, -.72, 4.55), (2.90, -.76, 4.30), (2.92, -.78, 3.40), (2.48, -.73, 3.18)], .13, BLACK, rails)
+        pivot = cylinder("Side pivot fastener", (x, -1.18, 3.05), .065, .045, METAL, head, rotation=(0, math.pi / 2, 0))
+        world = pivot.matrix_world.copy()
+        pivot.parent = door
+        pivot.matrix_world = world
+    # The side view shows a horizontal mounting block and a recessed,
+    # roughly rectangular grip below it. Its depth and exact shape are
+    # estimated; it is a fixed carry handle, not the movable door handle.
+    for side, x in (("Left", -2.32), ("Right", 2.32)):
+        cube(side + " side carry handle mount", (x, -.25, 4.57), (.18, 1.16, .24), BLACK, rails, .055)
+        for y in (-.69, .19):
+            cube(side + " side carry handle end", (x, y, 4.30), (.15, .15, .48), BLACK, rails, .055)
+        cube(side + " side carry handle grip", (x, -.25, 4.10), (.15, 1.00, .15), BLACK, rails, .055)
 
     # White shelf/tray under the head with molded rounded recesses.
     cube("Upper white shelf", (0, 0, 1.05), (TRAY_W, TRAY_D, .36), CREAM_HI, tray, .18)
@@ -947,8 +977,15 @@ def build_device():
         obj.parent = lower_panel
         obj.matrix_world = world
     cube("Lower left connector strip", (-1.24, -1.73, -.25), (.38, .08, 1.22), BLUE, base, .04)
-    for z, col in ((.18, YELLOW), (-.15, CORAL), (-.48, WHITE)):
-        cylinder("Lower connector detail", (-1.24, -1.82, z), .09, .05, col, base, rotation=(math.pi / 2, 0, 0), vertices=24)
+    # The open-cabinet photo shows a red-ringed fitting above a light-colored
+    # connector and a narrow hanging tube. These are fixed visual details;
+    # their exact geometry and connection path cannot be established here.
+    cylinder("Lower connector detail red collar", (-1.24, -1.80, .18), .105, .035, CORAL, base, rotation=(math.pi / 2, 0, 0), vertices=32)
+    cylinder("Lower connector detail dark socket", (-1.24, -1.83, .18), .061, .035, BLACK_RUBBER, base, rotation=(math.pi / 2, 0, 0), vertices=32)
+    cylinder("Lower connector detail metal fitting", (-1.24, -1.85, .18), .034, .05, METAL, base, rotation=(math.pi / 2, 0, 0), vertices=24)
+    cylinder("Lower connector detail light fitting", (-1.24, -1.84, -.13), .075, .08, WHITE, base, rotation=(math.pi / 2, 0, 0), vertices=32, bevel=.01)
+    curve("Lower connector detail tubing", [(-1.24, -1.89, .18), (-1.29, -1.91, -.04), (-1.30, -1.92, -.35), (-1.42, -1.90, -.65), (-1.60, -1.78, -.84)], .025, WHITE, base)
+    cube("Lower connector detail yellow clip", (-1.30, -1.92, -.42), (.115, .065, .14), YELLOW, base, .02)
     # The source photo places the yellow heat-warning label on the tub itself.
     # Its symbol is an approximate graphic, not a readable safety label.
     warning = cube("Tub warning label", (.66, -1.745, -.98), (.30, .012, .25), YELLOW, base, .008)
@@ -1032,6 +1069,11 @@ def build_device():
         grille["decorative"] = True
     for i in range(3):
         cube("Cycler rear central louver %d" % (i + 1), (0, 1.45, 4.78 + i * .20), (.62, .055, .085), REAR_METAL, head, .025)
+    # The supplied rear view shows a shallow rounded rectangular enclosure
+    # mounted below the perforations. It is a fixed visual approximation; the
+    # reference does not establish its internal parts or service behavior.
+    rear_module = cube("Cycler rear raised enclosure", (0, 1.58, 3.73), (2.65, .28, 1.22), REAR_METAL, head, .10)
+    rear_module["decorative"] = True
     cube("Cycler rear label strip", (0, 1.435, 2.99), (3.08, .012, .35), GRAY, head, .015)
     for x, width in ((-1.12, .68), (-.34, .68), (.68, 1.22)):
         cube("Cycler rear unreadable label", (x, 1.445, 2.99), (width, .008, .26), PANEL, head, .006)
@@ -1060,14 +1102,16 @@ def build_device():
         cylinder("Rear mounting screw", (x, 2.06, -.38), .034, .025, METAL, tubing, rotation=(math.pi / 2, 0, 0), vertices=16)
     curve("Rear canister blue loop", [(-1.95, 2.05, -.42), (-2.18, 2.16, -.70), (-2.12, 2.23, -1.36), (-1.87, 2.23, -1.50), (-1.55, 2.10, -1.10), (-1.42, 2.06, -.43)], .045, BLUE, tubing)
     cylinder("Rear blue tube connector", (-2.08, 2.20, -1.08), .078, .20, WHITE, tubing, vertices=24, bevel=.015)
+    pole_y = 1.81
+    cylinder("IV pole rear section", (0, pole_y, 3.95), .065, 3.85, METAL, tubing)
     for z in (6.45, 7.10):
-        cylinder("IV pole", (0, 1.02, z), .055, 1.0, METAL, tubing)
-    cylinder("IV pole lower", (0, 1.02, 6.0), .065, 1.5, METAL, tubing)
+        cylinder("IV pole", (0, pole_y, z), .055, 1.0, METAL, tubing)
+    cylinder("IV pole lower", (0, pole_y, 6.0), .065, 1.5, METAL, tubing)
     # Four looped metal hooks around a dark central collar, as visible in
     # the supplied 20261020_130938 image. Dimensions are visual estimates.
-    cylinder("IV hanger hub", (0, 1.02, 7.57), .105, .31, BLACK_RUBBER, tubing, vertices=32, bevel=.018)
+    cylinder("IV hanger hub", (0, pole_y, 7.57), .105, .31, BLACK_RUBBER, tubing, vertices=32, bevel=.018)
     for name, dx, dy in (("left", -1, 0), ("right", 1, 0), ("front", 0, -1), ("back", 0, 1)):
-        points = [(dx * distance, 1.02 + dy * distance, z) for distance, z in
+        points = [(dx * distance, pole_y + dy * distance, z) for distance, z in
                   ((.06, 7.68), (.69, 7.68), (.82, 7.57), (.81, 7.38), (.69, 7.30), (.57, 7.38), (.57, 7.57))]
         curve("IV hanger " + name, points, .026, METAL, tubing)
 
@@ -1097,7 +1141,7 @@ def build_device():
     tub_orientation.scale.y = 1.4
     tub_orientation.location.x -= .62 * .4
     for obj in base.objects:
-        if obj.name.startswith(("Caster wheel", "Caster fork")):
+        if obj.name.startswith(("Caster wheel", "Caster fork", "Front caster hub")):
             obj.location.z = cabinet_top + (obj.location.z - cabinet_top) * 1.5
     bpy.context.view_layer.update()
 

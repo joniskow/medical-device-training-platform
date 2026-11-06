@@ -1,0 +1,14 @@
+{
+  "sourceHash": "d8e8b33485df9a53555aab6c84a25ce2f7284e96eb0a6550b59dd1f63b141fbf",
+  "hash": "b84ab0e1e0403eb049a76f0ea4c4519ae5b1977909d815749adb0d7c81941b6f",
+  "scale": 0.08561798119782785,
+  "sceneUnits": true,
+  "originalShellWidth": 4.449999809265137,
+  "calibratedShellWidth": 0.381,
+  "reference": "https://hometherapies.freseniusmedicalcare.com/content/dam/home-therapies/travel-and-lifestyle/patient-journey/APM3382-Rev-B_LIVE-Book.pdf",
+  "limitation": "Scale calibrated from an approximate product-family width; depth, motion and the photographed unit remain unmeasured. Not a production asset.",
+  "tubRestOffsetMeters": {
+    "down": 0.014555056803630735,
+    "floorDown": 0.0042808990598913925
+  }
+}

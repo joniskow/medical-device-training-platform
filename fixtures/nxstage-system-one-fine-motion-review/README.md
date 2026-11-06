@@ -1,0 +1,7 @@
+# NxStage fine-motion review
+
+This candidate extends `fixtures/nxstage-system-one-blue-tube-review`. The lower cabinet door settles in 1.5-degree increments instead of 15-degree increments; the upper cycler door and tub settle in increments about 0.86 mm instead of 8.56 mm. The originally documented one-degree value was incorrect; `fixtures/nxstage-system-one-fine-motion-v2-review` corrects it. Motion limits, full-open and full-close controls, and handle/cabinet interlocks are unchanged. These increments are a visual interaction choice, not measured friction or mechanical stops.
+
+Browser checks passed with direct dragging of both doors and the tub. For the particular tested drag the lower door settled within half a degree; its 1.5-degree increments can otherwise produce up to 0.75 degrees of settling. The upper door and tub settled within half a new increment. The office suite also checked buttons, touch and vent dragging; the model-viewer suite checked the named controls, handle interlock and touch cancellation. Tests use browser emulation and do not establish physical-device usability.
+
+To preview, set `NXSTAGE_OFFICE_REVIEW_FOLDER='fixtures/nxstage-system-one-fine-motion-review'` and run `node tools/serve-nxstage-interaction-office.mjs`. The hidden upper cartridge chamber remains simplified and treatment operation is not simulated; this fixture does not replace the application model.

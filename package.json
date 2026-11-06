@@ -139,7 +139,10 @@
     "pilot:validate": "node tools/check-pilot-signoffs.mjs",
     "test:doubles": "node tools/check-deterministic-doubles.mjs",
     "typecheck": "pnpm --recursive --if-present run typecheck",
-    "test": "pnpm --recursive --if-present run test"
+    "test": "pnpm --recursive --if-present run test",
+    "developer:content": "node tools/build-nxstage-familiarization.mjs",
+    "developer:validate": "pnpm build && pnpm developer:artifacts && node packages/api-client/node_modules/typescript/bin/tsc --noEmit --module nodenext --target es2022 --strict --skipLibCheck tools/developer-contract.typecheck.ts && node tools/check-developer-api-client.mjs && node tools/check-model-session-runtime.mjs && node tools/check-e4-postgres-session.mjs --developer-browser",
+    "developer:artifacts": "pnpm developer:content && pnpm --filter @medical-device/api-client pack --pack-destination apps/web/dist && node tools/package-developer-kit.mjs"
   },
   "devDependencies": {
     "@types/node": "^26.6.5",

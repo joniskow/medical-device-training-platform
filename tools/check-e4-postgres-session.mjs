@@ -1,4 +1,7 @@
+import {createServer as reservePort} from 'node:net';
 import {createMediaAssetService} from '../apps/api/dist/media-asset-service.js';
+import {buildNxstageFamiliarization} from './nxstage-familiarization.mjs';
+import {createPostgresCredentialService} from '../packages/db/dist/credential-service.js';
 import {createCourseStoryStore} from '../packages/db/dist/index.js';
 import {enrollmentStoryFacts} from '../packages/db/dist/certification-eligibility.js';
 import {withTenantTransaction} from '../packages/db/dist/index.js';
@@ -16,9 +19,11 @@ import { applyProcessingJobMigration, createPostgresCourseReviewStore } from "..
 import { createPostgresModelSessionService } from "../apps/api/dist/postgres-model-session-service.js";
 import { createAttemptInvalidationService } from '../apps/api/dist/attempt-invalidation.js';
 import { createAttemptReviewService } from '../apps/api/dist/attempt-review.js';
+import { applyPermittedTransform } from '../packages/model-runtime/dist/browser.js';
 
 const root = new URL("../", import.meta.url);
 const pool = new Pool({ connectionString: process.env.DATABASE_URL ?? "postgresql://local_app:local_only_change_me@127.0.0.1:54329/medical_device" });
+const runtimePool=process.argv.includes('--runtime-role')?new Pool({connectionString:process.env.RUNTIME_DATABASE_URL??'postgresql://local_runtime:local_runtime_only_change_me@127.0.0.1:54329/medical_device'}):pool;
 const id = `e4_session_${Date.now()}`;
 const organizationId = `${id}_org`;
 const tenant = { organizationId, actorId: `${id}_learner`, correlationId: `${id}_corr` };
@@ -38,14 +43,17 @@ const moduleId = `${id}_module`;
 let activityId = `${id}_activity`;
 
 const readJson = async (relative) => JSON.parse(await readFile(new URL(relative, root), "utf8"));
-const canonical = await readJson("apps/web/src/model-manifest.json");
+const fineMotionMode=process.argv.includes('--nxstage-fine-motion');
+const developerBrowser=process.argv.includes('--developer-browser');
+const familiarizationMode=process.argv.includes('--nxstage-familiarization')||developerBrowser;
+const canonical = await readJson(familiarizationMode ? 'fixtures/nxstage-system-one-rear-outlet-depth-review/model-manifest.json' : fineMotionMode ? "fixtures/nxstage-system-one-fine-motion-v2-review/model-manifest.json" : "apps/web/src/model-manifest.json");
 const mobile = await readJson("apps/web/src/model/model-manifest.mobile.json");
 const reduced = await readJson("apps/web/src/model/model-manifest.reduced.json");
 const modelManifest = {
   ...canonical,
   modelVersionId,
   releaseBindingId: `releasebind:pending:${modelVersionId}`,
-  variants: [mobile, reduced].map((variant) => ({
+  variants: (fineMotionMode || familiarizationMode ? [] : [mobile, reduced]).map((variant) => ({
     variantId: variant.variant.variantId,
     sourceHash: variant.sourceHash,
     modelBlobKey: `${organizationId}/model.${variant.variant.variantId}.glb`,
@@ -72,6 +80,24 @@ const simulationDefinition = {
   completion: { requiredStepIds: ["select-panel", "open-cover", "position-sensor"], requiredFaultIds: [], terminalStepIds: ["position-sensor"] },
   equivalentPath: { mode: "TEXT_KEYBOARD", instructions: [{ stepId: "select-panel", text: "Select the control panel." }, { stepId: "open-cover", text: "Open the safety cover." }, { stepId: "position-sensor", text: "Position the line sensor." }], faultInstructions: [] }
 };
+if(fineMotionMode){
+ const cabinet=canonical.components.find(c=>c.componentId==='nxstage-cabinet-door'),tub=canonical.components.find(c=>c.componentId==='pureflow-tub');
+ const zero={rotationY:0,translationX:0};
+ const partial=applyPermittedTransform(cabinet,zero,{rotationY:-89*Math.PI/180}).rotationY;
+ const tubPartial=applyPermittedTransform(tub,zero,{translationX:tub.permittedTransforms.translationX.snap*3}).translationX;
+ const actions=[
+  {type:'select_component',componentId:'nxstage-control-panel'},
+  {type:'transform_component',componentId:'nxstage-cabinet-door',transform:{rotationY:partial}},
+  {type:'transform_component',componentId:'nxstage-cabinet-door',transform:{rotationY:-Math.PI/2}},
+  {type:'transform_component',componentId:'pureflow-tub',transform:{translationX:tubPartial}},
+  {type:'transform_component',componentId:'pureflow-tub',transform:{translationX:0}},
+  {type:'transform_component',componentId:'nxstage-cabinet-door',transform:{rotationY:0}},
+ ];
+ simulationDefinition.steps=actions.map((action,i)=>({stepId:i===0?'select-panel':`fine-${i}`,title:`Fine motion ${i}`,action,nextStepIds:i<actions.length-1?[`fine-${i+1}`]:[],points:1}));
+ simulationDefinition.scoring={maxScore:actions.length,passScore:1,stepPoints:{},faultPoints:{},penalties:{}};
+ simulationDefinition.completion={requiredStepIds:simulationDefinition.steps.map(s=>s.stepId),requiredFaultIds:[],terminalStepIds:[`fine-${actions.length-1}`]};
+ simulationDefinition.equivalentPath={mode:'TEXT_KEYBOARD',instructions:simulationDefinition.steps.map(s=>({stepId:s.stepId,text:`Perform ${s.title}`})),faultInstructions:[]};
+}
 const faultStory=process.argv.includes('--fault-story');
 const semanticMode=faultStory||process.argv.includes('--semantic-actions');
 if(semanticMode){
@@ -97,6 +123,11 @@ const courseContent = {
   policy: { schemaVersion:'certification-policy.v1',policyId, version: 1, requiredActivityIds:[activityId],requiredModuleIds:[],resultSelection:'latest',passScore:1,repeatedFailureReviewAfter:null,expirationDays:365,maxAttempts: 2, cooldownSeconds: 60, attemptTtlSeconds: 1800, requiredEvidence: ["simulation.completed", "simulation.equivalent-path"] },
   modules: [{ moduleId,title: "Procedure", activities: [{ activityId,type: "simulation", simulationDefinitionId, citations: [{ assetVersionId }] }] }]
 };
+const familiarization=familiarizationMode?buildNxstageFamiliarization(modelManifest,{simulationDefinitionId,policyId,activityId}):undefined;
+if(familiarization){
+  Object.assign(simulationDefinition,familiarization.definition);courseContent.title=familiarization.title;courseContent.policy=familiarization.policy;
+  Object.assign(courseContent.modules[0].activities[0],{type:'guided_procedure',title:familiarization.title,instructions:familiarization.briefing});
+}
 const activityKind=process.argv.find(arg=>arg.startsWith('--activity-type='))?.split('=')[1];
 if(activityKind){assert(['guided_procedure','manipulation','assembly'].includes(activityKind));courseContent.modules[0].activities[0].type=activityKind;}
 
@@ -114,7 +145,7 @@ const authoredStory={schemaVersion:'course-story.v1',mission:'Inspect the contro
 if(faultStory)authoredStory.nodes[1].choices[0].conditions.push({activityId,fact:'diagnosed',faultId:'semantic-fault',equals:true},{activityId,fact:'resolved',faultId:'semantic-fault',equals:true});
 const stories=createCourseStoryStore(pool);
 const verified=verifiedAccountFixture(pool,organizationId);
-try {
+fixture: try {
   await applyProcessingJobMigration(pool);
  await verified.prepare();
   await verified.seed(tenant.actorId);
@@ -286,7 +317,7 @@ try {
     for(const table of ['simulation_attempts','credentials'])assert.equal((await pool.query(`SELECT count(*)::int n FROM ${table} WHERE organization_id=$1`,[organizationId])).rows[0].n,0);
     assert.equal((await enrollments.get(tenant,enrollmentId)).eligibility.eligible,false);
   }
-  const sessions = createPostgresModelSessionService({ pool });
+  const sessions = createPostgresModelSessionService({ pool:runtimePool });
   const launcher = createLearnerSimulationService(pool,sessions);
   const publicActivityId = runtime.activities[0].activityId;
   if(publishedStory){
@@ -300,14 +331,14 @@ try {
   assert.equal(started.sessionId,concurrent.sessionId);
   attemptId = started.attemptId;
   const launchKey = `launch:${createHash('sha256').update(attemptId).digest('hex')}`;
-  const startRequest = { releaseId: release.releaseId, activityId, simulationDefinitionId, modelVersionId, enrollmentId, attemptId, policyId, expiresInSeconds:1800 };
+  const startRequest = { releaseId: release.releaseId, activityId, simulationDefinitionId, modelVersionId, enrollmentId, attemptId, policyId, expiresInSeconds:courseContent.policy.attemptTtlSeconds };
   await assert.rejects(sessions.start(tenant,{...startRequest,simulationDefinitionId:'foreign-definition'},`${id}:wrong-definition`),/ACTIVITY_NOT_IN_RELEASE/);
   await assert.rejects(launcher.launch({...tenant,actorId:'foreign'},enrollmentId,publicActivityId),/SIMULATION_NOT_FOUND/);
   await assert.rejects(launcher.launch(tenant,enrollmentId,'unknown'),publishedStory?/STORY_ACTIVITY_UNAVAILABLE/:/SIMULATION_NOT_FOUND/);
   assert.equal((await pool.query('SELECT count(*)::int AS count FROM simulation_attempts WHERE organization_id=$1',[organizationId])).rows[0].count,1);
   const signedUrls=[];
   const modelDeliveryStorage={createDownloadUrl:async({blobKey})=>{signedUrls.push(blobKey);return 'https://private.test/'+blobKey;},readObject:async({blobKey})=>{
-    if(blobKey.endsWith('/full.glb'))return {bytes:new Uint8Array(await readFile(new URL('fixtures/reference/model/aurora-infusion-controller.glb',root)))};
+    if(blobKey.endsWith('/full.glb'))return {bytes:new Uint8Array(await readFile(new URL(familiarizationMode?'fixtures/nxstage-system-one-rear-outlet-depth-review/nxstage-system-one.glb':fineMotionMode?'fixtures/nxstage-system-one-fine-motion-v2-review/nxstage-system-one.glb':'fixtures/reference/model/aurora-infusion-controller.glb',root)))};
     const row=(await pool.query('SELECT manifest FROM release_model_bindings WHERE organization_id=$1 AND release_id=$2 AND model_version_id=$3',[organizationId,release.releaseId,modelVersionId])).rows[0];
     return {bytes:Buffer.from(JSON.stringify(row.manifest))};
   }};
@@ -319,9 +350,18 @@ try {
   assert.equal(await privateAssets.getLearnerContent({...tenant,organizationId:'foreign'},{releaseId:release.releaseId,modelVersionId,content:'model'}),null);
 
   const candidatePrincipal={subject:tenant.actorId,issuer:'https://fixture.example.test/'+encodeURIComponent(organizationId),identityTenant:organizationId,verifiedEmail:'synthetic@example.test',verificationExpiresAt:new Date(Date.now()+3600000).toISOString(),roles:['operator']};
-  const server=createJobStatusHttpServer({enrollmentService:createPostgresEnrollmentService(pool),courseStoryStore:stories,candidateLearningAccessStore:createCandidateLearningAccessStore(pool),personalAccountStore:createPersonalAccountStore(pool),modelAssetService:assets,modelSessionService:sessions,learnerSimulationService:launcher,statusService:{get:async()=>null,retry:async()=>null},authenticator:{authenticate:async req=>req.headers.authorization==='Bearer learner'?candidatePrincipal:null},organizationContextResolver:{resolveActiveOrganizations:async()=>[]}});
-  await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
+  let browserPort=0;
+  if(developerBrowser){const reservation=reservePort();await new Promise(done=>reservation.listen(0,'127.0.0.1',done));browserPort=reservation.address().port;await new Promise(done=>reservation.close(done));}
+  const server=createJobStatusHttpServer({staticRoot:'apps/web/dist',allowedOrigins:developerBrowser?[`http://127.0.0.1:${browserPort}`]:[],enrollmentService:createPostgresEnrollmentService(pool),courseStoryStore:stories,candidateLearningAccessStore:createCandidateLearningAccessStore(pool),personalAccountStore:createPersonalAccountStore(pool),modelAssetService:developerBrowser?privateAssets:assets,modelSessionService:sessions,learnerSimulationService:launcher,statusService:{get:async()=>null,retry:async()=>null},authenticator:{authenticate:async req=>req.headers.authorization==='Bearer learner'?candidatePrincipal:null},organizationContextResolver:{resolveActiveOrganizations:async()=>developerBrowser?[organizationId]:[],selectOrganization:async()=>{}}});
+  await new Promise(resolve=>server.listen(browserPort,'127.0.0.1',resolve));
   try {
+    if(developerBrowser){
+      const {checkDeveloperBrowser}=await import('./check-developer-browser.mjs');
+      await checkDeveloperBrowser({upstream:`http://127.0.0.1:${server.address().port}`,organizationId,sessionId:started.sessionId,
+        expire:()=>pool.query("UPDATE simulation_sessions SET expires_at=now()-interval '1 second' WHERE simulation_session_id=$1",[started.sessionId])});
+      const debrief=await sessions.debrief(tenant,started.sessionId);assert.equal(debrief.completed,true);assert.equal(debrief.hintsUsed,2);assert.equal(debrief.rejectedAttempts,2);assert.equal(debrief.events.length,11);
+      break fixture;
+    }
     const url=`http://127.0.0.1:${server.address().port}/api/v1/enrollments/${enrollmentId}/activities/${publicActivityId}/start`;
     assert.equal((await fetch(url,{method:'POST',body:'{}'})).status,401);
     const headers={authorization:'Bearer learner','content-type':'application/json','x-organization-id':organizationId};
@@ -338,25 +378,100 @@ try {
     await pool.query("UPDATE enrollments SET status='SUSPENDED' WHERE enrollment_id=$1",[enrollmentId]);assert.equal((await fetch(modelUrl,{headers})).status,403);assert.equal(await assets.getLearnerModel(tenant,{releaseId:release.releaseId,modelVersionId}),null);await pool.query("UPDATE enrollments SET status='ACTIVE' WHERE enrollment_id=$1",[enrollmentId]);
     if(publishedStory){const projected=await fetch(`http://127.0.0.1:${server.address().port}/api/v1/enrollments/${enrollmentId}/story`,{headers});assert.equal(projected.status,200);assert.equal((await projected.json()).node.nodeId,'activity');}
     if(publishedExploration)for(const activity of inspectionActivities){const inspection=await fetch(`http://127.0.0.1:${server.address().port}/api/v1/enrollments/${enrollmentId}/activities/${activity.activityId}/inspection`,{headers});assert.equal(inspection.status,200);assert.deepEqual((await inspection.json()).exploration,activity.exploration);}
-    const action={clientActionId:`${id}:select`,releaseBindingId,modelVersionId,expectedSequence:1,type:'select_component',componentId:'AIC-C01',source:'KEYBOARD'};
+    const action={clientActionId:`${id}:select`,releaseBindingId,modelVersionId,expectedSequence:1,type:'select_component',componentId:simulationDefinition.steps[0].action.componentId,source:'KEYBOARD'};
     const acted=await fetch(`http://127.0.0.1:${server.address().port}/api/v1/model-sessions/${started.sessionId}/actions`,{method:'POST',headers:{...headers,'idempotency-key':`${id}:select`},body:JSON.stringify(action)});assert.equal(acted.status,200);assert.equal((await acted.json()).status,'accepted');
+    const debriefUrl=`http://127.0.0.1:${server.address().port}/api/v1/model-sessions/${started.sessionId}/debrief`;
+    const debriefResponse=await fetch(debriefUrl,{headers});assert.equal(debriefResponse.status,200);assert.equal((await debriefResponse.json()).events.length,1);
+    assert.equal((await fetch(debriefUrl)).status,401);
+    assert.equal((await fetch(debriefUrl+'?learnerId=other',{headers})).status,422);
 
   } finally {server.closeAllConnections();await new Promise(resolve=>server.close(resolve));}
   assert.equal(started.releaseBindingId, releaseBindingId);
-  assert.equal(started.state.activeStepId, "select-panel");
+  assert.equal(started.state.activeStepId, simulationDefinition.initialState.currentStepId);
   assert.deepEqual(started.state.allowedActions, ["select_component"]);
   const startedAgain = await sessions.start(tenant, startRequest, launchKey);
   assert.equal(startedAgain.sessionId, started.sessionId, "reusing a session-start idempotency key must return the original session");
-  const selected = await sessions.submit(tenant, started.sessionId, { clientActionId: `${id}:select`, releaseBindingId, modelVersionId, expectedSequence: 1, type: "select_component", componentId: "AIC-C01", source: "KEYBOARD" }, `${id}:select`);
+  const selected = await sessions.submit(tenant, started.sessionId, { clientActionId: `${id}:select`, releaseBindingId, modelVersionId, expectedSequence: 1, type: "select_component", componentId: simulationDefinition.steps[0].action.componentId, source: "KEYBOARD" }, `${id}:select`);
   assert.equal(selected.status, "accepted");
   assert.equal(selected.nextSequence, 2);
   if(branchMode){assert.equal(selected.state.activeStepId,'alternate-cover');assert.equal((await pool.query('SELECT state FROM simulation_sessions WHERE simulation_session_id=$1',[started.sessionId])).rows[0].state.simulationState.variables.route,false);}
-  if(semanticMode){
+  if(familiarizationMode){
+    let sequence=2;
+    const send=async(name,action)=>{const request={...action,clientActionId:`${id}:${name}`,releaseBindingId,modelVersionId,expectedSequence:sequence,source:'KEYBOARD'};const result=await sessions.submit(tenant,started.sessionId,request,request.clientActionId);if(result.status==='accepted')sequence=result.nextSequence;return result;};
+    const firstHint=await send('hint-one',{type:'request_hint'}),secondHint=await send('hint-two',{type:'request_hint'});assert.notEqual(firstHint.feedback,secondHint.feedback);
+    const premature=await send('premature-door',simulationDefinition.steps.find(step=>step.stepId==='open-door').action);assert.equal(premature.status,'invalid_precondition');assert.match(premature.feedback,/Lift the cycler door handle/i);
+    let last;
+    for(const step of simulationDefinition.steps.slice(1)){
+      last=await send(step.stepId,step.action);assert.equal(last.status,'accepted',JSON.stringify(last));
+      if(step.stepId==='open-door'){const prematureLower=await send('premature-lower',simulationDefinition.steps.at(-1).action);assert.equal(prematureLower.status,'invalid_precondition');assert.match(prematureLower.feedback,/Close the cycler door/i);}
+    }
+    assert.equal(last.state.completed,true);assert.equal(last.state.activeStepId,undefined);assert.equal(last.state.activeStepInstructions,undefined);
+    assert.deepEqual(last.state.transforms['nxstage-cycler-door'],{rotationY:0,translationX:0});assert.deepEqual(last.state.transforms['nxstage-cycler-handle'],{rotationY:0,translationX:0});
+    const debrief=await sessions.debrief(tenant,started.sessionId);assert.equal(debrief.steps.length,7);assert(debrief.steps.every(step=>step.completed));assert.equal(debrief.hintsUsed,2);assert.equal(debrief.rejectedAttempts,2);
+    assert.equal((await pool.query('SELECT count(*)::int n FROM credentials WHERE organization_id=$1',[organizationId])).rows[0].n,0);
+    await assert.rejects(createPostgresCredentialService(pool).issue(tenant,enrollmentId),/CREDENTIAL_ISSUANCE_DISABLED/);
+    const enrollment=await createPostgresEnrollmentService(pool).get(tenant,enrollmentId);assert.equal(enrollment.progress[0].status,'PASSED');assert.equal(enrollment.eligibility.eligible,false);assert(enrollment.eligibility.missing.includes('CREDENTIAL_ISSUANCE_DISABLED'));
+    console.log('NxStage familiarization passed: published synthetic fixture, private real model, seven-step sequence, mechanical mistakes/recovery, progressive hints, durable debrief and no automatic/manual credential issuance.');
+  }else if(process.argv.includes('--debrief')){
+    assert.ok(Array.isArray(started.state.interactionOptions));
+    const action=(name,type,extra={},sequence=2)=>({clientActionId:`${id}:${name}`,releaseBindingId,modelVersionId,expectedSequence:sequence,type,...extra});
+    const send=request=>sessions.submit(tenant,started.sessionId,request,request.clientActionId);
+    const hint=action('hint','request_hint');assert.equal((await send(hint)).status,'accepted');
+    const wrong=action('wrong-order','transform_component',{componentId:'AIC-C03',transform:{translationX:.2}},3);
+    const failing=createPostgresModelSessionService({pool:{async connect(){const client=await pool.connect();return {query(sql,args){if(sql.includes("'SIMULATION_ACTION_REJECTED'"))throw Error('Injected rejected-action audit failure');return client.query(sql,args);},release(){client.release();}};}}});
+    await assert.rejects(failing.submit(tenant,started.sessionId,wrong,wrong.clientActionId),/Injected rejected-action audit failure/);
+    assert.equal((await sessions.debrief(tenant,started.sessionId)).rejectedAttempts,0);
+    const failures=await Promise.all([send(wrong),send(wrong)]);assert.deepEqual(failures[0],failures[1]);assert.equal(failures[0].status,'invalid_precondition');assert.equal(failures[0].nextSequence,3);
+    assert.equal((await send({...wrong,componentId:'AIC-C02',transform:{rotationY:Math.PI/2}})).status,'invalid_precondition','A rejected action key cannot be reused with corrected intent');
+    assert.equal((await send({...wrong,clientActionId:`id:stale`,expectedSequence:1})).status,'stale_sequence');
+    assert.equal(await sessions.debrief({...tenant,actorId:'other-learner'},started.sessionId),null);
+    assert.equal(await sessions.debrief({...tenant,organizationId:'other-org'},started.sessionId),null);
+    const open=action('open','transform_component',{componentId:'AIC-C02',transform:{rotationY:Math.PI/2}},3);assert.equal((await send(open)).status,'accepted');
+    const finish=action('finish','transform_component',{componentId:'AIC-C03',transform:{translationX:.2}},4);assert.equal((await send(finish)).state.completed,true);
+    const debrief=await sessions.debrief(tenant,started.sessionId);
+    assert.equal(debrief.status,'COMPLETED');assert.equal(debrief.hintsUsed,1);assert.equal(debrief.rejectedAttempts,1);assert.equal(debrief.events.length,5);assert(debrief.steps.every(step=>step.completed));assert.equal(debrief.eventsTruncated,false);
+    await send(hint);await send(wrong);await send(finish);assert.deepEqual(await sessions.debrief(tenant,started.sessionId),debrief);
+    await pool.query("UPDATE simulation_sessions SET expires_at=now()-interval '1 second' WHERE simulation_session_id=$1",[started.sessionId]);
+    assert.equal((await sessions.debrief(tenant,started.sessionId)).status,'COMPLETED','Expiry must not hide the completed debrief');
+    for(const [table,column,key,status] of [['enrollments','enrollment_id',enrollmentId,'SUSPENDED'],['release_manifests','release_id',release.releaseId,'RETIRED']]){
+      const original=(await pool.query(`SELECT status FROM ${table} WHERE ${column}=$1`,[key])).rows[0].status;
+      await pool.query(`UPDATE ${table} SET status=$2 WHERE ${column}=$1`,[key,status]);
+      assert.equal(await sessions.debrief(tenant,started.sessionId),null);
+      await pool.query(`UPDATE ${table} SET status=$2 WHERE ${column}=$1`,[key,original]);
+    }
+    console.log('Model debrief passed: real database/HTTP, owner isolation, atomic rejected receipts, concurrent retries, unchanged sequences, hints, completion and expiry.');
+  }else if(fineMotionMode){
+    let sequence=2;
+    for(const step of simulationDefinition.steps.slice(1)){
+      const request={...step.action,releaseBindingId,modelVersionId,clientActionId:`${id}:fine:${sequence}`,expectedSequence:sequence,source:'KEYBOARD'};
+      const acted=await sessions.submit(tenant,started.sessionId,request,request.clientActionId);
+      assert.equal(acted.status,'accepted',`${step.stepId}: ${acted.feedback}`);
+      assert.deepEqual(await sessions.submit(tenant,started.sessionId,request,request.clientActionId),acted,`${step.stepId} replay must not move twice`);
+      sequence++;
+      const restarted=createPostgresModelSessionService({pool});
+      const resumed=await restarted.resume(tenant,started.sessionId,{releaseBindingId,modelVersionId,nextSequence:sequence});
+      assert.equal(resumed.status,'accepted');
+      assert.deepEqual(resumed.state.transforms,acted.state.transforms,`${step.stepId} must survive resume`);
+      const stored=(await pool.query('SELECT state FROM simulation_sessions WHERE simulation_session_id=$1',[started.sessionId])).rows[0].state;
+      assert.deepEqual((stored.modelState??stored).transforms,acted.state.transforms,`${step.stepId} must be persisted`);
+      if(step.stepId==='fine-1'){
+        const blocked={clientActionId:`${id}:blocked-tub`,releaseBindingId,modelVersionId,expectedSequence:sequence,type:'transform_component',componentId:'pureflow-tub',transform:{translationX:simulationDefinition.steps[3].action.transform.translationX},source:'KEYBOARD'};
+        const denied=await sessions.submit(tenant,started.sessionId,blocked,blocked.clientActionId);
+        assert.equal(denied.status,'invalid_precondition');assert.equal(denied.nextSequence,sequence);assert.match(denied.feedback,/open the cabinet door fully/i);
+      }
+      if(step.stepId==='fine-3'){
+        const blocked={clientActionId:`${id}:blocked-door`,releaseBindingId,modelVersionId,expectedSequence:sequence,type:'transform_component',componentId:'nxstage-cabinet-door',transform:{rotationY:0},source:'KEYBOARD'};
+        const denied=await sessions.submit(tenant,started.sessionId,blocked,blocked.clientActionId);
+        assert.equal(denied.status,'invalid_precondition');assert.equal(denied.nextSequence,sequence);assert.match(denied.feedback,/push the tub in/i);
+      }
+    }
+    console.log('NxStage fine-motion PostgreSQL rehearsal passed: partial positions persist and resume; cabinet/tub interlocks reject invalid actions.');
+  }else if(semanticMode){
     let sequence=2,last;
     const requirements=[simulationDefinition.faults[0].diagnosis,simulationDefinition.faults[0].resolution,...simulationDefinition.steps.slice(1).map(s=>s.action)];
     for(const requirement of requirements){
       const request={...requirement,releaseBindingId,modelVersionId,clientActionId:`${id}:semantic:${sequence}`,expectedSequence:sequence,source:'KEYBOARD'};
-      const wrong=await sessions.submit(tenant,started.sessionId,{...request,value:'wrong'},request.clientActionId);assert.equal(wrong.status,'invalid_precondition');assert.equal(wrong.nextSequence,sequence);
+      const wrong=await sessions.submit(tenant,started.sessionId,{...request,clientActionId:request.clientActionId+':wrong',value:'wrong'},request.clientActionId+':wrong');assert.equal(wrong.status,'invalid_precondition');assert.equal(wrong.nextSequence,sequence);
       last=await sessions.submit(tenant,started.sessionId,request,request.clientActionId);assert.equal(last.status,'accepted');assert.equal(last.nextSequence,++sequence);
       assert.deepEqual(await sessions.submit(tenant,started.sessionId,request,request.clientActionId),last);
       assert.equal((await sessions.submit(tenant,started.sessionId,{...request,stepId:'changed'},request.clientActionId)).status,'invalid_precondition');
@@ -553,5 +668,5 @@ try {
     "DELETE FROM courses WHERE organization_id = $1",
     "DELETE FROM organizations WHERE organization_id = $1"
   ]) await pool.query(sql, [organizationId]).catch(() => {});
-  await verified.cleanup();await pool.end();
+  await verified.cleanup();if(runtimePool!==pool)await runtimePool.end();await pool.end();
 }

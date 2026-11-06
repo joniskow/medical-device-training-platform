@@ -3,10 +3,11 @@ import { createHash, randomUUID } from "node:crypto";
 import type { Pool, PoolClient } from "pg";
 import type { TenantContext } from "@medical-device/contracts";
 import { withTenantTransaction } from "@medical-device/db";
-import { applyPermittedTransform, interactionStateViolation, validateAuthoritativeModelState, validateBrowserModelManifest, type AuthoritativeModelState, type ModelComponentManifest } from "@medical-device/model-runtime";
+import { applyPermittedTransform, interactionStateViolation, modelInteractionOptions, validateAuthoritativeModelState, validateBrowserModelManifest, type AuthoritativeModelState, type ModelComponentManifest } from "@medical-device/model-runtime";
 import { applySimulationAction, createInitialSimulationState, validateSimulationDefinition, type SimulationAction, type SimulationDefinition, type SimulationState } from "@medical-device/simulation-schema";
 import { sameModelSessionAction, type ModelSessionActionRequest, type ModelSessionActionResult, type ModelSessionService, type ModelSessionStartRequest, type ModelSessionStartResult } from "./model-session-service.js";
 import { issueCredentialInTransaction } from "./credential-service.js";
+import { readModelSessionDebrief, recordRejectedModelAction, rejectedActionId } from './model-session-debrief.js';
 
 type JsonObject = Record<string, unknown>;
 async function sessionAccessActive(client: PoolClient, tenant: TenantContext, sessionId: string): Promise<boolean> {
@@ -41,9 +42,12 @@ type ModelState = {
   completed: boolean;
   activeStepId?: string;
   activeStepTitle?: string;
+  activeStepInstructions?: string;
+  focusComponentId?: string;
   activeFaultId?: string;
   activeFaultTitle?: string;
   allowedActions: string[];
+  interactionOptions?: ReturnType<typeof modelInteractionOptions>;
   simulationState?: SimulationState;
 };
 
@@ -111,9 +115,12 @@ function modelStateFrom(value: unknown): ModelState | null {
     completed: candidate.completed,
     ...(typeof candidate.activeStepId === "string" ? { activeStepId: candidate.activeStepId } : {}),
     ...(typeof candidate.activeStepTitle === "string" ? { activeStepTitle: candidate.activeStepTitle } : {}),
+    ...(typeof candidate.activeStepInstructions === 'string' ? { activeStepInstructions: candidate.activeStepInstructions } : {}),
+    ...(typeof candidate.focusComponentId === 'string' ? { focusComponentId: candidate.focusComponentId } : {}),
     ...(typeof candidate.activeFaultId === "string" ? { activeFaultId: candidate.activeFaultId } : {}),
     ...(typeof candidate.activeFaultTitle === "string" ? { activeFaultTitle: candidate.activeFaultTitle } : {}),
     allowedActions,
+    ...(Array.isArray(candidate.interactionOptions) ? { interactionOptions: candidate.interactionOptions as ModelState['interactionOptions'] } : {}),
     ...(simulationState ? { simulationState } : {})
   };
 }
@@ -126,6 +133,8 @@ function stateWithModel(original: unknown, model: ModelState): unknown {
 
 function publicModelState(model: ModelState): Omit<ModelState, "simulationState"> {
   const { simulationState: _simulationState, ...publicState } = model;
+  // Cleared guidance must have the same shape before and after its JSON receipt is persisted.
+  for (const key of ['activeStepId','activeStepTitle','activeStepInstructions','focusComponentId','activeFaultId','activeFaultTitle'] as const) if (publicState[key] === undefined) delete publicState[key];
   return publicState;
 }
 
@@ -148,15 +157,17 @@ function simulationCompleted(definition: SimulationDefinition, state: Simulation
     && definition.completion.requiredFaultIds.every((faultId) => state.resolvedFaultIds.includes(faultId));
 }
 
-function simulationProjection(definition: SimulationDefinition, state: SimulationState): Pick<ModelState, "activeStepId" | "activeStepTitle" | "activeFaultId" | "activeFaultTitle" | "allowedActions"> {
+function simulationProjection(definition: SimulationDefinition, state: SimulationState): Pick<ModelState, "activeStepId" | "activeStepTitle" | "activeStepInstructions" | "focusComponentId" | "activeFaultId" | "activeFaultTitle" | "allowedActions"> {
   const step = state.currentStepId ? definition.steps.find((item) => item.stepId === state.currentStepId) : undefined;
   const fault = state.activeFaultId ? definition.faults.find((item) => item.faultId === state.activeFaultId) : undefined;
   const requirement = fault
     ? (state.faultStage === "DIAGNOSIS" ? fault.diagnosis : fault.resolution)
     : step?.action;
   return {
-    ...(step ? { activeStepId: step.stepId, activeStepTitle: step.title } : {}),
-    ...(fault ? { activeFaultId: fault.faultId, activeFaultTitle: fault.title } : {}),
+    activeStepId: step?.stepId, activeStepTitle: step?.title,
+    activeStepInstructions: definition.equivalentPath.instructions.find(instruction => instruction.stepId === step?.stepId)?.text,
+    focusComponentId: requirement?.componentId,
+    activeFaultId: fault?.faultId, activeFaultTitle: fault?.title,
     allowedActions: requirement ? [requirement.type] : []
   };
 }
@@ -206,6 +217,7 @@ function modelStartResult(row: {
  */
 export function createPostgresModelSessionService(input: { pool: Pool }): ModelSessionService {
   return {
+    debrief: (tenant, sessionId) => readModelSessionDebrief(input.pool, tenant, sessionId),
     async start(tenant: TenantContext, request: ModelSessionStartRequest, idempotencyKey: string) {
       if (!tenant.actorId) throw new Error("MODEL_SESSION_ACTOR_REQUIRED");
       return withTenantTransaction(input.pool, tenant, async (client) => {
@@ -322,6 +334,7 @@ export function createPostgresModelSessionService(input: { pool: Pool }): ModelS
           ...simulationProjection(typedDefinition, initialSimulationState),
           simulationState: initialSimulationState
         };
+        state.interactionOptions = modelInteractionOptions(validateBrowserModelManifest(bindingRow.manifest), state);
         const sessionId = `simulation-session:${randomUUID()}`;
         const inserted = await client.query<{
           simulation_session_id: string; release_id: string; activity_id: string; simulation_definition_id: string;
@@ -399,6 +412,7 @@ export function createPostgresModelSessionService(input: { pool: Pool }): ModelS
         );
         if (!activeBinding.rows[0]) return result("expired_session", row.next_sequence, "The release or certification policy is no longer active.", model, { clientActionId: action.clientActionId });
         if (!stateMatchesManifest(model, activeBinding.rows[0].manifest)) return result("version_mismatch", row.next_sequence, "The persisted model state no longer matches the approved model manifest.", undefined, { clientActionId: action.clientActionId });
+        model.interactionOptions = modelInteractionOptions(validateBrowserModelManifest(activeBinding.rows[0].manifest), model);
 
         const duplicate = await client.query<{ payload: unknown }>(
           `SELECT payload FROM simulation_actions
@@ -411,6 +425,13 @@ export function createPostgresModelSessionService(input: { pool: Pool }): ModelS
             ? stored.result
             : result("invalid_precondition", row.next_sequence, "This action ID was already used for a different action.", model, { clientActionId: action.clientActionId });
           return duplicate.rows[0].payload as ModelSessionActionResult;
+        }
+        const rejectedReceipt = await client.query<{ details: { request: ModelSessionActionRequest; result: ModelSessionActionResult } }>(
+          'SELECT details FROM audit_events WHERE organization_id=$1 AND audit_event_id=$2', [tenant.organizationId, rejectedActionId(tenant, sessionId, action.clientActionId)]);
+        if (rejectedReceipt.rows[0]) {
+          const stored = rejectedReceipt.rows[0].details;
+          return sameModelSessionAction(stored.request, action) ? stored.result
+            : result('invalid_precondition', row.next_sequence, 'This action ID was already used for a different action.', model, { clientActionId: action.clientActionId });
         }
         if (action.expectedSequence !== row.next_sequence || action.expectedSequence !== model.nextSequence) return result("stale_sequence", row.next_sequence, "The activity state changed. Resume before trying the action again.", model, { clientActionId: action.clientActionId });
         if(model.completed) return result("invalid_precondition",row.next_sequence,"This attempt is complete. Its result cannot be changed.",model,{clientActionId:action.clientActionId});
@@ -448,6 +469,9 @@ export function createPostgresModelSessionService(input: { pool: Pool }): ModelS
           || actionDefinitionModel.manifestHash !== text(actionManifest?.sourceHash)
           || actionComponentIds !== boundActionComponentIds) return result("version_mismatch", row.next_sequence, "The simulation definition no longer matches the approved model binding.", model, { clientActionId: action.clientActionId });
 
+        const rejectTaskAction = (feedback: string) => recordRejectedModelAction(client, tenant, sessionId, action,
+          result('invalid_precondition', row.next_sequence, feedback, model, { clientActionId: action.clientActionId }));
+
         const next: ModelState = {
           ...model,
           sequence: row.next_sequence,
@@ -461,7 +485,7 @@ export function createPostgresModelSessionService(input: { pool: Pool }): ModelS
         let feedback = "Action accepted by the authoritative activity session.";
         if (action.type === "transform_component" || action.transform) {
           const normalized = applyPermittedTransform(component! as unknown as ModelComponentManifest, model.transforms[componentId!] ?? { rotationY: 0, translationX: 0 }, action.transform);
-          if (!normalized) return result("invalid_precondition", row.next_sequence, "That transform is outside the permitted component bounds.", model, { clientActionId: action.clientActionId });
+          if (!normalized) return rejectTaskAction("That transform is outside the permitted component bounds.");
           next.transforms[componentId!] = normalized;
           next.selectedComponentId = componentId;
           feedback = "Component transform accepted.";
@@ -476,12 +500,15 @@ export function createPostgresModelSessionService(input: { pool: Pool }): ModelS
           feedback = "Component selected.";
         } else if(action.type === "request_hint") {
           const currentStep = simulationState.currentStepId ? typedDefinition.steps.find((step) => step.stepId === simulationState.currentStepId) : undefined;
-          feedback = currentStep?.hints?.[0] ?? "Hint requested. Continue with the next permitted procedure action.";
+          const hints = currentStep?.hints ?? [];
+          const used = hints.length > 1 ? await client.query<{ count: number }>(`SELECT count(*)::int AS count FROM simulation_actions
+            WHERE organization_id=$1 AND simulation_session_id=$2 AND action_type='request_hint' AND payload->'result'->'state'->>'activeStepId'=$3`, [tenant.organizationId, sessionId, currentStep!.stepId]) : undefined;
+          feedback = hints[Math.min(used?.rows[0]?.count ?? 0, hints.length - 1)] ?? "Hint requested. Continue with the next permitted procedure action.";
         }
         if (action.type === "transform_component" || action.type === "reset_component" || action.transform) {
           const manifest = validateBrowserModelManifest(modelRow.rows[0].manifest);
           const violation = interactionStateViolation(manifest, next.transforms, componentId);
-          if (violation) return result("invalid_precondition", row.next_sequence, violation, model, { clientActionId: action.clientActionId });
+          if (violation) return rejectTaskAction(violation);
         }
         let scoreDelta = 0;
         const currentStep = simulationState.currentStepId ? typedDefinition.steps.find((step) => step.stepId === simulationState.currentStepId) : undefined;
@@ -513,7 +540,7 @@ export function createPostgresModelSessionService(input: { pool: Pool }): ModelS
             await client.query(`INSERT INTO audit_events(audit_event_id,organization_id,actor_id,event_type,resource_type,resource_id,details,created_at) VALUES($1,$2,$3,'SIMULATION_FAULT_INVALIDATED','simulation_attempt',$4,$5::jsonb,now())`,[`audit:${randomUUID()}`,tenant.organizationId,tenant.actorId,failed.rows[0].simulation_attempt_id,JSON.stringify({sessionId,faultId:simulationState.activeFaultId,clientActionId:action.clientActionId,reason:'Published fault failure rule'})]);
             return terminal;
           }
-          if (!transition.accepted) return result("invalid_precondition", row.next_sequence, transition.feedback, model, { clientActionId: action.clientActionId });
+          if (!transition.accepted) return rejectTaskAction(transition.failure?.code === 'ACTION_NOT_ALLOWED' && currentStep ? `Current task: ${currentStep.title}. ${transition.feedback}` : transition.feedback);
           next.simulationState = transition.state;
           scoreDelta = transition.scoreDelta;
           next.scorePoints = transition.state.score;
@@ -529,6 +556,7 @@ export function createPostgresModelSessionService(input: { pool: Pool }): ModelS
           };
           Object.assign(next, simulationProjection(typedDefinition, next.simulationState));
         }
+        next.interactionOptions = modelInteractionOptions(validateBrowserModelManifest(modelRow.rows[0].manifest), next);
         const accepted = result("accepted", next.nextSequence, feedback, next, { clientActionId: action.clientActionId, scoreDelta });
         await client.query(
           `UPDATE simulation_sessions SET state = $3::jsonb, next_sequence = $4, updated_at = CURRENT_TIMESTAMP
@@ -619,6 +647,7 @@ export function createPostgresModelSessionService(input: { pool: Pool }): ModelS
           completed: simulationCompleted(definitionValue as SimulationDefinition, model.simulationState),
           ...simulationProjection(definitionValue as SimulationDefinition, model.simulationState)
         };
+        restoredState.interactionOptions = modelInteractionOptions(validateBrowserModelManifest(activeBinding.rows[0].manifest), restoredState);
         return result("accepted", row.next_sequence, "Authoritative model state restored.", restoredState);
       });
     }

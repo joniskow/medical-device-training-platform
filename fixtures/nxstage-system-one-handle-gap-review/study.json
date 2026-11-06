@@ -1,0 +1,6 @@
+{
+  "sourceHash": "0d19ddd9d36aa21173cc79ab92ef64b32148b7c485d53413ad466fe247aa9b77",
+  "hash": "00cc68816e271bd5e97d912ae534ca1b4daffc8b21eb77027de8d533dd87e30a",
+  "armOutwardOffsetMeters": 0.0005,
+  "limitation": "Approximate clearance adjustment, not a measured physical gap."
+}

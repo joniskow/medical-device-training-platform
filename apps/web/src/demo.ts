@@ -1,4 +1,5 @@
 import { createBabylonModelRuntime } from './babylon-model-runtime.js';
+import { updateNxstageWarmerPreview } from './nxstage-warmer-preview.js';
 import { createOpenMontageGeneration, loadOpenMontageGeneration, openMontageGenerationNarrationUrl, openMontageGenerationPreviewUrl } from './openmontage-client.js';
 import type { InteractiveModelRuntime } from './model-contract.js';
 import { validateTrainingSceneManifest, type OpenMontageGenerationStatus, type TrainingSceneManifest } from '@medical-device/contracts';
@@ -22,12 +23,17 @@ const defaultState: DemoState = {
 };
 
 const app = document.querySelector<HTMLDivElement>('#app')!;
+let nxstageDemoReview = new URLSearchParams(window.location.search).get('model') === 'nxstage-review';
 const storageKey = 'aurora-training-demo-v4';
 let state = loadState();
+if (nxstageDemoReview && state.demoSource && state.backgroundMode !== 'CINEMATIC' && state.narrationText === defaultState.narrationText) {
+  state.narrationText = 'Explore the System One control panel, handle, doors and PureFlow cabinet in this visual review. The cartridge chamber is simplified; treatment, fluid operation and electrical power are not simulated.';
+}
 let toastTimer: number | undefined;
 let conversionTimer: number | undefined;
 let backgroundRequestToken = 0;
 let demoModelRuntime: InteractiveModelRuntime | undefined;
+let demoReviewManifest: ModelManifest | undefined;
 let demoModelGeneration = 0;
 let sourcePreviewUrls: string[] = [];
 
@@ -131,7 +137,7 @@ function renderSourcePipeline(): string {
     const title = nxstage ? 'NxStage System One' : 'Aurora infusion controller';
     const instructions = nxstage ? 'Press the front-panel controls. Lift the black cycler handle, then pull the upper door open; close the door before lowering the handle. The upper door travel and interior are estimates. The lower cabinet door also opens.' : 'Press buttons, drag the edge of the flow dial around to turn it, and open the safety cover using its latch.';
     const chips = nxstage ? '<button class="component-chip" data-action="select-demo-component" data-component="nxstage-control-panel">Control panel</button><button class="component-chip" data-action="select-demo-component" data-component="nxstage-cycler-handle">Cycler handle</button><button class="component-chip" data-action="select-demo-component" data-component="nxstage-cycler-door">Cycler door</button><button class="component-chip" data-action="select-demo-component" data-component="nxstage-cabinet-door">Cabinet door</button>' : '<button class="component-chip" data-action="select-demo-component" data-component="AIC-C01">Control panel</button><button class="component-chip" data-action="select-demo-component" data-component="AIC-C02">Safety cover</button><button class="component-chip" data-action="select-demo-component" data-component="AIC-C03">Line sensor</button><button class="component-chip" data-action="select-demo-component" data-component="AIC-C04">Flow dial</button>';
-    body = state.sourceKind === 'photos' && !photoCandidateApproved() ? renderPhotoReviewGate() : `<div class="model-preview-panel"><div class="model-canvas-wrap"><canvas id="demo-model-canvas" aria-label="Interactive 3D ${title} model. Drag to rotate, use the wheel or pinch to zoom, and use arrow keys then Enter to activate a control.${nxstage ? '' : ' Hold Shift and use arrow keys to turn the flow dial.'}"></canvas><span class="model-badge">${icon('spark', 12)} Live 3D preview</span></div><div class="model-preview-copy"><p class="eyebrow">Training model preview</p><h3>${title}</h3><p class="muted">${instructions} Geometry remains a training/demo representation until dimensional evidence and device review are complete.</p><div class="component-chips">${chips}</div><div class="model-actions"><button class="outline-btn" data-action="reset-demo-model">Reset view</button><button class="primary-btn" data-action="source-stage" data-stage="content">Continue to training content ${icon('arrow', 14)}</button></div><p id="demo-model-status" class="model-status" role="status" aria-live="polite">Loading model…</p></div></div>`;
+    body = state.sourceKind === 'photos' && !photoCandidateApproved() ? renderPhotoReviewGate() : `<div class="model-preview-panel"><div class="model-canvas-wrap"><canvas id="demo-model-canvas" aria-label="Interactive 3D ${title} model. Drag to rotate, use the wheel or pinch to zoom, and use arrow keys then Enter to activate a control.${nxstage ? ' Hold Shift and use arrow keys to move a door or tub in increments.' : ' Hold Shift and use arrow keys to turn the flow dial or move a door in increments.'}"></canvas><span class="model-badge">${icon('spark', 12)} Live 3D preview</span></div><div class="model-preview-copy"><p class="eyebrow">Training model preview</p><h3>${title}</h3><p class="muted">${instructions} Geometry remains a training/demo representation until dimensional evidence and device review are complete.</p><div class="component-chips">${chips}</div><div class="model-actions"><button class="outline-btn" data-action="reset-demo-model">Reset view</button><button class="primary-btn" data-action="source-stage" data-stage="content">Continue to training content ${icon('arrow', 14)}</button></div><p id="demo-model-status" class="model-status" role="status" aria-live="polite">Loading model…</p></div></div>`;
   }
   if (state.sourceStage === 'model' && state.demoSource) body = `${renderNxStageReference()}${body}`;
   if (state.sourceStage === 'content') body = `<div class="content-preview-panel"><div class="generated-video ${state.videoPlaying ? 'playing' : ''}"><div class="video-topline"><span class="tag lime">Generated lesson video</span><span class="mono">02:14</span></div>${renderTrainingScene()}<div class="video-controls"><span class="video-progress"><span style="width:${state.videoPlaying ? '46%' : '18%'}"></span></span><span class="mono">00:${state.videoPlaying ? '59' : '24'}</span></div></div><div class="content-preview-copy"><p class="eyebrow">Generated from ${escapeHtml(state.sourceFileName || 'Aurora setup guide.pdf')}</p><h3>Ready-to-teach content, grounded in the source</h3><p class="muted">The lesson now uses a real video plate with the approved Babylon model composited above it. Production camera pose, scale, and reviewer sign-off stay bound to the scenario manifest.</p><div class="generated-list"><span>${icon('check', 13)} 1 source-bound video/model scene</span><span>${icon('check', 13)} 3-step guided procedure</span><span>${icon('check', 13)} 1 knowledge check with feedback</span></div><button class="primary-btn" data-action="open-generated-lesson">Open as learner ${icon('arrow', 14)}</button></div></div>`;
@@ -162,7 +168,8 @@ function currentPhotoPreviewUrls(): string[] {
 
 function renderNxStageReference(): string {
   if (!state.demoSource) return '';
-  return `<div class="nxstage-reference-card"><div class="nxstage-reference-image"><img src="/demo-assets/nxstage-system-one-preview.png" alt="Generated NxStage System One preview based on the uploaded reference photos" /><span class="model-badge">${icon('spark', 12)} Generated visual preview</span></div><div class="nxstage-reference-copy"><p class="eyebrow">Photo-grounded reference</p><h3>NxStage System One preview</h3><p class="muted">The reference render is paired with the interactive NxStage GLB below. The named front-panel controls and adjustment areas provide local press feedback; scale and hidden geometry remain review-required.</p></div></div>`;
+  const reviewLink = new URLSearchParams(window.location.search).has('review') ? '' : '<p><a href="/learner/model?preview=1&amp;model=nxstage-review">Explore the interactive visual review</a></p><p><a href="/demo?model=nxstage-review">View the updated model in the demo</a></p>';
+  return `<div class="nxstage-reference-card"><div class="nxstage-reference-image"><img src="/demo-assets/nxstage-system-one-preview.png" alt="Generated NxStage System One preview based on the uploaded reference photos" /><span class="model-badge">${icon('spark', 12)} Generated visual preview</span></div><div class="nxstage-reference-copy"><p class="eyebrow">Photo-grounded reference</p><h3>NxStage System One preview</h3><p class="muted">The reference render is paired with the interactive NxStage GLB below. The named front-panel controls and adjustment areas provide local press feedback; scale and hidden geometry remain review-required.</p>${reviewLink}</div></div>`;
 }
 
 function renderTrainingScene(): string {
@@ -170,11 +177,13 @@ function renderTrainingScene(): string {
   const cinematic = state.backgroundMode === 'CINEMATIC';
   const interactive = state.sceneInteractive && !cinematic;
   const photoPlate = nxstage && state.backgroundStatus === 'REVIEW_REQUIRED' && state.backgroundMode === 'LOCKED_INTERACTIVE' && state.backgroundPreviewUrl.endsWith('.png');
-  const manifestUrl = nxstage ? cinematic ? '/model/nxstage-cinematic-scene-manifest.json' : '/model/nxstage-training-scene-manifest.json' : '/model/aurora-training-scene-manifest.json';
-  const videoUrl = state.backgroundPreviewUrl && !photoPlate ? state.backgroundPreviewUrl : nxstage ? cinematic ? '/demo-assets/nxstage-hallway-to-room-composite.mp4' : '/demo-assets/nxstage-office-background-openmontage.mp4' : '/demo-assets/aic-priming-demo.mp4';
+  const manifestUrl = nxstage ? cinematic ? '/model/nxstage-cinematic-scene-manifest.json' : nxstageDemoReview ? '/model/nxstage-review-scene.json' : '/model/nxstage-training-scene-manifest.json' : '/model/aurora-training-scene-manifest.json';
+  const videoUrl = state.backgroundPreviewUrl && !photoPlate ? state.backgroundPreviewUrl : nxstage ? cinematic ? '/demo-assets/nxstage-hallway-to-room-composite.mp4' : nxstageDemoReview ? '/demo-assets/nxstage-office-background-photo-openmontage.mp4' : '/demo-assets/nxstage-office-background-openmontage.mp4' : '/demo-assets/aic-priming-demo.mp4';
+  const photorealWalkthrough = nxstage && !cinematic && videoUrl.endsWith('nxstage-doctors-office-walkthrough-photoreal-v3.mp4');
   const title = nxstage ? 'NxStage System One' : 'Aurora controller';
-  const interactionControl = cinematic ? '<span class="scene-interact cinematic-disabled" aria-disabled="true">Cinematic output · no live interaction</span>' : `<button class="scene-interact" data-action="toggle-scene-interaction" aria-pressed="${state.sceneInteractive ? 'true' : 'false'}">${state.sceneInteractive ? 'Exit model interaction' : 'Interact with model'}</button>`;
-  return `<div class="training-scene doctors-office ${interactive ? 'interactive' : ''} ${cinematic ? 'cinematic' : ''} ${photoPlate ? 'photo-plate' : ''}" data-scene-manifest="${manifestUrl}"><div class="doctors-office-backdrop" aria-hidden="true"><div class="office-window"><span></span><span></span><span></span></div><div class="office-poster"><strong>Patient care</strong><small>Clear steps. Safer setup.</small></div><div class="office-shelf"><i></i><i></i><i></i></div><div class="office-desk"><div class="office-monitor"><b></b><em></em></div><div class="office-drawer"></div></div><div class="office-chair"></div><div class="office-plant"><i></i><i></i><i></i><b></b></div></div>${photoPlate ? `<img id="training-photo" class="training-scene-video" src="${state.backgroundPreviewUrl}" alt="Generated clinical background draft" />` : `<video id="training-video" class="training-scene-video" src="${videoUrl}" muted loop playsinline preload="metadata" aria-label="Source-bound training video plate"></video>`}<canvas id="demo-scene-canvas" class="training-scene-model" aria-label="${cinematic ? `Non-interactive baked cinematic ${title} composite` : `Interactive ${title} model in a clinical scene`}"></canvas><span class="video-caption">${title} · ${photoPlate ? 'photographic draft plate · preview only' : cinematic ? 'cinematic baked-composite preview · interaction disabled' : 'draft composite preview'}</span>${interactionControl}<span class="scene-status" id="demo-model-status" role="status" aria-live="polite">Loading source-bound scene…</span></div>`;
+  const walkthroughPlayback = photorealWalkthrough ? '<button class="scene-playback" data-action="play-walkthrough" type="button">Play walkthrough</button>' : '';
+  const interactionControl = walkthroughPlayback + (cinematic ? '<span class="scene-interact cinematic-disabled" aria-disabled="true">Cinematic output · no live interaction</span>' : `<button class="scene-interact" data-action="toggle-scene-interaction" aria-pressed="${state.sceneInteractive ? 'true' : 'false'}">${state.sceneInteractive ? 'Exit model interaction' : 'Interact with model'}</button>${nxstage && nxstageDemoReview ? `<button class="scene-explore" data-action="toggle-review-explore" aria-pressed="false" ${state.sceneInteractive ? '' : 'hidden'}>Explore model</button>` : ''}`);
+  return `<div class="training-scene doctors-office ${interactive ? 'interactive' : ''} ${cinematic ? 'cinematic' : ''} ${photoPlate ? 'photo-plate' : ''} ${photorealWalkthrough ? 'photoreal-walkthrough' : ''} ${nxstage && nxstageDemoReview && !cinematic ? 'nxstage-review-scene' : ''}" data-scene-manifest="${manifestUrl}"><div class="doctors-office-backdrop" aria-hidden="true"><div class="office-window"><span></span><span></span><span></span></div><div class="office-poster"><strong>Patient care</strong><small>Clear steps. Safer setup.</small></div><div class="office-shelf"><i></i><i></i><i></i></div><div class="office-desk"><div class="office-monitor"><b></b><em></em></div><div class="office-drawer"></div></div><div class="office-chair"></div><div class="office-plant"><i></i><i></i><i></i><b></b></div></div>${photoPlate ? `<img id="training-photo" class="training-scene-video" src="${state.backgroundPreviewUrl}" alt="Generated clinical background draft" />` : `<video id="training-video" class="training-scene-video" src="${videoUrl}" muted loop playsinline preload="${nxstage && nxstageDemoReview ? 'auto' : 'metadata'}" aria-label="Source-bound training video plate"></video>`}${photorealWalkthrough ? '<img id="training-room-photo" class="training-room-photo" src="/demo-assets/nxstage-interactive-exam-room.png" alt="Photorealistic clinical exam room" />' : ''}<canvas id="demo-scene-canvas" class="training-scene-model" aria-label="${cinematic ? `Non-interactive baked cinematic ${title} composite` : `Interactive ${title} model in a clinical scene. When interaction is enabled, use arrow keys to choose a control, Enter or Space to operate it, and Escape to cancel a held control.${nxstage ? " Hold Shift and use arrow keys to move a door or tub in increments." : " Hold Shift and use arrow keys to turn the flow dial or move a door in increments."}`}"></canvas><span class="video-caption">${title} · ${photoPlate ? 'photographic draft plate · preview only' : cinematic ? 'cinematic baked-composite preview · interaction disabled' : photorealWalkthrough ? 'photoreal hallway → exam room · interactive reveal' : 'draft composite preview'}</span>${interactionControl}<span class="scene-status" id="demo-model-status" role="status" aria-live="polite">Loading source-bound scene…</span></div>`;
 }
 
 const trainingSceneManifestUrl = '/model/aurora-training-scene-manifest.json';
@@ -196,10 +205,10 @@ async function waitForVideoMetadata(video: HTMLVideoElement, sceneVideo: Trainin
   if (video.videoWidth !== sceneVideo.width || video.videoHeight !== sceneVideo.height || !Number.isFinite(video.duration) || Math.abs(video.duration - sceneVideo.durationSeconds) > 0.05) throw new Error(`SCENE_VIDEO_PROFILE_MISMATCH:${video.videoWidth}x${video.videoHeight}/${video.duration.toFixed(3)} expected ${sceneVideo.width}x${sceneVideo.height}/${sceneVideo.durationSeconds.toFixed(3)}`);
 }
 async function loadTrainingScene(): Promise<{ scene: TrainingSceneManifest; modelManifest: ModelManifest }> {
-  const sceneUrl = state.demoSource ? state.backgroundMode === 'CINEMATIC' ? '/model/nxstage-cinematic-scene-manifest.json' : '/model/nxstage-training-scene-manifest.json' : trainingSceneManifestUrl;
+  const sceneUrl = state.demoSource ? state.backgroundMode === 'CINEMATIC' ? '/model/nxstage-cinematic-scene-manifest.json' : nxstageDemoReview ? '/model/nxstage-review-scene.json' : '/model/nxstage-training-scene-manifest.json' : trainingSceneManifestUrl;
   const photoPlate = state.demoSource && state.backgroundStatus === 'REVIEW_REQUIRED' && state.backgroundMode === 'LOCKED_INTERACTIVE' && state.backgroundPreviewUrl.endsWith('.png');
-  const videoUrl = state.backgroundPreviewUrl && !photoPlate ? state.backgroundPreviewUrl : state.demoSource ? state.backgroundMode === 'CINEMATIC' ? '/demo-assets/nxstage-hallway-to-room-composite.mp4' : '/demo-assets/nxstage-office-background-openmontage.mp4' : trainingSceneVideoUrl;
-  const modelManifestUrl = state.demoSource ? state.backgroundMode === 'CINEMATIC' ? '/model/nxstage-cinematic-source-manifest.json' : '/model/nxstage-system-one-manifest.json' : '/model/aurora-training-manifest.json';
+  const videoUrl = state.backgroundPreviewUrl && !photoPlate ? state.backgroundPreviewUrl : state.demoSource ? state.backgroundMode === 'CINEMATIC' ? '/demo-assets/nxstage-hallway-to-room-composite.mp4' : nxstageDemoReview ? '/demo-assets/nxstage-office-background-photo-openmontage.mp4' : '/demo-assets/nxstage-office-background-openmontage.mp4' : trainingSceneVideoUrl;
+  const modelManifestUrl = state.demoSource ? state.backgroundMode === 'CINEMATIC' ? '/model/nxstage-cinematic-source-manifest.json' : nxstageDemoReview ? '/learner/nxstage-review-manifest.json' : '/model/nxstage-system-one-manifest.json' : '/model/aurora-training-manifest.json';
   const [sceneResponse, modelResponse] = await Promise.all([
     fetch(sceneUrl, { cache: 'no-store' }),
     fetch(modelManifestUrl, { cache: 'no-store' })
@@ -235,9 +244,10 @@ function renderPhotoModelDraft(): string {
 
 function renderPhotoReviewGate(): string {
   const isDemoCandidate = state.demoSource && state.candidateTriangles > 0;
+  const visualReview = isDemoCandidate && nxstageDemoReview;
   const preview = currentPhotoPreviewUrls()[0] || state.sourcePreviewDataUrl;
   const evidence = preview ? `<img src="${preview}" alt="Representative source view for the reviewed reconstruction" />` : `<div class="photo-placeholder">${icon('grid', 26)}<span>Source views are stored privately with the reconstruction job.</span></div>`;
-  return `<div class="pipeline-review-card"><div class="pipeline-review-evidence"><div class="photo-model-shell">${evidence}</div><span class="model-badge">${icon('shield', 12)} Private source evidence</span></div><div class="pipeline-review-copy"><div class="pipeline-review-heading"><div><p class="eyebrow">Candidate quality report</p><h3>Review is required before this model can reach the scene.</h3></div><span class="tag yellow">REVIEW_REQUIRED</span></div><p class="muted">The reconstruction worker produced a source-bound candidate. Keep it private until an independent reviewer approves the geometry, measurements, and intended training use.</p>${isDemoCandidate ? `<div class="pipeline-metrics"><div><strong>502,001</strong><span>triangles</span></div><div><strong>0.54 mm</strong><span>mean surface error</span></div><div><strong>24</strong><span>source views</span></div></div><p class="pipeline-rationale">${escapeHtml(state.reviewRationale || 'Candidate passed the demo quality thresholds and is awaiting reviewer sign-off.')}</p><button class="primary-btn" data-action="approve-demo-candidate">Approve candidate for scene preview ${icon('arrow', 14)}</button>` : `<div class="reconstruction-status"><span class="status-dot"></span><strong>Candidate remains review-required</strong><small>Use the reconstruction API to attach a quality report and reviewer decision.</small></div><button class="outline-btn" data-action="back-to-source">Replace photo set</button>`}</div></div>`;
+  return `<div class="pipeline-review-card"><div class="pipeline-review-evidence"><div class="photo-model-shell">${evidence}</div><span class="model-badge">${icon('shield', 12)} Private source evidence</span></div><div class="pipeline-review-copy"><div class="pipeline-review-heading"><div><p class="eyebrow">${visualReview ? 'Visual reconstruction' : 'Candidate quality report'}</p><h3>Review is required before this model can reach the scene.</h3></div><span class="tag yellow">REVIEW_REQUIRED</span></div><p class="muted">${visualReview ? 'This sample is a visual reconstruction. Its dimensions and hidden geometry are estimates, and it is not approved for clinical use.' : 'The reconstruction worker produced a source-bound candidate. Keep it private until an independent reviewer approves the geometry, measurements, and intended training use.'}</p>${isDemoCandidate ? `${visualReview ? '' : '<div class="pipeline-metrics"><div><strong>502,001</strong><span>triangles</span></div><div><strong>0.54 mm</strong><span>mean surface error</span></div><div><strong>24</strong><span>source views</span></div></div>'}<p class="pipeline-rationale">${escapeHtml(state.reviewRationale || 'Candidate is awaiting review.')}</p><button class="primary-btn" data-action="approve-demo-candidate">${visualReview ? 'Open visual review' : 'Approve candidate for scene preview'} ${icon('arrow', 14)}</button>` : `<div class="reconstruction-status"><span class="status-dot"></span><strong>Candidate remains review-required</strong><small>Use the reconstruction API to attach a quality report and reviewer decision.</small></div><button class="outline-btn" data-action="back-to-source">Replace photo set</button>`}</div></div>`;
 }
 
 function renderCreatorRail(): string {
@@ -246,7 +256,7 @@ function renderCreatorRail(): string {
 }
 
 function renderBackgroundReviewArtifacts(): string {
-  if (!state.demoSource || state.backgroundStatus === 'IDLE' || state.backgroundStatus === 'GENERATING') return '';
+  if (!state.demoSource || (nxstageDemoReview && state.backgroundMode !== 'CINEMATIC') || state.backgroundStatus === 'IDLE' || state.backgroundStatus === 'GENERATING') return '';
   const cinematic = state.backgroundMode === 'CINEMATIC';
   const cleanPlate = cinematic ? '/demo-assets/nxstage-hallway-to-room-background-openmontage.mp4' : state.backgroundPreviewUrl || '/demo-assets/nxstage-office-background-photo-openmontage.mp4';
   const finalComposite = cinematic
@@ -267,6 +277,7 @@ function renderCreator(): string {
   const index = Math.max(0, creatorStepIndex());
   const [, title, description] = creatorFlow[index];
   const nxstagePreview = state.demoSource;
+  const visualReview = nxstagePreview && nxstageDemoReview && (state.creatorStep === 'model' || state.backgroundMode !== 'CINEMATIC');
   const previewTitle = nxstagePreview ? 'NxStage System One' : 'Aurora training controller';
   const previewAria = nxstagePreview ? 'Interactive 3D NxStage System One reconstruction' : 'Interactive 3D Aurora infusion controller model';
   const componentChips = nxstagePreview
@@ -278,10 +289,11 @@ function renderCreator(): string {
   let body = '';
   if (state.creatorStep === 'source') body = renderSourceUpload();
   if (state.creatorStep === 'convert') body = state.sourceProgress < 100 ? renderPipelineProcessing() : `<div class="focus-complete"><span class="complete-mark">${icon('check', 20)}</span><div><p class="eyebrow">${state.sourceKind === 'photos' ? 'Candidate ready for review' : 'Conversion complete'}</p><h3>${escapeHtml(state.sourceFileName || 'Aurora setup guide.pdf')} is ready.</h3><p class="muted">${state.sourceKind === 'photos' ? 'The candidate is held at REVIEW_REQUIRED until a reviewer approves it.' : 'The source is structured and connected to the next two steps.'}</p></div><button class="primary-btn" data-action="creator-next">${state.sourceKind === 'photos' ? 'Open review gate' : 'Open 3D model'} ${icon('arrow', 14)}</button></div>`;
-  if (state.creatorStep === 'model') body = state.sourceKind === 'photos' && !photoCandidateApproved() ? renderPhotoReviewGate() : `${renderNxStageReference()}<div class="focus-model"><div class="model-canvas-wrap"><canvas id="demo-model-canvas" aria-label="${previewAria}. Drag to rotate, use the wheel or pinch to zoom, move over a tagged control to preview it, and use arrow keys then Enter to activate a control."></canvas><span class="model-badge">${icon('spark', 12)} ${state.demoSource ? 'Reviewed demo reconstruction' : 'Reviewed 3D preview'}</span></div><div class="focus-model-copy"><p class="eyebrow">${state.demoSource ? 'Reviewed reconstruction candidate from the sample photo set' : 'Reviewed source-bound training model'}</p><h3>${previewTitle}</h3><p class="muted">Drag to rotate, use the wheel to zoom, select the named component, or press a tagged control. This preview is not dimensional, clinical, or manufacturing acceptance.</p><div class="component-chips">${componentChips}</div><p id="demo-model-status" class="model-status" role="status" aria-live="polite">Loading reviewed model…</p>${state.demoSource ? `<div class="demo-photo-strip">${currentPhotoPreviewUrls().slice(0, 3).map((url, photoIndex) => `<img src="${url}" alt="Sample reconstruction source view ${photoIndex + 1}" />`).join('')}<span>24 source views</span></div>` : ''}</div></div>`;
-  if (state.creatorStep === 'content') body = `${renderBackgroundPromptEditor()}<div class="focus-content"><div class="generated-video ${state.videoPlaying ? 'playing' : ''}"><div class="video-topline"><span class="tag ${state.backgroundStatus === 'REVIEW_REQUIRED' ? 'yellow' : 'lime'}">${state.backgroundStatus === 'REVIEW_REQUIRED' ? 'Preview · review required' : 'Generated lesson video'}</span><span class="mono">02:14</span></div>${renderTrainingScene()}<div class="video-controls"><span class="video-progress"><span style="width:${state.videoPlaying ? '46%' : '18%'}"></span></span><span class="mono">00:${state.videoPlaying ? '59' : '24'}</span></div></div><div class="focus-content-copy"><p class="eyebrow">Generated from ${escapeHtml(state.sourceFileName || 'Aurora setup guide.pdf')}</p><h3>${state.backgroundStatus === 'REVIEW_REQUIRED' ? 'Composite preview awaiting independent review' : 'Ready-to-teach content, grounded in the source'}</h3><p class="muted">The source-bound model is rendered above the generated background plate. Scene hashes, camera data, provider provenance, and review status stay attached to the generation.</p><div class="generated-list"><span>${icon('check', 13)} Source-bound 3D model</span><span>${icon('check', 13)} ${state.backgroundMode === 'LOCKED_INTERACTIVE' ? 'Camera-locked interactive overlay' : 'Cinematic composite path'}</span><span>${icon('check', 13)} Independent review gate before publication</span></div></div></div>`;
+  if (state.creatorStep === 'model') body = state.sourceKind === 'photos' && !photoCandidateApproved() ? renderPhotoReviewGate() : `${renderNxStageReference()}<div class="focus-model"><div class="model-canvas-wrap"><canvas id="demo-model-canvas" aria-label="${previewAria}. Drag to rotate, use the wheel or pinch to zoom, move over a tagged control to preview it, and use arrow keys then Enter to activate a control."></canvas><span class="model-badge">${icon('spark', 12)} ${visualReview ? 'Visual reconstruction' : state.demoSource ? 'Reviewed demo reconstruction' : 'Reviewed 3D preview'}</span></div><div class="focus-model-copy"><p class="eyebrow">${visualReview ? 'Visual reconstruction from the sample photo set' : state.demoSource ? 'Reviewed reconstruction candidate from the sample photo set' : 'Reviewed source-bound training model'}</p><h3>${previewTitle}</h3><p class="muted">Drag to rotate, use the wheel to zoom, select the named component, or press a tagged control. This preview is not dimensional, clinical, or manufacturing acceptance.</p><div class="component-chips">${componentChips}</div><p id="demo-model-status" class="model-status" role="status" aria-live="polite">Loading reviewed model…</p>${state.demoSource ? `<div class="demo-photo-strip">${currentPhotoPreviewUrls().slice(0, 3).map((url, photoIndex) => `<img src="${url}" alt="Sample reconstruction source view ${photoIndex + 1}" />`).join('')}<span>24 source views</span></div>` : ''}</div></div>`;
+  if (state.creatorStep === 'content') body = `${renderBackgroundPromptEditor()}<div class="focus-content"><div class="generated-video ${state.videoPlaying ? 'playing' : ''}"><div class="video-topline"><span class="tag ${visualReview || state.backgroundStatus === 'REVIEW_REQUIRED' ? 'yellow' : 'lime'}">${visualReview ? 'Visual review' : state.backgroundStatus === 'REVIEW_REQUIRED' ? 'Preview · review required' : 'Generated lesson video'}</span>${visualReview ? '' : '<span class="mono">02:14</span>'}</div>${renderTrainingScene()}${visualReview ? '' : `<div class="video-controls"><span class="video-progress"><span style="width:${state.videoPlaying ? '46%' : '18%'}"></span></span><span class="mono">00:${state.videoPlaying ? '59' : '24'}</span></div>`}</div><div class="focus-content-copy"><p class="eyebrow">Generated from ${escapeHtml(state.sourceFileName || 'Aurora setup guide.pdf')}</p><h3>${visualReview ? 'Interactive visual review' : state.backgroundStatus === 'REVIEW_REQUIRED' ? 'Composite preview awaiting independent review' : 'Ready-to-teach content, grounded in the source'}</h3><p class="muted">The source-bound model is rendered above the generated background plate. Scene hashes, camera data, provider provenance, and review status stay attached to the generation.</p><div class="generated-list"><span>${icon('check', 13)} Source-bound 3D model</span><span>${icon('check', 13)} ${state.backgroundMode === 'LOCKED_INTERACTIVE' ? 'Camera-locked interactive overlay' : 'Cinematic composite path'}</span><span>${icon('check', 13)} Independent review gate before publication</span></div></div></div>`;
   if (state.creatorStep === 'build') body = `<div class="focus-build"><div class="focus-build-head"><div><h3>Course modules</h3><p class="muted">Keep the path short and focused. Click one module to edit it.</p></div><button class="outline-btn" data-action="add-module">${icon('plus', 14)} Add module</button></div><div class="module-list compact">${state.modules.map((module, moduleIndex) => `<article class="module-row clickable ${state.selectedModule === moduleIndex ? 'selected' : ''}" tabindex="0" role="button" data-action="select-module" data-index="${moduleIndex}" aria-label="Edit module ${moduleIndex + 1}: ${escapeHtml(module.title)}"><div class="module-num">${String(moduleIndex + 1).padStart(2, '0')}</div><div><h3>${escapeHtml(module.title)}</h3><p>${escapeHtml(module.description)}</p></div><span class="tag ${module.completed ? 'lime' : 'gray'}">${module.completed ? 'Complete' : module.type}</span></article>`).join('')}</div>${moduleEditor}</div>`;
   if (state.creatorStep === 'publish') body = `<div class="focus-publish"><div class="publish-summary"><span class="course-icon">${icon('shield', 22)}</span><div><p class="eyebrow">Release summary</p><h3>Aurora infusion controller · Fundamentals</h3><p class="muted">${state.modules.length} modules · ${state.modules.reduce((total, module) => total + module.minutes, 0)} minutes · Clinical specialists</p></div></div><div class="publish-checks"><span>${icon('check', 13)} Source evidence connected</span><span>${icon('check', 13)} 3D model preview approved</span><span>${icon('check', 13)} Learner knowledge check ready</span></div>${state.published ? `<div class="focus-complete"><span class="complete-mark">${icon('check', 20)}</span><div><p class="eyebrow">Published</p><h3>Your course is ready for learners.</h3><p class="muted">The published release is now visible in Learner view.</p></div><button class="primary-btn" data-action="toggle-view">Preview learner view ${icon('arrow', 14)}</button></div>` : `<button class="primary-btn" data-action="publish">Approve & publish course ${icon('arrow', 14)}</button>`}</div>`;
+  if (state.creatorStep === 'publish' && visualReview) body = '<div class="focus-empty"><div><strong>Visual review only</strong><p>This model is an unmeasured visual reconstruction and is not a publishable course.</p></div></div>';
   const footer = state.creatorStep === 'source' ? '' : `<div class="focus-footer"><button class="text-btn" data-action="creator-back">${icon('back', 14)} Back</button>${state.creatorStep === 'build' ? `<button class="primary-btn" data-action="creator-next">Continue to publish ${icon('arrow', 14)}</button>` : state.creatorStep === 'publish' ? '' : `<button class="primary-btn" data-action="creator-next">Continue ${icon('arrow', 14)}</button>`}</div>`;
   return shell(`<div class="page focus-page"><div class="focus-heading"><div><p class="eyebrow">Creator studio · Step ${index + 1} of ${creatorFlow.length}</p><h1>${title}</h1><p class="lede">${description}</p></div><span class="tag ${state.published ? 'lime' : 'yellow'}">${state.published ? 'Published release' : 'Draft in progress'}</span></div><div class="focus-layout"><section class="card focus-card"><div class="focus-card-top">${renderCreatorRail()}</div><div class="focus-body">${body}</div>${footer}</section><aside class="focus-aside"><div class="focus-aside-block"><p class="eyebrow">What this step proves</p><strong>${state.creatorStep === 'source' ? 'Your source is the starting point.' : state.creatorStep === 'convert' ? 'The source can become structured learning.' : state.creatorStep === 'model' && state.sourceKind === 'photos' && !state.demoSource ? 'Your uploaded photos stay attached to the generated preview.' : state.creatorStep === 'model' ? 'The product can be explored in 3D.' : state.creatorStep === 'content' ? 'Review the content before teaching.' : state.creatorStep === 'build' ? 'The course reflects your expertise.' : 'Learners can start immediately.'}</strong></div><div class="focus-aside-block muted">You can revisit any completed step from the rail.</div></aside></div></div>`, 'Creator studio');
 }
@@ -345,7 +357,7 @@ function startConversion(fileNames: string[], kind: SourceKind, previewUrls: str
       state.sourceStage = kind === 'photos' ? 'model' : 'content';
       state.pipelinePhase = kind === 'photos' ? 'REVIEW_REQUIRED' : 'CONTENT_READY';
       state.candidateTriangles = kind === 'photos' && demoSource ? 502001 : 0;
-      state.reviewRationale = kind === 'photos' ? 'Candidate is source-bound and measured; independent reviewer approval is required.' : '';
+      state.reviewRationale = kind === 'photos' ? (demoSource && nxstageDemoReview ? 'The sample model is an unmeasured visual reconstruction.' : 'Candidate is source-bound and measured; independent reviewer approval is required.') : '';
       saveState();
       render();
       showToast(kind === 'photos' ? 'Candidate ready — review required before Babylon can load it' : 'Conversion complete — interactive model and lessons generated');
@@ -379,7 +391,7 @@ function addNamedModelControls(canvas: HTMLCanvasElement, runtime: InteractiveMo
     reset.type = 'button';
     reset.className = 'outline-btn';
     reset.textContent = 'Reset view';
-    reset.addEventListener('click', () => { runtime.resetView(); const status = app.querySelector<HTMLElement>('#demo-model-status'); if (status) status.textContent = 'View reset.'; });
+    reset.addEventListener('click', () => { runtime.resetView(); if (nxstageDemoReview && canvas.closest('.training-scene')?.classList.contains('review-explore')) runtime.fitModel(); const status = app.querySelector<HTMLElement>('#demo-model-status'); if (status) status.textContent = 'View reset.'; });
     panel.insertBefore(reset, panel.querySelector('#demo-model-status'));
   }
   const details = document.createElement('details');
@@ -419,6 +431,69 @@ function addNamedModelControls(canvas: HTMLCanvasElement, runtime: InteractiveMo
   panel.insertBefore(details, panel.querySelector('#demo-model-status'));
 }
 
+function addReviewSceneViews(canvas: HTMLCanvasElement, runtime: InteractiveModelRuntime, manifest: ModelManifest) {
+  const panel = app.querySelector<HTMLElement>('.scene-named-controls');
+  if (!panel) return;
+  const details = document.createElement('details');
+  details.className = 'scene-review-views';
+  details.hidden = true;
+  const summary = document.createElement('summary');
+  summary.textContent = 'Focus a part or control group';
+  const controls = document.createElement('div');
+  controls.className = 'named-model-control-list';
+  const parts: Array<[string, string]> = [
+    ['Cycler handle', 'nxstage-cycler-handle'],
+    ['Upper cycler door', 'nxstage-cycler-door'],
+    ['Lower cabinet door', 'nxstage-cabinet-door'],
+    ['PureFlow tub', 'pureflow-tub']
+  ];
+  for (const [label, componentId] of parts) {
+    const button = document.createElement('button');
+    button.type = 'button'; button.textContent = label; button.dataset.reviewComponent = componentId;
+    button.addEventListener('click', () => {
+      const status = app.querySelector<HTMLElement>('#demo-model-status');
+      if (componentId === 'pureflow-tub') {
+        const tub = manifest.components.find(component => component.componentId === componentId)?.interactionTargets?.find(target => target.targetId === 'PF-C02-TUB');
+        const blocked = tub?.openTranslationMeters === undefined ? undefined : runtime.interactionBlockReason(tub.targetId, { translationX: tub.openTranslationMeters });
+        if (blocked) { if (status) status.textContent = /^Open the cabinet door/i.test(blocked) ? 'Open the cabinet door fully to see the PureFlow tub.' : blocked; return; }
+      }
+      const angle = componentId === 'nxstage-cabinet-door' ? runtime.getState().transforms[componentId]?.rotationY ?? 0 : 0;
+      runtime.frameComponent(componentId, { alpha: Math.PI / 2 - angle, beta: 1.4 });
+      canvas.scrollIntoView({ block: 'center', behavior: 'instant' });
+      if (status) status.textContent = `Showing ${label.toLowerCase()}. Drag or tap it on the model.`;
+    });
+    controls.append(button);
+  }
+  const groups: Array<[string, string[], boolean]> = [
+    ['Left buttons', ['NX-C01-ADD-FLUID', 'NX-C01-VOLUME-TOGGLE', 'NX-C01-TREATMENT'], false],
+    ['Decrease arrows', ['NX-C01-ROW1-DOWN', 'NX-C01-ROW2-DOWN', 'NX-C01-ROW3-DOWN'], false],
+    ['Increase arrows', ['NX-C01-ROW1-UP', 'NX-C01-ROW2-UP', 'NX-C01-ROW3-UP'], false],
+    ['Stop and mute', ['NX-C01-STOP', 'NX-C01-MUTE'], false],
+    ['Lower arrows', ['PF-C01-UP', 'PF-C01-DOWN'], false],
+    ['Lower GO and STOP', ['PF-C01-GO', 'PF-C01-STOP'], false],
+    ['Warmer controls', ['FW-C01-UP', 'FW-C01-DOWN'], false],
+    ['Rear power switch', ['NX-C05-POWER-SWITCH'], true]
+  ];
+  for (const [label, ids, rear] of groups) {
+    const button = document.createElement('button');
+    button.type = 'button'; button.textContent = label; button.dataset.reviewGroup = ids[0];
+    button.addEventListener('click', () => {
+      const status = app.querySelector<HTMLElement>('#demo-model-status');
+      if (ids[0].startsWith('PF-')) {
+        const tub = manifest.components.find(component => component.componentId === 'pureflow-tub')?.interactionTargets?.find(target => target.targetId === 'PF-C02-TUB');
+        const blocked = tub?.openTranslationMeters === undefined ? undefined : runtime.interactionBlockReason(tub.targetId, { translationX: tub.openTranslationMeters });
+        if (blocked) { if (status) status.textContent = /^Open the cabinet door/i.test(blocked) ? 'Open the cabinet door fully to see the lower panel.' : blocked; return; }
+      }
+      if (!runtime.frameInteractionTargets(ids, { alpha: rear ? -Math.PI / 2 : Math.PI / 2, beta: rear ? 1.2 : 1.4 })) return;
+      canvas.scrollIntoView({ block: 'center', behavior: 'instant' });
+      if (status) status.textContent = `Showing ${label.toLowerCase()}. Touch a control on the model.`;
+    });
+    controls.append(button);
+  }
+  details.append(summary, controls);
+  panel.append(details);
+}
+
 async function initDemoModel() {
   const canvas = app.querySelector<HTMLCanvasElement>('#demo-model-canvas, #demo-scene-canvas');
   if (!canvas) return;
@@ -426,15 +501,39 @@ async function initDemoModel() {
   const status = app.querySelector<HTMLElement>('#demo-model-status');
   const composite = canvas.id === 'demo-scene-canvas';
   const video = app.querySelector<HTMLVideoElement>('#training-video');
+  const scene = canvas.closest<HTMLElement>('.training-scene');
   const nxstageModel = state.demoSource;
+  const nxstageReviewModel = nxstageModel && nxstageDemoReview;
   const trainingModel = composite || nxstageModel;
   let runtimeForControls: InteractiveModelRuntime | undefined;
   let lastStatusKey = '';
+  let lastInteractionFeedback: string | undefined;
+  let lastSelectedComponentId: string | undefined;
+  let lastHoveredTargetId: string | undefined;
+  let lastFocusedTargetId: string | undefined;
+  let pendingMotionFeedback: { componentId: string; moving: string; completed: string } | undefined;
   try {
     const sceneBinding = composite ? await loadTrainingScene() : undefined;
     const sceneCamera = sceneBinding?.scene.camera.orbit;
     const photoPlate = composite && state.demoSource && state.backgroundStatus === 'REVIEW_REQUIRED' && state.backgroundMode === 'LOCKED_INTERACTIVE' && state.backgroundPreviewUrl.endsWith('.png');
     const cinematicPreview = composite && state.backgroundMode === 'CINEMATIC';
+    const walkthroughRevealSeconds = composite && state.demoSource && state.backgroundPreviewUrl.endsWith('nxstage-doctors-office-walkthrough-photoreal-v3.mp4') ? 3.5 : 0;
+    const syncWalkthroughReveal = () => {
+      if (!scene || !video || walkthroughRevealSeconds <= 0) return;
+      const revealed = state.sceneInteractive || video.currentTime >= walkthroughRevealSeconds;
+      scene.classList.toggle('room-reveal', revealed);
+      if (revealed && !state.sceneInteractive && video.currentTime > walkthroughRevealSeconds) {
+        video.pause();
+        const playback = scene.querySelector<HTMLButtonElement>('.scene-playback');
+        if (playback) { playback.hidden = false; playback.textContent = 'Replay walkthrough'; }
+        if (status) status.textContent = 'Exam room reached · choose Interact with model.';
+      }
+    };
+    if (walkthroughRevealSeconds > 0 && video) {
+      video.addEventListener('timeupdate', syncWalkthroughReveal);
+      video.addEventListener('loadedmetadata', syncWalkthroughReveal, { once: true });
+      syncWalkthroughReveal();
+    }
     if (cinematicPreview) {
       if (generation === demoModelGeneration && status) status.textContent = 'Cinematic composite ready · baked model present · live interaction disabled.';
       if (generation === demoModelGeneration && state.videoPlaying) void video?.play().catch(() => undefined);
@@ -445,24 +544,40 @@ async function initDemoModel() {
       : photoPlate
         ? { enabled: true, opacity: 0.46, softness: 0.88, offsetMeters: -0.004, direction: [0.64, 0.48] as [number, number] }
         : undefined;
-    const runtime = await createBabylonModelRuntime({ canvas, manifest: sceneBinding?.modelManifest, manifestUrl: composite ? (nxstageModel ? '/model/nxstage-system-one-manifest.json' : '/model/aurora-training-manifest.json') : nxstageModel ? '/model/nxstage-system-one-manifest.json' : '/model/aurora-training-manifest.json', modelUrl: nxstageModel ? '/model/nxstage-system-one.glb' : '/model/aurora-training.glb', transparentBackground: composite, interactionEnabled: !composite || state.sceneInteractive, interactiveCamera: composite ? false : !cinematicPreview, camera: composite ? sceneCamera ?? { alpha: -0.8, beta: Math.PI / 2.8, radius: 3, target: [0, 0, 0] } : nxstageModel ? { alpha: Math.PI / 2, beta: 1.2, radius: 13.5, target: [0, 3.6, 0] } : undefined, lighting: composite ? { direction: sceneBinding?.scene.camera.lightDirection, exposure: sceneBinding?.scene.camera.exposure, whiteBalanceKelvin: sceneBinding?.scene.camera.whiteBalanceKelvin } : undefined, modelTransform: sceneBinding?.scene.model, contactShadow: composite ? photoPlate ? photoContactShadow : sceneBinding?.scene.render.contactShadow : undefined, onStateChange: (modelState) => {
+    const runtime = await createBabylonModelRuntime({ canvas, manifest: sceneBinding?.modelManifest, manifestUrl: nxstageReviewModel ? '/learner/nxstage-review-manifest.json' : composite ? (nxstageModel ? '/model/nxstage-system-one-manifest.json' : '/model/aurora-training-manifest.json') : nxstageModel ? '/model/nxstage-system-one-manifest.json' : '/model/aurora-training-manifest.json', modelUrl: nxstageReviewModel ? '/learner/model/nxstage-review.glb' : nxstageModel ? '/model/nxstage-system-one.glb' : '/model/aurora-training.glb', transparentBackground: composite, interactionEnabled: !composite || state.sceneInteractive, interactiveCamera: composite ? state.sceneInteractive : !cinematicPreview, camera: composite ? sceneCamera ?? { alpha: -0.8, beta: Math.PI / 2.8, radius: 3, target: [0, 0, 0] } : nxstageModel ? nxstageReviewModel ? { alpha: Math.PI / 2, beta: 1.2, radius: 2, target: [0, 0.4, 0] } : { alpha: Math.PI / 2, beta: 1.2, radius: 13.5, target: [0, 3.6, 0] } : undefined, lighting: composite ? { direction: sceneBinding?.scene.camera.lightDirection, exposure: sceneBinding?.scene.camera.exposure, whiteBalanceKelvin: sceneBinding?.scene.camera.whiteBalanceKelvin } : undefined, modelTransform: sceneBinding?.scene.model, ...(nxstageReviewModel && composite ? { preserveImportedRoot: true } : {}), ...(nxstageReviewModel ? { pixelRatioLimit: 1.5 } : {}), contactShadow: composite ? photoPlate ? photoContactShadow : sceneBinding?.scene.render.contactShadow : undefined, onStateChange: (modelState) => {
       if (generation !== demoModelGeneration || !status) return;
       const panel = composite ? app.querySelector<HTMLElement>('.scene-named-controls') : status.parentElement;
       if (runtimeForControls && panel) updateNamedModelControls(panel, runtimeForControls);
-      const statusKey = JSON.stringify([modelState.phase, modelState.pressedInteractionTargetId, modelState.focusedInteractionTargetId, modelState.hoveredInteractionTargetId, modelState.interactionMessage, modelState.errorMessage]);
+      const selectionChanged = modelState.selectedComponentId !== lastSelectedComponentId;
+      lastSelectedComponentId = modelState.selectedComponentId;
+      const hoverChanged = modelState.hoveredInteractionTargetId !== lastHoveredTargetId;
+      const focusChanged = modelState.focusedInteractionTargetId !== lastFocusedTargetId;
+      lastHoveredTargetId = modelState.hoveredInteractionTargetId;
+      lastFocusedTargetId = modelState.focusedInteractionTargetId;
+      const statusKey = JSON.stringify([modelState.phase, modelState.selectedComponentId, modelState.pressedInteractionTargetId, modelState.focusedInteractionTargetId, modelState.hoveredInteractionTargetId, modelState.interactionMessage, modelState.errorMessage]);
       if (statusKey === lastStatusKey) return;
       lastStatusKey = statusKey;
-      status.textContent = modelState.interactionMessage ?? (modelState.pressedInteractionTargetId ? `Holding ${modelState.pressedInteractionTargetName ?? modelState.pressedInteractionTargetId} · release to finish.` : modelState.focusedInteractionTargetId ? `Keyboard focus on ${modelState.focusedInteractionTargetName ?? modelState.focusedInteractionTargetId} · ${modelState.focusedInteractionType === 'turn' ? 'hold Shift and use the arrow keys to turn.' : 'press Enter or Space to activate.'}` : modelState.hoveredInteractionTargetId ? `Over ${modelState.hoveredInteractionTargetName ?? modelState.hoveredInteractionTargetId} · interact with this control.` : modelState.phase === 'READY' ? (composite ? 'Scene ready · source-bound video + Babylon model.' : 'Ready · drag to rotate, wheel to zoom, select a component, or press a tagged control.') : modelState.phase === 'LOADING' ? 'Loading approved 3D model…' : modelState.phase === 'REDUCED_COMPLEXITY' ? 'Model loaded · reduced-complexity path active.' : `${modelState.phase}: ${modelState.errorMessage ?? 'Model preview unavailable.'}`);
-    }, onInteractionTargetActivated: ({ targetId, targetName, interactionType, transform }) => { if (generation === demoModelGeneration && status) { const target = runtimeForControls?.listInteractionTargets().find((item) => item.targetId === targetId); const position = target?.openVerb === 'Lift' ? (target.isOpen ? (target.isFullyOpen ? 'raised' : 'partially raised') : 'lowered') : target?.openVerb === 'Pull out' ? (target.isOpen ? (target.isFullyOpen ? 'pulled out' : 'partially pulled out') : 'pushed in') : (target?.isOpen ? (target.isFullyOpen ? 'open' : 'partially open') : 'closed'); status.textContent = `${targetName} ${interactionType === 'turn' ? `turned to ${transform?.rotationY?.toFixed(2) ?? 'a new position'}` : interactionType === 'open' ? `is ${position}` : 'pressed'} in local preview.${interactionType === 'turn' || interactionType === 'press' ? ' Device settings are not simulated.' : ''}${composite ? ' Scoring requires an approved learner session.' : ''}`; } }, onInteractionBlocked: ({ message }) => { if (generation === demoModelGeneration && status) status.textContent = message; } });
+      // Touch and pen hover is cleared immediately after release. Keep the
+      // completed action visible until another interaction or an error occurs.
+      if (selectionChanged || (hoverChanged && modelState.hoveredInteractionTargetId) || (focusChanged && modelState.focusedInteractionTargetId) || (lastInteractionFeedback && status.textContent !== lastInteractionFeedback) || modelState.pressedInteractionTargetId || modelState.interactionMessage) lastInteractionFeedback = undefined;
+      if (lastInteractionFeedback && !modelState.errorMessage && (modelState.phase === 'READY' || modelState.phase === 'REDUCED_COMPLEXITY')) { status.textContent = lastInteractionFeedback; return; }
+      const hoveredTarget = modelState.hoveredInteractionTargetId ? runtimeForControls?.listInteractionTargets().find(target => target.targetId === modelState.hoveredInteractionTargetId) : undefined;
+      const hoverHint = hoveredTarget?.interactionType === 'open' ? `drag to move, or click to ${hoveredTarget.openVerb.toLowerCase()} or ${hoveredTarget.closeVerb.toLowerCase()}.` : hoveredTarget?.interactionType === 'turn' ? 'drag to turn.' : 'press and release.';
+      const keyboardFocus = modelState.focusedInteractionTargetId && (!modelState.hoveredInteractionTargetId || modelState.hoveredInteractionTargetId === modelState.focusedInteractionTargetId);
+      status.textContent = modelState.interactionMessage ?? (modelState.pressedInteractionTargetId ? `Holding ${modelState.pressedInteractionTargetName ?? modelState.pressedInteractionTargetId} · release to finish.` : keyboardFocus ? `Keyboard focus on ${modelState.focusedInteractionTargetName ?? modelState.focusedInteractionTargetId} · ${modelState.focusedInteractionType === 'turn' ? 'hold Shift and use the arrow keys to turn.' : modelState.focusedInteractionType === 'open' ? 'press Enter or Space to open or close; hold Shift and use the arrow keys to move gradually.' : 'press Enter or Space to activate.'}` : modelState.hoveredInteractionTargetId ? `Over ${modelState.hoveredInteractionTargetName ?? modelState.hoveredInteractionTargetId} · ${hoverHint}` : modelState.phase === 'READY' ? (composite ? 'Scene ready · source-bound video + Babylon model.' : 'Ready · drag to rotate, wheel to zoom, select a component, or press a tagged control.') : modelState.phase === 'LOADING' ? 'Loading approved 3D model…' : modelState.phase === 'REDUCED_COMPLEXITY' ? 'Model loaded · reduced-complexity path active.' : `${modelState.phase}: ${modelState.errorMessage ?? 'Model preview unavailable.'}`);
+    }, onInteractionTargetActivated: ({ targetId, targetName, componentId, interactionType, moving, transform }) => { if (generation === demoModelGeneration && status) { const warmerLevel = nxstageReviewModel && interactionType === 'press' ? updateNxstageWarmerPreview(targetId) : undefined; const target = runtimeForControls?.listInteractionTargets().find((item) => item.targetId === targetId); const position = target?.openVerb === 'Lift' ? (target.isOpen ? (target.isFullyOpen ? 'raised' : 'partially raised') : 'lowered') : target?.openVerb === 'Pull out' ? (target.isOpen ? (target.isFullyOpen ? 'pulled out' : 'partially pulled out') : 'pushed in') : (target?.isOpen ? (target.isFullyOpen ? 'open' : 'partially open') : 'closed'); const displayPosition = target?.openVerb === 'Set on' ? (target.isOpen ? 'in the on position (power not simulated)' : 'in the off position (power not simulated)') : position; const completed = `${targetName} ${interactionType === 'turn' ? `turned to ${transform?.rotationY?.toFixed(2) ?? 'a new position'}` : interactionType === 'open' ? `is ${displayPosition}` : 'pressed'} in local preview.${interactionType === 'turn' || interactionType === 'press' ? ' Device settings are not simulated.' : ''}${warmerLevel !== undefined ? ` Illustrative warmer bars: ${warmerLevel} of 9; power, temperature and heating are not simulated.` : ''}${composite ? ' Scoring requires an approved learner session.' : ''}`; const movingMessage = target?.openVerb === 'Set on' ? `${targetName} is moving toward the ${target.isOpen ? 'on' : 'off'} position (power not simulated).` : `${targetName} is moving to its ${position} position.`; pendingMotionFeedback = moving && interactionType === 'open' ? { componentId, moving: movingMessage, completed } : undefined; status.textContent = pendingMotionFeedback?.moving ?? completed; lastInteractionFeedback = status.textContent; } }, onInteractionBlocked: ({ message }) => { if (generation === demoModelGeneration && status) { pendingMotionFeedback = undefined; status.textContent = message; lastInteractionFeedback = message; } }, onInteractionMotionFinished: (componentId) => { if (generation === demoModelGeneration && status && pendingMotionFeedback?.componentId === componentId) { if (status.textContent === pendingMotionFeedback.moving) { status.textContent = pendingMotionFeedback.completed; lastInteractionFeedback = status.textContent; } pendingMotionFeedback = undefined; } } });
     if (generation !== demoModelGeneration) { runtime.dispose(); return; }
     demoModelRuntime = runtime;
+    demoReviewManifest = nxstageReviewModel ? sceneBinding?.modelManifest : undefined;
     runtimeForControls = runtime;
+    if (nxstageReviewModel && !composite) runtime.fitModel();
     if (composite && state.sceneInteractive) {
       const panel = document.createElement('div');
       panel.className = 'scene-named-controls';
       canvas.closest('.training-scene')?.insertAdjacentElement('afterend', panel);
     }
     if (!composite || state.sceneInteractive) addNamedModelControls(canvas, runtime);
+    if (composite && state.sceneInteractive && nxstageReviewModel && sceneBinding) addReviewSceneViews(canvas, runtime, sceneBinding.modelManifest);
     if (composite && state.videoPlaying) void video?.play().catch(() => undefined);
   } catch (error) {
     if (generation === demoModelGeneration && status) status.textContent = `3D preview unavailable · ${error instanceof Error ? error.message : 'runtime error'}`;
@@ -471,7 +586,14 @@ async function initDemoModel() {
 
 function render() {
   if (demoModelRuntime) { demoModelRuntime.dispose(); demoModelRuntime = undefined; demoModelGeneration += 1; }
+  demoReviewManifest = undefined;
   app.innerHTML = state.view === 'creator' ? renderCreator() : state.view === 'learner' ? renderLearner() : renderLesson();
+  if (state.demoSource && nxstageDemoReview && (state.creatorStep === 'model' || state.backgroundMode !== 'CINEMATIC')) {
+    const notice = document.createElement('p');
+    notice.className = 'visual-review-notice';
+    notice.textContent = 'Visual review: dimensions and hidden geometry are estimates. The cartridge chamber is simplified; treatment and power are not simulated.';
+    app.prepend(notice);
+  }
   bindActions();
   void initDemoModel();
 }
@@ -582,6 +704,16 @@ function bindActions() {
     }
     if (action === 'simulate-upload') {
       if (element.dataset.kind === 'photos') {
+        // A new sample-photo workflow should open the corrected visual review.
+        // Existing saved demos keep their original binding until explicitly
+        // choosing the sample again or following the review link.
+        if (!nxstageDemoReview) {
+          const url = new URL(window.location.href);
+          url.searchParams.set('model', 'nxstage-review');
+          window.history.replaceState(window.history.state, '', url);
+          nxstageDemoReview = true;
+        }
+        if (state.narrationText === defaultState.narrationText) state.narrationText = 'Explore the System One control panel, handle, doors and PureFlow cabinet in this visual review. The cartridge chamber is simplified; treatment, fluid operation and electrical power are not simulated.';
         const names = Array.from({ length: 24 }, (_, index) => `aurora-view-${String(index + 1).padStart(2, '0')}.png`);
         const previews = Array.from({ length: 8 }, (_, index) => `/demo-assets/view-${String(index).padStart(3, '0')}.png`);
         startConversion(names, 'photos', previews, true);
@@ -590,7 +722,7 @@ function bindActions() {
     if (action === 'approve-demo-candidate') {
       if (!state.demoSource || state.pipelinePhase !== 'REVIEW_REQUIRED') { showToast('Only a review-required candidate can be approved'); return; }
       state.pipelinePhase = 'APPROVED';
-      state.reviewRationale = 'Demo reviewer approved the measured candidate for scene preview.';
+      state.reviewRationale = nxstageDemoReview ? 'Visual review opened; this reconstruction remains unmeasured.' : 'Demo reviewer approved the measured candidate for scene preview.';
       saveState();
       render();
       showToast('Candidate approved — the Babylon model is now available');
@@ -642,6 +774,23 @@ function bindActions() {
     if (action === 'select-demo-component') { const component = element.dataset.component; if (component && demoModelRuntime) demoModelRuntime.frameComponent(component); const status = app.querySelector<HTMLElement>('#demo-model-status'); if (status) status.textContent = `Showing ${element.textContent?.trim() ?? 'component'} · drag to inspect, or reset the view.`; }
     if (action === 'reset-demo-model') { demoModelRuntime?.resetView(); }
     if (action === 'toggle-video') { state.videoPlaying = !state.videoPlaying; render(); }
+    if (action === 'play-walkthrough') {
+      const scene = element.closest('.training-scene');
+      const video = scene?.querySelector<HTMLVideoElement>('#training-video');
+      if (!video) return;
+      state.videoPlaying = true;
+      saveState();
+      if (video.currentTime >= 3.5) { video.currentTime = 0; scene?.classList.remove('room-reveal'); }
+      void video.play().then(() => {
+        element.hidden = true;
+        scene?.classList.add('is-playing');
+      }).catch(() => {
+        state.videoPlaying = false;
+        saveState();
+        const status = scene?.querySelector<HTMLElement>('#demo-model-status');
+        if (status) status.textContent = 'Playback was blocked. Press Play walkthrough again.';
+      });
+    }
     if (action === 'generate-background') {
       const prompt = app.querySelector<HTMLTextAreaElement>('#background-prompt')?.value.trim() ?? '';
       if (!prompt) { showToast('Describe the background before generating'); return; }
@@ -660,6 +809,21 @@ function bindActions() {
     }
     if (action === 'cancel-background') { backgroundRequestToken += 1; state.backgroundStatus = 'IDLE'; state.backgroundApproved = false; state.backgroundGenerationId = ''; state.backgroundJobId = ''; state.backgroundProgress = 0; state.backgroundPreviewUrl = ''; state.narrationUrl = ''; saveState(); render(); showToast('Background generation cancelled'); }
     if (action === 'approve-background') { if (state.backgroundStatus !== 'REVIEW_REQUIRED') { showToast('Generate a draft before approving it'); return; } if (configuredOpenMontageApiBase() && !state.narrationUrl) { showToast('Review the generated narration before approving the background'); return; } state.backgroundApproved = true; saveState(); render(); showToast('Background and narration approved for authoring — publication remains subject to course review'); }
+    if (action === 'toggle-review-explore') {
+      const scene = element.closest('.training-scene');
+      const canvas = scene?.querySelector<HTMLCanvasElement>('#demo-scene-canvas');
+      if (!state.sceneInteractive || !scene || !canvas || !demoModelRuntime) return;
+      const exploring = !scene.classList.contains('review-explore');
+      scene.classList.toggle('review-explore', exploring);
+      demoModelRuntime.setCameraInteractive(exploring);
+      if (exploring) demoModelRuntime.fitModel(); else demoModelRuntime.resetView();
+      element.textContent = exploring ? 'Return to scene' : 'Explore model';
+      element.setAttribute('aria-pressed', String(exploring));
+      const views = app.querySelector<HTMLElement>('.scene-review-views');
+      if (views) views.hidden = !exploring;
+      const status = app.querySelector<HTMLElement>('#demo-model-status');
+      if (status) status.textContent = exploring ? 'Explore the model. Drag to rotate or focus a control group.' : 'Returned to the aligned scene.';
+    }
     if (action === 'toggle-scene-interaction') {
       state.sceneInteractive = !state.sceneInteractive;
       saveState();
@@ -672,15 +836,26 @@ function bindActions() {
         return;
       }
       demoModelRuntime.setInteractionEnabled(state.sceneInteractive);
+      demoModelRuntime.setCameraInteractive(state.sceneInteractive && !(nxstageDemoReview && state.demoSource));
       scene.classList.toggle('interactive', state.sceneInteractive);
+      if (!state.sceneInteractive && nxstageDemoReview && state.demoSource) { scene.classList.remove('review-explore'); demoModelRuntime.resetView(); }
       element.setAttribute('aria-pressed', String(state.sceneInteractive));
       element.textContent = state.sceneInteractive ? 'Exit model interaction' : 'Interact with model';
+      const exploreButton = scene.querySelector<HTMLButtonElement>('[data-action="toggle-review-explore"]');
+      if (exploreButton) { exploreButton.hidden = !state.sceneInteractive; exploreButton.textContent = 'Explore model'; exploreButton.setAttribute('aria-pressed', 'false'); }
       app.querySelector('.scene-named-controls')?.remove();
       if (state.sceneInteractive) {
+        const walkthroughVideo = scene.classList.contains('photoreal-walkthrough') ? scene.querySelector<HTMLVideoElement>('#training-video') : undefined;
+        if (walkthroughVideo) {
+          walkthroughVideo.pause();
+          walkthroughVideo.currentTime = 3.5;
+          scene.classList.add('room-reveal');
+        }
         const panel = document.createElement('div');
         panel.className = 'scene-named-controls';
         scene.insertAdjacentElement('afterend', panel);
         addNamedModelControls(canvas, demoModelRuntime);
+        if (nxstageDemoReview && state.demoSource && demoReviewManifest) addReviewSceneViews(canvas, demoModelRuntime, demoReviewManifest);
       }
     }
     if (action === 'open-generated-lesson') { state.view = 'lesson'; state.currentLesson = Math.min(1, state.modules.length - 1); state.answer = 'idle'; saveState(); render(); }

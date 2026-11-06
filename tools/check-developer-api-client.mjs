@@ -1,0 +1,45 @@
+import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
+import { createTrainingClient, prepareModelAction, TrainingApiError } from '../packages/api-client/dist/index.js';
+import { modelInteractionOptions, validateBrowserModelManifest } from '../packages/model-runtime/dist/index.js';
+
+let context={identity:'account-1',organizationId:'org-1'}, token='token-1', reply, sent=[];
+const client=createTrainingClient({baseUrl:'https://training.example.test',getContext:()=>context,getAccessToken:async()=>token,
+  fetch:async request=>{sent.push(request);return reply(request);}});
+reply=()=>Response.json({items:[],nextCursor:null});
+await client.listEnrollments();
+assert.equal(sent.at(-1).headers.get('authorization'),'Bearer token-1');assert.equal(sent.at(-1).headers.get('x-organization-id'),'org-1');
+assert.equal(sent.at(-1).credentials,'omit');assert.equal(sent.at(-1).redirect,'error');assert.equal(sent.at(-1).cache,'no-store');
+token='renewed';await client.listEnrollments();assert.equal(sent.at(-1).headers.get('authorization'),'Bearer renewed');
+await client.getAuthConfig();assert.equal(sent.at(-1).headers.get('authorization'),null);
+const action=prepareModelAction({releaseBindingId:'binding',modelVersionId:'model'},{nextSequence:1},{type:'request_hint'});
+reply=()=>Response.json({status:'invalid_precondition',nextSequence:1,feedback:'Open the handle first.'});
+assert.equal((await client.submitAction('session:1',action)).status,'invalid_precondition');
+await client.submitAction('session:1',action);
+assert.equal(sent.at(-1).headers.get('idempotency-key'),action.clientActionId);
+assert.deepEqual(await sent.at(-1).clone().json(),await sent.at(-2).clone().json());
+reply=()=>Response.json({error:{code:'SUSPENDED',message:'Access is suspended.'}},{status:403,headers:{'X-Correlation-Id':'corr:test'}});
+await assert.rejects(client.getEnrollment('enrollment'),error=>error instanceof TrainingApiError&&error.status===403&&error.code==='SUSPENDED'&&error.correlationId==='corr:test'&&!error.retryable);
+reply=()=>Response.json({error:{code:'BUSY',message:'Try later.'}},{status:429,headers:{'Retry-After':'12'}});
+await assert.rejects(client.getEnrollment('enrollment'),error=>error.retryAfterSeconds===12&&error.retryable);
+reply=()=>new Response('{invalid');await assert.rejects(client.listEnrollments(),error=>error.code==='INVALID_API_RESPONSE');
+let count=sent.length;reply=()=>{throw new TypeError('network')};await assert.rejects(client.submitAction('session',action),error=>error.code==='NETWORK_ERROR'&&error.retryable);assert.equal(sent.length,count+1,'A mutation must never be automatically replayed');
+reply=()=>{context={identity:'account-2',organizationId:'org-1'};return Response.json({items:[]});};
+await assert.rejects(client.listEnrollments(),error=>error.code==='SESSION_CONTEXT_CHANGED');
+context={identity:'account-1',organizationId:'org-1'};
+const switching=createTrainingClient({baseUrl:'https://training.example.test',getContext:()=>context,getAccessToken:async()=>{context={identity:'account-1',organizationId:'org-2'};return token;},fetch:async()=>{throw Error('Should not send');}});
+await assert.rejects(switching.listEnrollments(),error=>error.code==='SESSION_CONTEXT_CHANGED');
+const abort=new AbortController();reply=async request=>{abort.abort();throw request.signal.reason;};
+await assert.rejects(client.listEnrollments(undefined,abort.signal),error=>error.name==='AbortError');
+assert.throws(()=>createTrainingClient({baseUrl:'http://not-loopback.test',getContext:()=>context,getAccessToken:()=>token}));
+
+const manifest=validateBrowserModelManifest(JSON.parse(await readFile(new URL('../fixtures/nxstage-system-one-rear-outlet-depth-review/model-manifest.json',import.meta.url),'utf8')));
+const state={completed:false,transforms:Object.fromEntries(manifest.components.map(component=>[component.componentId,{rotationY:0,translationX:0}]))};
+let choices=modelInteractionOptions(manifest,state);
+const tub=choices.find(choice=>choice.componentId==='pureflow-tub'&&choice.transform?.translationX);
+assert.equal(tub.enabled,false);assert.match(tub.blockedReason,/door/i);
+const door=choices.find(choice=>choice.componentId==='nxstage-cabinet-door'&&choice.transform?.rotationY);
+assert.equal(door.enabled,true);Object.assign(state.transforms[door.componentId],door.transform);
+choices=modelInteractionOptions(manifest,state);assert.equal(choices.find(choice=>choice.componentId==='pureflow-tub'&&choice.transform?.translationX).enabled,true);
+assert(modelInteractionOptions(manifest,{...state,completed:true}).every(choice=>!choice.enabled));
+console.log('Developer API client passed: typed transport behavior, structured failures, renewal/context fences, stable retry IDs, cancellation and shared NxStage availability.');

@@ -5,7 +5,10 @@ import { createGlbModelManifest } from "../packages/model-runtime/dist/glb-manif
 import { validateBrowserModelManifest } from "../packages/model-runtime/dist/browser.js";
 import { validateTrainingSceneManifest } from "../packages/contracts/dist/scene-manifest.js";
 
-const folder = "fixtures/nxstage-system-one-interaction-review";
+const folder = process.env.NXSTAGE_REVIEW_MODEL_FOLDER ?? "fixtures/nxstage-system-one-interaction-review";
+const expectedVersion = process.env.NXSTAGE_EXPECTED_MODEL_VERSION ?? "preview:nxstage-system-one-interaction-review-v3";
+const expectedVentCount = Number(process.env.NXSTAGE_EXPECTED_VENT_COUNT ?? 15);
+const background = process.env.NXSTAGE_REVIEW_BACKGROUND_PATH ?? "fixtures/nxstage-system-one-interaction-review/office-background-review.mp4";
 const bytes = await readFile(`${folder}/nxstage-system-one.glb`);
 const hash = createHash("sha256").update(bytes).digest("hex");
 const manifest = validateBrowserModelManifest(JSON.parse(await readFile(`${folder}/model-manifest.json`, "utf8")));
@@ -14,13 +17,24 @@ const imported = createGlbModelManifest(bytes, hash, data => createHash("sha256"
 const jsonChunkLength = bytes.readUInt32LE(12);
 const document = JSON.parse(bytes.subarray(20, 20 + jsonChunkLength).toString("utf8"));
 const nodes = document.nodes ?? [];
+for (const name of ["Cycler rear raised enclosure", "IV pole rear section"]) {
+  const node = nodes.find(item => item.name === name);
+  assert(node && !node.extras?.interactionTargetId, `${name} must be a fixed visual detail`);
+}
+const casterHubs = nodes.filter(node => /^Front caster hub(?:\.\d+)?$/.test(node.name ?? ""));
+const casterWheels = nodes.filter(node => /^Caster wheel(?:\.\d+)?$/.test(node.name ?? ""));
+assert.equal(casterHubs.length, 2, "The front wheels must have two hubs");
+for (const hub of casterHubs) {
+  const position = hub.translation;
+  assert(position?.length === 3 && casterWheels.some(wheel => wheel.translation && Math.abs(wheel.translation[0] - position[0]) < 1e-5 && Math.abs(wheel.translation[1] - position[1]) < 1e-5 && Math.abs(wheel.translation[2] - position[2]) < .11), `${hub.name} must be aligned with a front wheel`);
+}
 const doorIndex = nodes.findIndex(node => node.name === "Cycler door assembly");
 assert(doorIndex >= 0, "The cycler door assembly must exist");
 const descendants = new Set();
 const visit = index => { if (descendants.has(index)) return; descendants.add(index); for (const child of nodes[index].children ?? []) visit(child); };
 visit(doorIndex);
 const vents = nodes.map((node, index) => ({node, index})).filter(item => item.node.name?.startsWith("Cycler arched front vent "));
-assert.equal(vents.length, 15, "The front has one row of fifteen arched vent slots");
+assert.equal(vents.length, expectedVentCount, "The front must have the expected number of arched vent slots");
 assert(vents.every(({node,index}) => descendants.has(index) && !node.extras?.interactionTargetId), "Vents must travel with the door and must not become controls");
 const recessIndex = nodes.findIndex(node => node.name === "Central recessed face");
 assert(recessIndex >= 0 && descendants.has(recessIndex) && nodes[recessIndex].extras?.decorative && !nodes[recessIndex].extras?.interactionTargetId, "The curved face must move with the door without becoming a separate control");
@@ -41,8 +55,8 @@ for (const name of ["Lower right equipment housing", "Lower right equipment cove
 assert.equal(manifest.sourceHash, hash, "The review manifest must match the model bytes");
 assert.equal(scene.model.sourceHash, hash, "The review scene must match the same model");
 assert.equal(scene.model.modelVersionId, manifest.modelVersionId, "The review scene must match the model version");
-assert.equal(scene.video.sourceHash, createHash("sha256").update(await readFile("fixtures/nxstage-system-one/nxstage-office-background-photo-openmontage.mp4")).digest("hex"), "The review scene must match its background video");
-assert.equal(manifest.modelVersionId, "preview:nxstage-system-one-interaction-review-v1");
+assert.equal(scene.video.sourceHash, createHash("sha256").update(await readFile(background)).digest("hex"), "The review scene must match its background video");
+assert.equal(manifest.modelVersionId, expectedVersion);
 assert.equal(scene.production, undefined, "An unmeasured review must not carry production approval");
 const target = (component, id) => manifest.components.find(c => c.componentId === component)?.interactionTargets?.find(t => t.targetId === id);
 const kind = t => t?.interactionType ?? (t?.pressDepthMeters !== undefined ? "press" : undefined);

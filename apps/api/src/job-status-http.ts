@@ -1,4 +1,5 @@
 import type {createMediaReviewService} from './media-review-service.js';
+import { learnerOpenApi } from '@medical-device/contracts';
 import type {createReconstructionService} from './reconstruction-service.js';
 import type {MediaAssetService} from './media-asset-service.js';
 import type {createModelImportService} from './model-import-service.js';
@@ -151,6 +152,16 @@ function writeHtml(response: ServerResponse, statusCode: number, body: string) {
 }
 
 const staticFiles: Record<string, { file: string; contentType: string; binary?: boolean }> = {
+  '/developer/api': { file: 'api-docs.html', contentType: 'text/html; charset=utf-8' },
+  '/developer/api-docs.js': { file: 'api-docs.js', contentType: 'text/javascript; charset=utf-8' },
+  '/developer/training-viewer.js': { file: 'training-viewer.js', contentType: 'text/javascript; charset=utf-8' },
+  '/developer/starter': { file: 'developer-starter.html', contentType: 'text/html; charset=utf-8' },
+  '/developer/developer-starter.js': { file: 'developer-starter.js', contentType: 'text/javascript; charset=utf-8' },
+  '/developer/training-viewer.d.ts': { file: 'training-viewer.d.ts', contentType: 'text/plain; charset=utf-8' },
+  '/developer/client.tgz': {file:'medical-device-api-client-0.1.0.tgz',contentType:'application/gzip',binary:true},
+  '/developer/guide': {file:'developer-integration.md',contentType:'text/plain; charset=utf-8'},
+  '/developer/starter-source': {file:'developer-starter.ts',contentType:'text/plain; charset=utf-8'},
+  '/developer/nxstage-review.json': {file:'nxstage-familiarization.review.json',contentType:'application/json; charset=utf-8'},
   '/author/candidate-workbench.js': {file:'candidate-workbench.js',contentType:'text/javascript; charset=utf-8'},
   '/author/author-model-runtime.js': {file:'author-model-runtime.js',contentType:'text/javascript; charset=utf-8'},
   '/learner/author-model-runtime.js': {file:'author-model-runtime.js',contentType:'text/javascript; charset=utf-8'},
@@ -195,6 +206,7 @@ const staticFiles: Record<string, { file: string; contentType: string; binary?: 
   "/model/nxstage-system-one.glb": { file: "model/nxstage-system-one.glb", contentType: "model/gltf-binary", binary: true },
   "/model/nxstage-system-one-manifest.json": { file: "model/nxstage-system-one-manifest.json", contentType: "application/json; charset=utf-8" },
   "/model/nxstage-training-scene-manifest.json": { file: "model/nxstage-training-scene-manifest.json", contentType: "application/json; charset=utf-8" },
+  "/model/nxstage-review-scene.json": { file: "model/nxstage-review-scene.json", contentType: "application/json; charset=utf-8" },
   "/model/nxstage-cinematic-source.glb": { file: "model/nxstage-cinematic-source.glb", contentType: "model/gltf-binary", binary: true },
   "/model/nxstage-cinematic-source-manifest.json": { file: "model/nxstage-cinematic-source-manifest.json", contentType: "application/json; charset=utf-8" },
   "/model/nxstage-cinematic-scene-manifest.json": { file: "model/nxstage-cinematic-scene-manifest.json", contentType: "application/json; charset=utf-8" },
@@ -221,6 +233,8 @@ const staticFiles: Record<string, { file: string; contentType: string; binary?: 
   "/learner/model-manifest.json": { file: "model-manifest.json", contentType: "application/json; charset=utf-8" },
   "/learner/model-manifest.mobile.json": { file: "model-manifest.mobile.json", contentType: "application/json; charset=utf-8" },
   "/learner/model-manifest.reduced.json": { file: "model-manifest.reduced.json", contentType: "application/json; charset=utf-8" },
+  "/learner/nxstage-review-manifest.json": { file: "model/nxstage-review-manifest.json", contentType: "application/json; charset=utf-8" },
+  "/learner/model/nxstage-review.glb": { file: "model/nxstage-review.glb", contentType: "model/gltf-binary", binary: true },
   "/learner/model/optimization-report.json": { file: "model/optimization-report.json", contentType: "application/json; charset=utf-8" },
   "/learner/model/aurora-infusion-controller.mobile.glb": { file: "model/aurora-infusion-controller.mobile.glb", contentType: "model/gltf-binary", binary: true },
   "/learner/model/aurora-infusion-controller.reduced.glb": { file: "model/aurora-infusion-controller.reduced.glb", contentType: "model/gltf-binary", binary: true },
@@ -316,7 +330,7 @@ function modelAssetPath(pathname: string): { releaseId: string; modelVersionId: 
   return releaseId && modelVersionId ? { releaseId, modelVersionId } : null;
 }
 
-function modelSessionPath(pathname: string, action?: "actions"): string | null {
+function modelSessionPath(pathname: string, action?: "actions" | "debrief"): string | null {
   const parts = pathParts(pathname);
   if (!parts || parts.length !== (action ? 5 : 4) || parts[2] !== "model-sessions" || (action && parts[4] !== action)) return null;
   return decodePathSegment(parts[3]);
@@ -525,6 +539,16 @@ export function createJobStatusHttpServer(options: JobStatusHttpOptions): Server
 
     try {
       const url = new URL(request.url ?? "/", "http://localhost");
+      if (request.method === 'GET' && url.pathname === '/' && options.staticRoot) {
+        // MSAL's redirect bridge can return to the application homepage.
+        response.writeHead(302, {Location: '/signin'});
+        response.end();
+        return;
+      }
+      if (url.pathname === '/api/v1/openapi.json') {
+        if (request.method !== 'GET') { writeJson(response, 405, errorBody('METHOD_NOT_ALLOWED', 'Use GET.'), origin); return; }
+        writeJson(response, 200, learnerOpenApi, origin); return;
+      }
       if(url.pathname==='/api/v1/catalog'||url.pathname.startsWith('/api/v1/catalog/')){
         if(request.method!=='GET'){writeJson(response,405,errorBody('METHOD_NOT_ALLOWED','Use GET to browse courses.'),origin);return;}
         if(request.headers.origin&&!origin){writeJson(response,403,errorBody('CORS_ORIGIN_DENIED','Origin is not allowed.'));return;}
@@ -560,18 +584,32 @@ export function createJobStatusHttpServer(options: JobStatusHttpOptions): Server
       if (request.method === "GET" && options.staticRoot && staticFiles[url.pathname]) {
         const staticFile = staticFiles[url.pathname];
         try {
-          const contents = await readFile(join(options.staticRoot, staticFile.file));
+          const acceptsGzip = String(request.headers['accept-encoding'] ?? '').split(',').some(value => {
+            const [name, ...parameters] = value.trim().toLowerCase().split(';').map(part => part.trim());
+            const quality = parameters.find(part => part.startsWith('q='));
+            const q = quality === undefined ? 1 : Number(quality.slice(2));
+            return name === 'gzip' && Number.isFinite(q) && q > 0 && q <= 1;
+          });
+          const filePath = join(options.staticRoot, staticFile.file);
+          const compressed = acceptsGzip && staticFile.file.endsWith('.js')
+            ? await readFile(`${filePath}.gz`).catch(error => {if(error.code==='ENOENT')return undefined;throw error;}) : undefined;
+          const contents = compressed ?? await readFile(filePath);
           response.statusCode = 200;
           response.setHeader("Content-Type", staticFile.contentType);
+          response.setHeader('Vary', origin ? 'Origin, Accept-Encoding' : 'Accept-Encoding');
+          if (compressed) response.setHeader('Content-Encoding', 'gzip');
+          response.setHeader('Content-Length', contents.byteLength);
           setSecurityHeaders(response);
-          response.setHeader("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' blob: https://*.blob.core.windows.net; media-src 'self' blob: https://*.blob.core.windows.net; connect-src 'self' https://login.microsoftonline.com https://*.blob.core.windows.net; frame-ancestors 'none'");
+          // Babylon's bundled PBR lighting texture is an embedded data image.
+          const embeddedImages = url.pathname === '/learner/model' || url.pathname === '/demo' || url.pathname === '/developer/starter' ? ' data:' : '';
+          response.setHeader("Content-Security-Policy", `default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' blob:${embeddedImages} https://*.blob.core.windows.net; media-src 'self' blob: https://*.blob.core.windows.net; connect-src 'self' https://login.microsoftonline.com https://*.blob.core.windows.net; frame-ancestors 'none'`);
           if (options.browserAuthConfig) {
             const authorityOrigin = new URL(options.browserAuthConfig.authority).origin;
             const trustedOrigins=options.browserAuthConfig.knownAuthorities.map(host=>`https://${host}`).join(' ');
-            response.setHeader('Content-Security-Policy', `default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' blob: https://*.blob.core.windows.net; media-src 'self' blob: https://*.blob.core.windows.net; connect-src 'self' ${authorityOrigin} ${trustedOrigins} https://*.blob.core.windows.net; frame-src 'self' ${authorityOrigin} ${trustedOrigins}; frame-ancestors ${url.pathname==='/auth/redirect'?"'self'":"'none'"}`);
+            response.setHeader('Content-Security-Policy', `default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' blob:${embeddedImages} https://*.blob.core.windows.net; media-src 'self' blob: https://*.blob.core.windows.net; connect-src 'self' ${authorityOrigin} ${trustedOrigins} https://*.blob.core.windows.net; frame-src 'self' ${authorityOrigin} ${trustedOrigins}; frame-ancestors ${url.pathname==='/auth/redirect'?"'self'":"'none'"}`);
           }
           if(url.pathname==='/auth/redirect')response.setHeader('X-Frame-Options','SAMEORIGIN');
-          response.end(staticFile.binary ? contents : contents.toString("utf8"));
+          response.end(contents);
         } catch {
           writeJson(response, 404, errorBody("NOT_FOUND", "The requested resource was not found."), origin);
         }
@@ -604,6 +642,7 @@ export function createJobStatusHttpServer(options: JobStatusHttpOptions): Server
       const modelSessionStart = request.method === "POST" && modelSessionStartPath(url.pathname);
       const modelSessionActionId = request.method === "POST" ? modelSessionPath(url.pathname, "actions") : null;
       const modelSessionGetId = request.method === "GET" ? modelSessionPath(url.pathname) : null;
+      const modelSessionDebriefId = request.method === "GET" ? modelSessionPath(url.pathname, "debrief") : null;
       const isUploadRoute = uploadCreateOrganizationId !== null || uploadCompleteId !== null || uploadCancelId !== null || uploadContentId !== null;
       const isDraftRoute = draftCourseVersionId !== null;
       const isCourseCollection = url.pathname === "/api/v1/courses";
@@ -639,7 +678,7 @@ export function createJobStatusHttpServer(options: JobStatusHttpOptions): Server
       const sourceDetailId = sourceParts?.length === 4 && sourceParts[2] === "knowledge-sources" ? decodeURIComponent(sourceParts[3]) : null;
       const isReviewRoute = reviewCourseVersionId !== null || publishCourseVersionId !== null || reviseCourseVersionId!==null;
       const isModelAssetRoute = modelAssetRequest !== null;
-      const isModelSessionRoute = modelSessionStart || modelSessionActionId !== null || modelSessionGetId !== null;
+      const isModelSessionRoute = modelSessionStart || modelSessionActionId !== null || modelSessionGetId !== null || modelSessionDebriefId !== null;
       const isGet = request.method === "GET";
       const isRetry = request.method === "POST";
       const jobId = isGet ? jobIdFromPath(url.pathname) : jobIdFromPath(url.pathname, "retry");
@@ -1047,7 +1086,7 @@ export function createJobStatusHttpServer(options: JobStatusHttpOptions): Server
           }
           if(!isObject(body)||Object.keys(body).length)throw new Error('CREDENTIAL_REQUEST_INVALID');
           writeJson(response,200,await options.credentialService.issue(tenant,decodeURIComponent(assessmentParts![3])),origin);
-        }catch(error){const code=error instanceof Error?error.message:'';const status=code==='CREDENTIAL_EMAIL_VERIFICATION_REQUIRED'?403:code==='CREDENTIAL_NOT_FOUND'?404:['CREDENTIAL_RELEASE_SUPERSEDED','CREDENTIAL_CHANGE_NOT_EFFECTIVE','CREDENTIAL_CHANGE_INVALID','CREDENTIAL_SHARING_CONFLICT','CREDENTIAL_SHARING_NOT_ALLOWED','CREDENTIAL_REQUIREMENTS_NOT_MET','CREDENTIAL_ALREADY_REVOKED','CREDENTIAL_ALREADY_SUPERSEDED','CREDENTIAL_REPLACEMENT_INVALID','IDEMPOTENCY_KEY_REUSED'].includes(code)?409:code==='CREDENTIAL_REQUEST_INVALID'||error instanceof SyntaxError?422:500;writeJson(response,status,errorBody(status===500?'CREDENTIAL_FAILED':code,code==='CREDENTIAL_EMAIL_VERIFICATION_REQUIRED'?'Create your personal profile and sign in with a verified email before receiving a credential.':code==='CREDENTIAL_REQUIREMENTS_NOT_MET'?'The published certification requirements have not been met.':'The credential request could not be completed.'),origin);}
+        }catch(error){const code=error instanceof Error?error.message:'';const status=code==='CREDENTIAL_EMAIL_VERIFICATION_REQUIRED'?403:code==='CREDENTIAL_NOT_FOUND'?404:['CREDENTIAL_ISSUANCE_DISABLED','CREDENTIAL_RELEASE_SUPERSEDED','CREDENTIAL_CHANGE_NOT_EFFECTIVE','CREDENTIAL_CHANGE_INVALID','CREDENTIAL_SHARING_CONFLICT','CREDENTIAL_SHARING_NOT_ALLOWED','CREDENTIAL_REQUIREMENTS_NOT_MET','CREDENTIAL_ALREADY_REVOKED','CREDENTIAL_ALREADY_SUPERSEDED','CREDENTIAL_REPLACEMENT_INVALID','IDEMPOTENCY_KEY_REUSED'].includes(code)?409:code==='CREDENTIAL_REQUEST_INVALID'||error instanceof SyntaxError?422:500;writeJson(response,status,errorBody(status===500?'CREDENTIAL_FAILED':code,code==='CREDENTIAL_EMAIL_VERIFICATION_REQUIRED'?'Create your personal profile and sign in with a verified email before receiving a credential.':code==='CREDENTIAL_REQUIREMENTS_NOT_MET'?'The published certification requirements have not been met.':code==='CREDENTIAL_ISSUANCE_DISABLED'?'This familiarization course does not issue credentials.':'The credential request could not be completed.'),origin);}
         return;
       }
       if(isLearnerSimulation) {
@@ -1339,6 +1378,13 @@ export function createJobStatusHttpServer(options: JobStatusHttpOptions): Server
       if (isModelSessionRoute) {
         if (!options.modelSessionService) {
           writeJson(response, 503, errorBody("MODEL_SESSION_UNAVAILABLE", "The model activity session is not available."), origin);
+          return;
+        }
+        if (modelSessionDebriefId !== null) {
+          if (url.search) { writeJson(response, 422, errorBody('VALIDATION_ERROR', 'Debrief does not accept query parameters.'), origin); return; }
+          if (!options.modelSessionService.debrief) { writeJson(response, 503, errorBody('MODEL_DEBRIEF_UNAVAILABLE', 'The activity debrief is unavailable.'), origin); return; }
+          const debrief = await options.modelSessionService.debrief(tenant, modelSessionDebriefId);
+          writeJson(response, debrief ? 200 : 404, debrief ?? errorBody('MODEL_SESSION_NOT_FOUND', 'The model activity session was not found.'), origin);
           return;
         }
         if (modelSessionStart) {

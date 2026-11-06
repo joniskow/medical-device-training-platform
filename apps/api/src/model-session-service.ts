@@ -1,4 +1,4 @@
-import type { TenantContext } from "@medical-device/contracts";
+import type { TenantContext, ModelInteractionOption, ModelSessionDebrief } from "@medical-device/contracts";
 
 export interface ModelSessionActionRequest {
   clientActionId: string;
@@ -29,9 +29,12 @@ export interface ModelSessionActionResult {
     completed: boolean;
     activeStepId?: string;
     activeStepTitle?: string;
+    activeStepInstructions?: string;
+    focusComponentId?: string;
     activeFaultId?: string;
     activeFaultTitle?: string;
     allowedActions: string[];
+    interactionOptions?: ModelInteractionOption[];
   };
   feedback: string;
   scoreDelta?: number;
@@ -70,6 +73,7 @@ export interface ModelSessionService {
   start(tenant: TenantContext, request: ModelSessionStartRequest, idempotencyKey: string): Promise<ModelSessionStartResult>;
   submit(tenant: TenantContext, sessionId: string, action: ModelSessionActionRequest, idempotencyKey: string): Promise<ModelSessionActionResult>;
   resume(tenant: TenantContext, sessionId: string, input: { releaseBindingId: string; modelVersionId: string; nextSequence: number }): Promise<ModelSessionActionResult | null>;
+  debrief?(tenant: TenantContext, sessionId: string): Promise<ModelSessionDebrief | null>;
 }
 
 export function sameModelSessionAction(left: ModelSessionActionRequest, right: ModelSessionActionRequest): boolean {

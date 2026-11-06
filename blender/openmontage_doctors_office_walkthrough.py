@@ -24,8 +24,8 @@ from mathutils import Vector
 bpy.ops.wm.read_factory_settings(use_empty=True)
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-OUT = os.path.join(ROOT, "output", "openmontage")
-MODEL_PATH = os.path.join(ROOT, "fixtures", "nxstage-system-one", "nxstage-system-one.glb")
+OUT = os.path.abspath(os.environ.get("OPENMONTAGE_OUT", os.path.join(ROOT, "output", "openmontage")))
+MODEL_PATH = os.path.abspath(os.environ.get("NXSTAGE_MODEL_PATH", os.path.join(ROOT, "fixtures", "nxstage-system-one", "nxstage-system-one.glb")))
 FPS = 24
 SECONDS = 6
 WIDTH = 960
@@ -411,7 +411,7 @@ def main():
         render_variant(os.path.join(OUT, "background", "frame-"), device, False)
         render_variant(os.path.join(OUT, "composite", "frame-"), device, True)
     model_hash = None
-    manifest_path = os.path.join(ROOT, "fixtures", "nxstage-system-one", "model-manifest.json")
+    manifest_path = os.path.abspath(os.environ.get("NXSTAGE_MANIFEST_PATH", os.path.join(ROOT, "fixtures", "nxstage-system-one", "model-manifest.json")))
     if os.path.exists(manifest_path):
         with open(manifest_path, "r", encoding="utf-8") as handle:
             model_hash = json.load(handle).get("sourceHash")
@@ -436,26 +436,27 @@ def main():
     composite_video = os.path.join(OUT, "nxstage-hallway-to-room-composite.mp4")
     encode_sequence(os.path.join(OUT, "background"), background_video)
     encode_sequence(os.path.join(OUT, "composite"), composite_video)
-    shutil.copyfile(
-        background_video,
-        os.path.join(ROOT, "fixtures", "nxstage-system-one", "nxstage-hallway-to-room-background-openmontage.mp4"),
-    )
-    shutil.copyfile(
-        composite_video,
-        os.path.join(ROOT, "fixtures", "nxstage-system-one", "nxstage-hallway-to-room-composite.mp4"),
-    )
-    # Keep the cinematic source fixture byte-identical to the model used for
-    # the render. This prevents the offline composite and packaged cinematic
-    # scene from silently drifting to an older foreground revision.
-    shutil.copyfile(
-        MODEL_PATH,
-        os.path.join(ROOT, "fixtures", "nxstage-system-one", "nxstage-cinematic-source.glb"),
-    )
-    if os.path.exists(manifest_path):
+    if os.environ.get("OPENMONTAGE_COPY_FIXTURES", "1") == "1":
         shutil.copyfile(
-            manifest_path,
-            os.path.join(ROOT, "fixtures", "nxstage-system-one", "nxstage-cinematic-source-manifest.json"),
+            background_video,
+            os.path.join(ROOT, "fixtures", "nxstage-system-one", "nxstage-hallway-to-room-background-openmontage.mp4"),
         )
+        shutil.copyfile(
+            composite_video,
+            os.path.join(ROOT, "fixtures", "nxstage-system-one", "nxstage-hallway-to-room-composite.mp4"),
+        )
+        # Keep the cinematic source fixture byte-identical to the model used for
+        # the render. This prevents the offline composite and packaged cinematic
+        # scene from silently drifting to an older foreground revision.
+        shutil.copyfile(
+            MODEL_PATH,
+            os.path.join(ROOT, "fixtures", "nxstage-system-one", "nxstage-cinematic-source.glb"),
+        )
+        if os.path.exists(manifest_path):
+            shutil.copyfile(
+                manifest_path,
+                os.path.join(ROOT, "fixtures", "nxstage-system-one", "nxstage-cinematic-source-manifest.json"),
+            )
 
 
 if __name__ == "__main__":

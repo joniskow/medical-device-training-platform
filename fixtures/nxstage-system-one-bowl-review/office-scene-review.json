@@ -1,0 +1,165 @@
+{
+  "schemaVersion": "training-scene.v1",
+  "sceneId": "scene:nxstage:office-overlay:metric-study",
+  "video": {
+    "assetVersionId": "assetv:fixture:nxstage-office-photo-background:v4",
+    "sourceHash": "e3ca7bdc2a92f9a75d59d7b20ef0c893674a1d6ec0934fe4646417ee323cbacb",
+    "contentType": "video/mp4",
+    "width": 960,
+    "height": 540,
+    "frameRate": 30,
+    "durationSeconds": 3
+  },
+  "model": {
+    "modelVersionId": "preview:nxstage-bowl-shading-v1",
+    "sourceHash": "de3b39eae6f28facc9fa4e5bbc7f4e1746399c49afa5f4bafae5f96f9847730d",
+    "translationMeters": [
+      0,
+      0.23182972426000306,
+      0
+    ],
+    "rotationRadians": [
+      0,
+      0,
+      0
+    ],
+    "scale": 1
+  },
+  "camera": {
+    "projection": "perspective",
+    "focalLengthPixels": 638.6100534105599,
+    "principalPointPixels": [
+      480,
+      270
+    ],
+    "orbit": {
+      "alpha": 1.5707963267948966,
+      "beta": 1.2,
+      "radius": 2.176019072476563,
+      "target": [
+        0,
+        0.43938846655776753,
+        0
+      ]
+    },
+    "distortion": {
+      "radial": [
+        0,
+        0,
+        0
+      ],
+      "tangential": [
+        0,
+        0
+      ]
+    },
+    "exposure": 0.7,
+    "whiteBalanceKelvin": 5400,
+    "lightDirection": [
+      -0.35,
+      0.8,
+      -0.45
+    ]
+  },
+  "render": {
+    "opacity": 1,
+    "receiveShadows": true,
+    "castShadows": true,
+    "contactShadow": {
+      "enabled": true,
+      "opacity": 0.46,
+      "softness": 0.88,
+      "offsetMeters": -0.0016738608249819715,
+      "direction": [
+        0.64,
+        0.48
+      ]
+    }
+  },
+  "interaction": {
+    "mode": "INTERACTIVE_OVERLAY",
+    "equivalentPath": "TEXT_KEYBOARD",
+    "cues": [
+      {
+        "startSeconds": 0,
+        "endSeconds": 3,
+        "componentId": "nxstage-control-panel",
+        "targetId": "NX-C01-ADD-FLUID",
+        "allowedActions": [
+          "activate_target"
+        ],
+        "label": "Press Add Fluid"
+      },
+      {
+        "startSeconds": 0,
+        "endSeconds": 3,
+        "componentId": "nxstage-control-panel",
+        "targetId": "NX-C01-VOLUME-TOGGLE",
+        "allowedActions": [
+          "activate_target"
+        ],
+        "label": "Press Volume Toggle"
+      },
+      {
+        "startSeconds": 0,
+        "endSeconds": 3,
+        "componentId": "nxstage-control-panel",
+        "targetId": "NX-C01-TREATMENT",
+        "allowedActions": [
+          "activate_target"
+        ],
+        "label": "Press Treatment"
+      },
+      {
+        "startSeconds": 0,
+        "endSeconds": 3,
+        "componentId": "nxstage-control-panel",
+        "targetId": "NX-C01-ROW1-DOWN",
+        "allowedActions": [
+          "activate_target"
+        ],
+        "label": "Press dialysate decrease"
+      },
+      {
+        "startSeconds": 0,
+        "endSeconds": 3,
+        "componentId": "nxstage-control-panel",
+        "targetId": "NX-C01-STOP",
+        "allowedActions": [
+          "activate_target"
+        ],
+        "label": "Press Stop"
+      },
+      {
+        "startSeconds": 0,
+        "endSeconds": 3,
+        "componentId": "nxstage-control-panel",
+        "targetId": "NX-C01-MUTE",
+        "allowedActions": [
+          "activate_target"
+        ],
+        "label": "Press Mute"
+      },
+      {
+        "startSeconds": 0,
+        "endSeconds": 3,
+        "componentId": "express-warmer-panel",
+        "targetId": "FW-C01-DOWN",
+        "allowedActions": [
+          "activate_target"
+        ],
+        "label": "Press Warmer temperature down"
+      },
+      {
+        "startSeconds": 0,
+        "endSeconds": 3,
+        "componentId": "express-warmer-panel",
+        "targetId": "FW-C01-UP",
+        "allowedActions": [
+          "activate_target"
+        ],
+        "label": "Press Warmer temperature up"
+      }
+    ]
+  }
+}

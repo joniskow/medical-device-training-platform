@@ -33,6 +33,9 @@ let auth=await import(pathToFileURL(bundle)+'?disabled');mode='disabled';await a
 mode='origin';await assert.rejects(auth.beginSignIn(),/configured application address/);
 mode='ok';await auth.beginSignIn();assert.equal(sdkConfig.cache.cacheLocation,'sessionStorage');assert.equal(sdkConfig.auth.redirectUri,location.origin+'/auth/redirect');assert.deepEqual(loginRequest.scopes,[publicConfig.apiScope]);assert.equal(loginRequest.redirectStartPage,location.origin+'/signin');
 assert.equal(loginRequest.prompt,'select_account');assert.equal(sdkConfig.system.loggerOptions.piiLoggingEnabled,false);
+globalThis.authResult=null;await assert.rejects(auth.completeSignIn(),/could not be completed/);
+assert.equal(sessionStorage.getItem('mdt.auth.signin-pending'),null);
+await auth.beginSignIn();
 globalThis.authResult={account:{homeAccountId:'one'},accessToken:'api-token',idToken:'never-use-id-token'};
 checkResponse=403;await assert.rejects(auth.completeSignIn(),/could not be completed/);assert.equal(sessionStorage.getItem('mdt.auth.access-token'),null);
 checkResponse=200;await auth.beginSignIn();mode='late';await assert.rejects(auth.completeSignIn());assert.equal(sessionStorage.getItem('mdt.auth.access-token'),null);

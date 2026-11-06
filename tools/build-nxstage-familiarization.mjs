@@ -1,0 +1,11 @@
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { buildNxstageFamiliarization } from './nxstage-familiarization.mjs';
+import { validateSimulationDefinition } from '../packages/simulation-schema/dist/index.js';
+import { validateSimulationModelActions, validateBrowserModelManifest } from '../packages/model-runtime/dist/index.js';
+const manifest=validateBrowserModelManifest(JSON.parse(await readFile(new URL('../fixtures/nxstage-system-one-rear-outlet-depth-review/model-manifest.json',import.meta.url),'utf8')));
+const content=buildNxstageFamiliarization(manifest,{simulationDefinitionId:'nxstage-familiarization-v1',policyId:'nxstage-familiarization-policy-v1',activityId:'nxstage-familiarization'});
+const findings=[...validateSimulationDefinition(content.definition).findings,...validateSimulationModelActions(content.definition,{manifest,modelVersionId:manifest.modelVersionId,manifestHash:manifest.sourceHash})];
+if(findings.some(item=>item.severity==='error'))throw Error(JSON.stringify(findings));
+const output=new URL('../output/developer-kit/',import.meta.url);await mkdir(output,{recursive:true});
+await writeFile(new URL('nxstage-familiarization.review.json',output),JSON.stringify(content,null,2)+'\n');
+console.log('Built source-referenced candidate at output/developer-kit/nxstage-familiarization.review.json. Independent approval and pilot validation remain required.');

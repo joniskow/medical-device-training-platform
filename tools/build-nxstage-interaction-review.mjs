@@ -16,7 +16,7 @@ const sourcePhotoSet = await Promise.all(sourcePhotoNames.map(async name => {
   return { file: `${sourcePhotoDir}/${name}`, bytes: photo.length, sha256: createHash("sha256").update(photo).digest("hex") };
 }));
 manifest.reconstructionSource = { type: "REFERENCE_PHOTO_SET", count: sourcePhotoSet.length, rightsReview: "REVIEW_REQUIRED", files: sourcePhotoSet };
-manifest.modelVersionId = "preview:nxstage-system-one-interaction-review-v1";
+manifest.modelVersionId = process.env.NXSTAGE_MODEL_VERSION ?? "preview:nxstage-system-one-interaction-review-v3";
 manifest.releaseBindingId = manifest.modelVersionId;
 manifest.fidelity = {
   status: "VISUAL_RECONSTRUCTION",
@@ -97,10 +97,11 @@ if (cabinet) {
 const tub = manifest.components.find(component => component.componentId === "pureflow-tub");
 assert.ok(cabinet && tub, "The PureFlow tub and cabinet door must be exported");
 tub.interactionCapabilities = ["select", "open", "translate"];
-tub.permittedTransforms = { translationX: { min: 0, max: 2.1, step: .1 } };
 const tubTarget = tub.interactionTargets?.find(target => target.targetId === "PF-C02-TUB");
 const cabinetTarget = cabinet.interactionTargets?.find(target => target.targetId === "NX-C02-CABINET-DOOR");
 assert.ok(tubTarget && cabinetTarget, "The tub and cabinet must have interaction targets");
+assert.ok(Number.isFinite(tubTarget.openTranslationMeters) && tubTarget.openTranslationMeters > 0, "The tub must provide its outward travel");
+tub.permittedTransforms = { translationX: { min: 0, max: tubTarget.openTranslationMeters, step: .1 } };
 tubTarget.openVerb = "Pull out";
 tubTarget.closeVerb = "Push in";
 tubTarget.openRequires = { componentId: cabinet.componentId, transform: "rotationY", value: -Math.PI / 2, message: "Open the cabinet door fully before pulling out the tub." };
@@ -110,7 +111,7 @@ await writeFile(`${folder}/model-manifest.json`, manifestJson);
 // This review asset never rewrites a shared scene or release binding.
 await writeFile(`${folder}/provenance.json`, `${JSON.stringify({
   schemaVersion: "authored-model.v1",
-  source: "blender/nxstage_system_one_interaction_review.py",
+  source: process.env.NXSTAGE_MODEL_SOURCE ?? "blender/nxstage_system_one_interaction_review.py",
   blenderVersion: "5.2.3 LTS",
   sha256: sourceHash,
   bytes: bytes.length,

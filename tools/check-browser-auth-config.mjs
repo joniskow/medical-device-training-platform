@@ -33,6 +33,18 @@ for(const configured of [false,true]){
   const body=await response.json();if(configured)assert.deepEqual(body,config);
   assert.equal(JSON.stringify(body).includes('must-not-be-public'),false);
   assert.equal((await fetch(url,{method:'POST'})).status,405);
+  const homepage=await fetch(new URL('/',url),{redirect:'manual'});
+  assert.equal(homepage.status,302);
+  assert.equal(homepage.headers.get('location'),'/signin');
+  assert.equal(homepage.headers.get('cache-control'),'no-store');
+  const compressed=await fetch(new URL('/developer/training-viewer.js',url),{headers:{'accept-encoding':'gzip'}});
+  assert.equal(compressed.headers.get('content-encoding'),'gzip');
+  assert.ok(compressed.headers.get('vary').includes('Accept-Encoding'));
+  const decoded=await compressed.text();
+  assert.ok(Number(compressed.headers.get('content-length'))<Buffer.byteLength(decoded));
+  const identity=await fetch(new URL('/developer/training-viewer.js',url),{headers:{'accept-encoding':'gzip;q=0, identity;q=1'}});
+  assert.equal(identity.headers.get('content-encoding'),null);
+  assert.equal(await identity.text(),decoded,'Compressed and identity delivery differ');
   for(const route of ['/signin','/signout','/auth/redirect','/auth/redirect.js','/author/signin.js']){
    const page=await fetch(new URL(route,url));assert.equal(page.status,200,route);
    assert.equal(page.headers.has('cross-origin-opener-policy'),false);

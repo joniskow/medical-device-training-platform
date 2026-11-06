@@ -6,6 +6,11 @@ const pendingKey='mdt.auth.signin-pending';
 const epochKey='mdt.auth.epoch';
 const logoutKey='mdt.auth.logout-account';
 let setup:Promise<{client:PublicClientApplication;scope:string}>|undefined;
+function logSignInFailure(stage:'start'|'complete',error:unknown){
+ // Record only a library error identifier, never provider messages, tokens or URLs.
+ const code=error&&typeof error==='object'&&'errorCode' in error?error.errorCode:undefined;
+ console.warn(`Sign-in ${stage} failed`,typeof code==='string'&&/^[a-z_]{1,64}$/.test(code)?code:'unavailable');
+}
 async function initialize(){
  if(!setup)setup=(async()=>{
   const response=await fetch('/api/v1/auth/config',{cache:'no-store',credentials:'omit'});
@@ -26,21 +31,21 @@ export async function beginSignIn(){
  for(const key of ['mdt.auth.access-token','mdt.auth.organization-id',managedAccountKey])sessionStorage.removeItem(key);
  const epoch=crypto.randomUUID();sessionStorage.setItem(epochKey,epoch);sessionStorage.setItem(pendingKey,epoch);
  try{await client.loginRedirect({scopes:[scope],prompt:'select_account',redirectStartPage:`${location.origin}/signin`});}
- catch{if(sessionStorage.getItem(pendingKey)===epoch)sessionStorage.removeItem(pendingKey);throw Error('Sign-in could not start. Please try again.');}
+ catch(error){logSignInFailure('start',error);if(sessionStorage.getItem(pendingKey)===epoch)sessionStorage.removeItem(pendingKey);throw Error('Sign-in could not start. Please try again.');}
 }
 export async function completeSignIn():Promise<boolean>{
  const pending=sessionStorage.getItem(pendingKey);if(!pending)return false;
  try{
   const {client}=await initialize();
   const result=await client.handleRedirectPromise();
-  if(!result)return false;
+  if(!result)throw Error('No sign-in response was received.');
   if(!result.account||!result.accessToken||sessionStorage.getItem(epochKey)!==pending)throw Error('Invalid session.');
   // Server validates the API token, identity realm and account lock before local acceptance.
   const response=await fetch('/api/v1/account',{headers:{authorization:`Bearer ${result.accessToken}`},cache:'no-store',credentials:'omit'});
   if(!response.ok||sessionStorage.getItem(epochKey)!==pending||sessionStorage.getItem(pendingKey)!==pending)throw Error('Invalid session.');
   setAccessToken(result.accessToken);sessionStorage.setItem(managedAccountKey,result.account.homeAccountId);
   client.setActiveAccount(result.account);sessionStorage.removeItem(pendingKey);return true;
- }catch{if(sessionStorage.getItem(pendingKey)===pending)sessionStorage.removeItem(pendingKey);throw Error('Sign-in could not be completed. Try again or contact support.');}
+ }catch(error){logSignInFailure('complete',error);if(sessionStorage.getItem(pendingKey)===pending)sessionStorage.removeItem(pendingKey);throw Error('Sign-in could not be completed. Try again or contact support.');}
 }
 export async function providerSignOut(){
  const accountId=sessionStorage.getItem(logoutKey);if(!accountId)return;

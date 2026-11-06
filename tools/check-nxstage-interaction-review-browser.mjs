@@ -21,6 +21,18 @@ try{
  const assertFitted = async label => {const b=await evaluate('window.__reviewProjectedBounds()');assert(b.left>=-.01&&b.right<=1.01&&b.top>=-.01&&b.bottom<=1.01,`${label} must show the whole model: ${JSON.stringify(b)}`);};
  await assertFitted('The initial view');
  await evaluate('window.__reviewRearPanel()');
+ if(process.env.NXSTAGE_REAR_PANEL_SCREENSHOT){
+  await new Promise(resolve=>setTimeout(resolve,400));
+  const rear=await command('Page.captureScreenshot',{format:'png'});
+  await writeFile(process.env.NXSTAGE_REAR_PANEL_SCREENSHOT,Buffer.from(rear.data,'base64'));
+ }
+ if(process.env.NXSTAGE_REAR_CONNECTOR_SCREENSHOT){
+  assert(await evaluate('window.__reviewRearConnector()'),'The rear connector must be present');
+  await new Promise(resolve=>setTimeout(resolve,400));
+  const connector=await command('Page.captureScreenshot',{format:'png'});
+  await writeFile(process.env.NXSTAGE_REAR_CONNECTOR_SCREENSHOT,Buffer.from(connector.data,'base64'));
+  await evaluate('window.__reviewRearPanel()');
+ }
  const rearAngles=await evaluate('window.__reviewCameraAngles()');
  await evaluate('document.querySelector("#fit-view").click()');
  await new Promise(resolve=>setTimeout(resolve,400));
@@ -29,14 +41,40 @@ try{
  await evaluate('document.querySelector("#reset-view").click()');
  await new Promise(resolve=>setTimeout(resolve,400));
  await assertFitted('Reset view');
+ if(process.env.NXSTAGE_SIDE_GRIP_SCREENSHOT){
+  assert(await evaluate('window.__reviewSideGrip()'),'The side carry grip must be present and fixed');
+  await new Promise(resolve=>setTimeout(resolve,350));
+  const side=await command('Page.captureScreenshot',{format:'png'});
+  await writeFile(process.env.NXSTAGE_SIDE_GRIP_SCREENSHOT,Buffer.from(side.data,'base64'));
+  await evaluate('document.querySelector("#reset-view").click()');
+  await new Promise(resolve=>setTimeout(resolve,350));
+ }
  assert(await evaluate('document.querySelector("#score").parentElement.hidden'),'An unscored review must not show a score');
  const image=await command('Page.captureScreenshot',{format:'png'});await writeFile('output/nxstage-interaction-review/review-page.png',Buffer.from(image.data,'base64'));
  assert.equal(await evaluate('document.querySelector("#title").textContent'),'NxStage System One · interactive review');
  await evaluate('window.__reviewRearPanel();document.querySelector("#focus-pureflow").click()');
  await waitFor('document.querySelector("#lower-panel-guidance") && !document.querySelector("#lower-panel-guidance").hidden && /cabinet door may obscure/i.test(document.querySelector("#lower-panel-guidance").textContent)');
  await new Promise(wait=>setTimeout(wait,300));
+ if (process.env.NXSTAGE_CABINET_WINDOW_SCREENSHOT) {
+  const image=await command('Page.captureScreenshot',{format:'png'});
+  await writeFile(process.env.NXSTAGE_CABINET_WINDOW_SCREENSHOT,Buffer.from(image.data,'base64'));
+ }
  const closedGo=await evaluate('window.__reviewTargetPoint("PF-C01-GO")'),closedStop=await evaluate('window.__reviewTargetPoint("PF-C01-STOP")');
- assert((await evaluate(`window.__reviewHits(${closedGo.x},${closedGo.y})`))[0]?.target === 'PF-C01-GO','The exposed GO control must remain reachable through the opening');
+ if (process.env.NXSTAGE_CABINET_WINDOW_STUDY === '1') {
+  for (const id of ['PF-C01-UP','PF-C01-DOWN']) {
+   const point=await evaluate(`window.__reviewTargetPoint(${JSON.stringify(id)})`);
+   assert.equal((await evaluate(`window.__reviewHits(${point.x},${point.y})`))[0]?.target,id,`${id} must be reachable through the modeled opening`);
+  }
+  assert.equal((await evaluate(`window.__reviewHits(${closedGo.x},${closedGo.y})`))[0]?.target,'NX-C02-CABINET-DOOR','The modeled cabinet must cover the GO control when closed');
+  await command('Input.dispatchMouseEvent',{type:'mouseMoved',...closedGo});
+  await waitFor('/Over Lower cabinet door/.test(document.querySelector("#model-status").textContent)');
+  await command('Input.dispatchMouseEvent',{type:'mousePressed',...closedGo,button:'left',buttons:1,clickCount:1});
+  await waitFor('/Holding Lower cabinet door/.test(document.querySelector("#model-status").textContent)');
+  await command('Input.dispatchKeyEvent',{type:'keyDown',key:'Escape',code:'Escape',windowsVirtualKeyCode:27});
+  await command('Input.dispatchKeyEvent',{type:'keyUp',key:'Escape',code:'Escape',windowsVirtualKeyCode:27});
+  await command('Input.dispatchMouseEvent',{type:'mouseReleased',...closedGo,button:'left',buttons:0,clickCount:1});
+  assert.equal((await evaluate('window.__reviewTransform("nxstage-cabinet-door")')).rotationY,0,'Canceling the covered-control gesture must leave the door closed');
+ } else assert((await evaluate(`window.__reviewHits(${closedGo.x},${closedGo.y})`))[0]?.target === 'PF-C01-GO','The exposed GO control must remain reachable through the opening');
  assert((await evaluate(`window.__reviewHits(${closedStop.x},${closedStop.y})`))[0]?.target === 'NX-C02-CABINET-DOOR','The cabinet must occlude the hidden edge of the panel');
  await evaluate('document.querySelector("#reset-view").click()');
  await evaluate('document.querySelector("#focus-panel").click()');
@@ -48,9 +86,23 @@ try{
  const guided=await command('Page.captureScreenshot',{format:'png'});await writeFile('output/nxstage-interaction-review/review-guided.png',Buffer.from(guided.data,'base64'));
  await evaluate('document.querySelector("#show-controls").click()');
  assert.equal(await evaluate('document.querySelector("#show-controls").getAttribute("aria-pressed")'),'false');
+ // These three symbols are printed artwork beside the row buttons. Resolve
+ // their locations from the photo texture so the test follows the actual UVs.
+ for (const [label,x,y] of [['L/hr picture',1275,320],['ultrafiltration picture',1280,495],['blood-flow picture',1318,690]]) {
+  const point=await evaluate(`window.__reviewFasciaPoint(${x}/1600,${y}/920)`);
+  assert(point,`${label} must project onto the fascia`);
+  const hits=await evaluate(`window.__reviewHits(${point.x},${point.y})`);
+  assert.equal(hits[0]?.name,'Photo-derived control fascia',`${label} must land on the printed fascia: ${JSON.stringify(hits)}`);
+  await command('Input.dispatchMouseEvent',{type:'mouseMoved',...point});
+  assert.notEqual(await evaluate('document.querySelector("#model-canvas").style.cursor'),'pointer',`${label} must not present as a button`);
+  await command('Input.dispatchMouseEvent',{type:'mousePressed',...point,button:'left',buttons:1,clickCount:1});
+  assert.doesNotMatch(await evaluate('document.querySelector("#model-status").textContent'),/Holding /,`${label} must not press a control`);
+  await command('Input.dispatchMouseEvent',{type:'mouseReleased',...point,button:'left',buttons:0,clickCount:1});
+ }
  const canvasPoint=await evaluate('window.__reviewTargetPoint("NX-C01-ADD-FLUID")');assert(canvasPoint, "Add Fluid must be present in the model");
  await command('Input.dispatchMouseEvent',{type:'mouseMoved',x:canvasPoint.x,y:canvasPoint.y});
  await waitFor('/Over Add Fluid/.test(document.querySelector("#model-status").textContent)');
+ assert.match(await evaluate('document.querySelector("#model-status").textContent'), /press and release/i, 'A button must explain how to activate it');
  assert.equal(await evaluate('getComputedStyle(document.querySelector("#model-canvas")).cursor'),'pointer','A visible interactive control must show a pointer cursor');
  await evaluate('window.__confirmedPresses=0;new MutationObserver(()=>{if(document.querySelector("#action-log").textContent.startsWith("accepted:"))window.__confirmedPresses++}).observe(document.querySelector("#action-log"),{childList:true,characterData:true,subtree:true})');
  await command('Input.dispatchMouseEvent',{type:'mousePressed',x:canvasPoint.x,y:canvasPoint.y,button:'left',buttons:1,clickCount:1});
@@ -74,6 +126,59 @@ try{
  await new Promise(wait=>setTimeout(wait,150));
  assert.equal(await evaluate('window.__confirmedPresses'),2,'Canceling a touch must not confirm a press');
  await command('Emulation.setTouchEmulationEnabled',{enabled:false});
+ const restBeforeBlur=await evaluate('window.__reviewTargetPosition("NX-C01-ADD-FLUID")');
+ await command('Input.dispatchMouseEvent',{type:'mouseMoved',...canvasPoint});
+ await command('Input.dispatchMouseEvent',{type:'mousePressed',...canvasPoint,button:'left',buttons:1,clickCount:1});
+ await waitFor('/Holding Add Fluid/.test(document.querySelector("#model-status").textContent)');
+ assert.notDeepEqual(await evaluate('window.__reviewTargetPosition("NX-C01-ADD-FLUID")'),restBeforeBlur,'The button must visibly depress before focus changes');
+ await evaluate('document.querySelector("#reset-view").focus()');
+ assert.equal(await evaluate('document.activeElement?.id'),'reset-view','Focus must leave the canvas during the interrupted press');
+ await command('Input.dispatchMouseEvent',{type:'mouseReleased',...canvasPoint,button:'left',buttons:0,clickCount:1});
+ assert.deepEqual(await evaluate('window.__reviewTargetPosition("NX-C01-ADD-FLUID")'),restBeforeBlur,'The interrupted button must return to rest');
+ assert.equal(await evaluate('window.__confirmedPresses'),2,'A press interrupted by focus change must not activate');
+ // Capture can fail if the browser has already canceled a pointer. A release
+ // elsewhere in the page must still cancel the press and leave controls usable.
+ await evaluate('window.__originalSetPointerCapture=document.querySelector("#model-canvas").setPointerCapture;document.querySelector("#model-canvas").setPointerCapture=()=>{throw new DOMException("Pointer is no longer active", "NotFoundError")}');
+ const beforeCaptureFailure=await evaluate('window.__confirmedPresses');
+ const restingAfterCaptureFailure=await evaluate('window.__reviewTargetPosition("NX-C01-ADD-FLUID")');
+ await command('Input.dispatchMouseEvent',{type:'mouseMoved',...canvasPoint});
+ await command('Input.dispatchMouseEvent',{type:'mousePressed',...canvasPoint,button:'left',buttons:1,clickCount:1});
+ await waitFor('/Holding Add Fluid/.test(document.querySelector("#model-status").textContent)');
+ await command('Input.dispatchMouseEvent',{type:'mouseReleased',x:5,y:5,button:'left',buttons:0,clickCount:1});
+ await waitFor('!/Holding Add Fluid/.test(document.querySelector("#model-status").textContent)');
+ assert.equal(await evaluate('window.__confirmedPresses'),beforeCaptureFailure,'Release outside must not activate the button when capture fails');
+ assert.deepEqual(await evaluate('window.__reviewTargetPosition("NX-C01-ADD-FLUID")'),restingAfterCaptureFailure,'A failed capture must not leave the button depressed');
+ assert.doesNotMatch(await evaluate('document.querySelector("#model-status").textContent'),/Over Add Fluid/,'Releasing outside must clear the stale hover feedback');
+ await evaluate('document.querySelector("#model-canvas").setPointerCapture=window.__originalSetPointerCapture');
+ for (const [id,label] of [
+  ['NX-C01-ADD-FLUID','Add Fluid'], ['NX-C01-VOLUME-TOGGLE','Volume Toggle'], ['NX-C01-TREATMENT','Treatment'],
+  ['NX-C01-ROW1-DOWN','Dialysate decrease'], ['NX-C01-ROW1-UP','Dialysate increase'],
+  ['NX-C01-ROW2-DOWN','Ultrafiltration decrease'], ['NX-C01-ROW2-UP','Ultrafiltration increase'],
+  ['NX-C01-ROW3-DOWN','Blood flow decrease'], ['NX-C01-ROW3-UP','Blood flow increase'],
+  ['NX-C01-STOP','Stop control'], ['NX-C01-MUTE','Mute control']
+ ]) {
+  const point=await evaluate(`window.__reviewTargetPoint(${JSON.stringify(id)})`);
+  assert(point,`${label} must have a visible target`);
+  const hits=await evaluate(`window.__reviewHits(${point.x},${point.y})`);
+  assert.equal(hits[0]?.target,id,`${label} must be the first visible hit: ${JSON.stringify(hits)}`);
+  const resting=await evaluate(`window.__reviewTargetPosition(${JSON.stringify(id)})`);
+  const restWorld=await evaluate(`window.__reviewPressWorld(${JSON.stringify(id)})`);
+  const count=await evaluate('window.__confirmedPresses');
+  await command('Input.dispatchMouseEvent',{type:'mouseMoved',...point});
+  await command('Input.dispatchMouseEvent',{type:'mousePressed',...point,button:'left',buttons:1,clickCount:1});
+  await waitFor(`document.querySelector("#model-status").textContent.includes(${JSON.stringify('Holding '+label)})`);
+  if(process.env.NXSTAGE_PRESS_SCREENSHOT && id==='NX-C01-ADD-FLUID') {
+   const image=await command('Page.captureScreenshot',{format:'png'});
+   await writeFile(process.env.NXSTAGE_PRESS_SCREENSHOT,Buffer.from(image.data,'base64'));
+  }
+  assert.notDeepEqual(await evaluate(`window.__reviewTargetPosition(${JSON.stringify(id)})`),resting,`${label} must visibly depress`);
+  const pressedWorld=await evaluate(`window.__reviewPressWorld(${JSON.stringify(id)})`);
+  const towardCamera=pressedWorld.point.reduce((sum,value,i)=>sum+(value-restWorld.point[i])*(restWorld.camera[i]-restWorld.point[i]),0);
+  assert(towardCamera<0,`${label} must move into the panel, away from the front-facing camera: ${JSON.stringify({restWorld,pressedWorld,towardCamera})}`);
+  await command('Input.dispatchMouseEvent',{type:'mouseReleased',...point,button:'left',buttons:0,clickCount:1});
+  await waitFor(`window.__confirmedPresses===${count+1}`);
+  assert.deepEqual(await evaluate(`window.__reviewTargetPosition(${JSON.stringify(id)})`),resting,`${label} must return to rest`);
+ }
  const emptyPoint=await evaluate('(()=>{const r=document.querySelector("#model-canvas").getBoundingClientRect();return {x:r.left+8,y:r.top+8}})()');
  await command('Input.dispatchMouseEvent',{type:'mouseMoved',x:emptyPoint.x,y:emptyPoint.y});
  await waitFor('!/Over Add Fluid/.test(document.querySelector("#model-status").textContent)');
@@ -86,6 +191,17 @@ try{
  }
  await evaluate('document.querySelector("#reset-view").click()');
  await new Promise(resolve=>setTimeout(resolve,300));
+ const fullRadius=await evaluate('window.__reviewCameraRadius()');
+ await evaluate('document.querySelector("#focus-handle").click()');
+ await waitFor('[...document.querySelectorAll("#action-controls button")].some(b=>b.textContent==="Lift Cycler door handle")');
+ assert((await evaluate('window.__reviewCameraRadius()'))<fullRadius,'Focus door handle must bring the handle closer');
+ await new Promise(resolve=>setTimeout(resolve,300));
+ const armBefore=await evaluate('window.__reviewNodeCenter("Cycler handle arm right")');
+ assert(armBefore,'The right handle linkage must exist');
+ const pivotBefore=await evaluate('window.__reviewNodeCenter("Side pivot fastener")');
+ const fixedGuideBefore = process.env.NXSTAGE_SIDE_GUIDE_CHECK ? await evaluate('window.__reviewNodeCenter("Cycler right side guide channel")') : undefined;
+ if (process.env.NXSTAGE_SIDE_GUIDE_CHECK) assert(fixedGuideBefore, 'The fixed side guide must be present');
+ assert(pivotBefore,'The side pivot must exist');
  const handlePoint=await evaluate('window.__reviewHandlePoint()');assert(handlePoint,'The handle must have a visible position');
  await command('Input.dispatchMouseEvent',{type:'mouseMoved',...handlePoint});
  await waitFor('/Over Cycler door handle/.test(document.querySelector("#model-status").textContent)');
@@ -94,13 +210,61 @@ try{
  await command('Input.dispatchMouseEvent',{type:'mouseMoved',x:handlePoint.x,y:handlePoint.y-100,button:'left',buttons:1});
  await command('Input.dispatchMouseEvent',{type:'mouseReleased',x:handlePoint.x,y:handlePoint.y-100,button:'left',buttons:0,clickCount:1});
  await waitFor('/Cycler door handle is raised/.test(document.querySelector("#model-status").textContent)');await new Promise(wait=>setTimeout(wait,600));
+ const handleBounds=await evaluate('window.__reviewComponentBounds("nxstage-cycler-handle")');
+ assert(handleBounds && handleBounds.left>=0 && handleBounds.right<=1 && handleBounds.top>=0 && handleBounds.bottom<=1,`The focused handle must stay visible when raised: ${JSON.stringify(handleBounds)}`);
+ assert.notDeepEqual(await evaluate('window.__reviewNodeCenter("Cycler handle arm right")'),armBefore,'The side linkage must move with the handle');
+ assert.deepEqual(await evaluate('window.__reviewNodeCenter("Side pivot fastener")'),pivotBefore,'The pivot must stay in place as the handle turns');
  const raisedImage=await command('Page.captureScreenshot',{format:'png'});await writeFile('output/nxstage-interaction-review/review-handle-raised.png',Buffer.from(raisedImage.data,'base64'));
+ // Keyboard users can move the upper door partway and reverse it, while the
+ // raised handle cannot be lowered until the door is completely closed.
+ const focusKeyboardTarget=async label=>{
+  await evaluate('document.querySelector("#model-canvas").focus()');
+  for(let i=0;i<40;i++){
+   await command('Input.dispatchKeyEvent',{type:'keyDown',key:'ArrowRight',code:'ArrowRight',windowsVirtualKeyCode:39});
+   await command('Input.dispatchKeyEvent',{type:'keyUp',key:'ArrowRight',code:'ArrowRight',windowsVirtualKeyCode:39});
+   if((await evaluate('document.querySelector("#model-status").textContent')).includes(`Keyboard focus on ${label}.`))return;
+  }
+  throw Error(`Could not focus ${label} with the keyboard`);
+ };
+ const shiftArrow=async(key,code)=>{await command('Input.dispatchKeyEvent',{type:'keyDown',key,code,windowsVirtualKeyCode:key==='ArrowUp'?38:40,modifiers:8});await command('Input.dispatchKeyEvent',{type:'keyUp',key,code,windowsVirtualKeyCode:key==='ArrowUp'?38:40,modifiers:8});};
+ await focusKeyboardTarget('Upper cycler door');
+ await shiftArrow('ArrowUp','ArrowUp');
+ await waitFor('window.__reviewTransform("nxstage-cycler-door").translationX > 0');
+ const keyboardDoor=await evaluate('window.__reviewTransform("nxstage-cycler-door").translationX');
+ assert(keyboardDoor<.068,`One keyboard step must leave the upper door partly open: ${keyboardDoor}`);
+ for(let i=0;i<4;i++) await shiftArrow('ArrowUp','ArrowUp');
+ await waitFor(`Math.abs(window.__reviewTransform("nxstage-cycler-door").translationX - ${keyboardDoor * 5}) < 1e-6`);
+ await new Promise(wait=>setTimeout(wait,500));
+ await focusKeyboardTarget('Cycler door handle');
+ await shiftArrow('ArrowDown','ArrowDown');
+ await waitFor('/Close the cycler door before lowering the handle/.test(document.querySelector("#model-status").textContent)');
+ assert(Math.abs((await evaluate('window.__reviewTransform("nxstage-cycler-handle").rotationY'))+Math.PI/2)<1e-5,'The open door must keep the handle raised');
+ await focusKeyboardTarget('Upper cycler door');
+ for(let i=0;i<5;i++) await shiftArrow('ArrowDown','ArrowDown');
+ await waitFor('Math.abs(window.__reviewTransform("nxstage-cycler-door").translationX)<1e-8');
+ await new Promise(wait=>setTimeout(wait,500));
+ await focusKeyboardTarget('Cycler door handle');
+ await evaluate('document.querySelector("#reset-view").click()');
+ await new Promise(wait=>setTimeout(wait,300));
  const ventPoint=await evaluate('window.__reviewVentPoint()');assert(ventPoint,'The central front vent must be present');
  await command('Input.dispatchMouseEvent',{type:'mouseMoved',x:ventPoint.x,y:ventPoint.y});
  await waitFor('/Over Upper cycler door/.test(document.querySelector("#model-status").textContent)');
+ assert.match(await evaluate('document.querySelector("#model-status").textContent'), /drag to move.*click to open or close/i, 'A door must explain how it can be moved');
  await command('Input.dispatchMouseEvent',{type:'mousePressed',x:ventPoint.x,y:ventPoint.y,button:'left',buttons:1,clickCount:1});
  await command('Input.dispatchMouseEvent',{type:'mouseReleased',x:ventPoint.x,y:ventPoint.y,button:'left',buttons:0,clickCount:1});
+ await waitFor('/Upper cycler door is moving toward open/.test(document.querySelector("#model-status").textContent)');
  await waitFor('/Upper cycler door is open/.test(document.querySelector("#model-status").textContent)');
+ await new Promise(wait=>setTimeout(wait,600));
+ assert.notDeepEqual(await evaluate('window.__reviewNodeCenter("Side pivot fastener")'),pivotBefore,'The pivot must travel with the upper door');
+ if (fixedGuideBefore) assert.deepEqual(await evaluate('window.__reviewNodeCenter("Cycler right side guide channel")'), fixedGuideBefore, 'The guide must stay fixed as the door opens');
+ if(process.env.NXSTAGE_OPEN_SIDE_SCREENSHOT){
+  assert(await evaluate('window.__reviewOpenSide()'),'The open side view must be available');
+  await new Promise(wait=>setTimeout(wait,350));
+  const side=await command('Page.captureScreenshot',{format:'png'});
+  await writeFile(process.env.NXSTAGE_OPEN_SIDE_SCREENSHOT,Buffer.from(side.data,'base64'));
+  await evaluate('document.querySelector("#reset-view").click()');
+  await new Promise(wait=>setTimeout(wait,350));
+ }
  await evaluate('document.querySelector("[data-component-id=nxstage-cycler-door]").click()');
  await waitFor('[...document.querySelectorAll("#action-controls button")].some(b=>b.textContent==="Close Upper cycler door")');
  await evaluate('[...document.querySelectorAll("#action-controls button")].find(b=>b.textContent==="Close Upper cycler door").click()');
@@ -120,6 +284,22 @@ try{
  assert.equal(await evaluate('window.__confirmedPresses'),beforeEscapeDoor,'Escape must cancel a door drag without submitting it');
  await evaluate('document.querySelector("[data-component-id=nxstage-cycler-door]").click()');
  await waitFor('[...document.querySelectorAll("#action-controls button")].some(b=>b.textContent==="Open Upper cycler door")');
+ await new Promise(wait=>setTimeout(wait,300));
+ const beforeFocusInterruption=await evaluate('window.__confirmedPresses');
+ // Moving focus away during a drag must restore the accepted position and
+ // must not allow a subsequent mouse release to submit the abandoned gesture.
+ await command('Input.dispatchMouseEvent',{type:'mousePressed',...doorPoint,button:'left',buttons:1,clickCount:1});
+ await waitFor('/Holding Upper cycler door/.test(document.querySelector("#model-status").textContent)');
+ await command('Input.dispatchMouseEvent',{type:'mouseMoved',x:doorPoint.x,y:doorPoint.y+45,button:'left',buttons:1});
+ assert(Math.abs((await evaluate('window.__reviewTransform("nxstage-cycler-door")')).translationX)>1e-5,'The door must move before the focus interruption');
+ assert.equal(await evaluate('window.__confirmedPresses'),beforeFocusInterruption,'The drag must remain unsubmitted before focus changes');
+ assert.match(await evaluate('document.querySelector("#model-status").textContent'),/Holding Upper cycler door/,'The door must still be held before focus changes');
+ await evaluate('document.querySelector("#reset-view").focus()');
+ assert.equal(await evaluate('document.activeElement?.id'),'reset-view','Focus must actually leave the canvas');
+ await command('Input.dispatchMouseEvent',{type:'mouseReleased',x:doorPoint.x,y:doorPoint.y+45,button:'left',buttons:0,clickCount:1});
+ await waitFor('Math.abs(window.__reviewTransform("nxstage-cycler-door").translationX)<1e-8');
+ assert.equal(await evaluate('window.__confirmedPresses'),beforeFocusInterruption,'Losing focus must cancel a door drag without submitting it');
+ await new Promise(wait=>setTimeout(wait,500));
  await command('Input.dispatchMouseEvent',{type:'mousePressed',...doorPoint,button:'left',buttons:1,clickCount:1});
  await waitFor('/Holding Upper cycler door/.test(document.querySelector("#model-status").textContent)');
  await command('Input.dispatchMouseEvent',{type:'mouseMoved',x:doorPoint.x,y:doorPoint.y+200,button:'left',buttons:1});
@@ -182,7 +362,12 @@ try{
  await command('Input.dispatchMouseEvent',{type:'mousePressed',...cabinetPoint,button:'left',buttons:1,clickCount:1});
  await waitFor('/Holding Lower cabinet door/.test(document.querySelector("#model-status").textContent)');
  await command('Input.dispatchMouseEvent',{type:'mouseMoved',x:cabinetPoint.x-70,y:cabinetPoint.y,button:'left',buttons:1});
+ const cabinetBeforeRelease=(await evaluate('window.__reviewTransform("nxstage-cabinet-door")')).rotationY;
  await command('Input.dispatchMouseEvent',{type:'mouseReleased',x:cabinetPoint.x-70,y:cabinetPoint.y,button:'left',buttons:0,clickCount:1});
+ if(process.env.NXSTAGE_FINE_DRAG_CHECK==='1') {
+  const after=(await evaluate('window.__reviewTransform("nxstage-cabinet-door")')).rotationY;
+  assert(Math.abs(after-cabinetBeforeRelease)<=Math.PI/360+1e-6,`Cabinet door must settle within half a degree of release: ${JSON.stringify({cabinetBeforeRelease,after})}`);
+ }
  await waitFor('/Lower cabinet door is (partially )?open/.test(document.querySelector("#model-status").textContent)');
  await evaluate('document.querySelector("[data-component-id=nxstage-control-panel]").click()');
  await waitFor('[...document.querySelectorAll("#action-controls button")].some(b=>b.textContent==="Press Add Fluid")');
@@ -290,6 +475,16 @@ try{
  await evaluate('[...document.querySelectorAll("#action-controls button")].find(b=>b.textContent==="Pull out PureFlow tub").click()');
  await waitFor('/PureFlow tub is pulled out/.test(document.querySelector("#model-status").textContent)');
  await new Promise(wait=>setTimeout(wait,600));
+ const tubSide=await evaluate('window.__findVisibleTubPart("Container left side")');
+ assert(tubSide, 'The exposed side must be a direct tub target');
+ await command('Input.dispatchMouseEvent',{type:'mouseMoved',...tubSide});
+ await command('Input.dispatchMouseEvent',{type:'mousePressed',...tubSide,button:'left',buttons:1,clickCount:1});
+ await waitFor('/Holding PureFlow tub/.test(document.querySelector("#model-status").textContent)');
+ await command('Input.dispatchMouseEvent',{type:'mouseReleased',...tubSide,button:'left',buttons:0,clickCount:1});
+ await waitFor('/PureFlow tub is pushed in/.test(document.querySelector("#model-status").textContent)');
+ await evaluate('[...document.querySelectorAll("#action-controls button")].find(b=>b.textContent==="Pull out PureFlow tub").click()');
+ await waitFor('/PureFlow tub is pulled out/.test(document.querySelector("#model-status").textContent)');
+ await new Promise(wait=>setTimeout(wait,600));
  const materialPoint=await evaluate('(()=>{const r=document.querySelector("#model-canvas").getBoundingClientRect();return {x:r.left+8,y:r.top+8}})()');
  await command('Input.dispatchMouseEvent',{type:'mouseMoved',...materialPoint});
  await evaluate('document.querySelector("[data-component-id=nxstage-cabinet-door]").click()');
@@ -335,6 +530,29 @@ try{
  await command('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]});
  await waitFor('/PureFlow tub is partially pulled out/.test(document.querySelector("#model-status").textContent)');
  await command('Emulation.setTouchEmulationEnabled',{enabled:false});
+ for (const offset of [-.45,.45]) {
+  await evaluate('document.querySelector("#focus-tub").click()');
+  await waitFor('[...document.querySelectorAll("#action-controls button")].some(b=>b.textContent==="Push in PureFlow tub")');
+  await evaluate('[...document.querySelectorAll("#action-controls button")].find(b=>b.textContent==="Push in PureFlow tub").click()');
+  await waitFor('/PureFlow tub is pushed in/.test(document.querySelector("#model-status").textContent)');
+  await new Promise(wait=>setTimeout(wait,600));
+  await evaluate(`document.querySelector("#focus-tub").click();window.__reviewTubAngle(${offset})`);
+  await new Promise(wait=>setTimeout(wait,250));
+  const point=await evaluate('window.__reviewTargetPoint("PF-C02-TUB")');
+  const hits=await evaluate(`window.__reviewHits(${point.x},${point.y})`);
+  assert.equal(hits[0]?.target,'PF-C02-TUB',`The tub front must be visible at angle ${offset}`);
+  const delta=await evaluate(`window.__projectTubMotion(${point.x},${point.y})`);
+  assert(Math.hypot(delta.x,delta.y)>12,`The tub travel must be visible at angle ${offset}`);
+  await command('Input.dispatchMouseEvent',{type:'mouseMoved',...point});
+  await command('Input.dispatchMouseEvent',{type:'mousePressed',...point,button:'left',buttons:1,clickCount:1});
+  await waitFor('/Holding PureFlow tub/.test(document.querySelector("#model-status").textContent)');
+  const end={x:point.x+delta.x*.3,y:point.y+delta.y*.3};
+  await command('Input.dispatchMouseEvent',{type:'mouseMoved',...end,button:'left',buttons:1});
+  await command('Input.dispatchMouseEvent',{type:'mouseReleased',...end,button:'left',buttons:0,clickCount:1});
+  await waitFor('/PureFlow tub is partially pulled out/.test(document.querySelector("#model-status").textContent)');
+  const position=await evaluate('window.__reviewTransform("pureflow-tub").translationX');
+  assert(position>.1 && position<2.1,`Dragging along visible travel should move the tub at angle ${offset}: ${position}`);
+ }
  await evaluate('document.querySelector("[data-component-id=express-warmer-panel]").click();document.querySelector("#focus-warmer").click()');
  await waitFor('[...document.querySelectorAll("#action-controls button")].some(b=>b.textContent==="Press Warmer temperature down") && [...document.querySelectorAll("#action-controls button")].some(b=>b.textContent==="Press Warmer temperature up")');
  const warmerNames=await evaluate('[...document.querySelectorAll("#action-controls button")].map(b=>b.textContent)');assert(!warmerNames.some(name=>/indicator/i.test(name)),'Warmer indicators must not appear as buttons');
@@ -359,6 +577,7 @@ try{
  await command('Input.dispatchMouseEvent',{type:'mouseMoved',...rearPoint});
  await command('Input.dispatchMouseEvent',{type:'mousePressed',...rearPoint,button:'left',buttons:1,clickCount:1});
  await command('Input.dispatchMouseEvent',{type:'mouseReleased',...rearPoint,button:'left',buttons:0,clickCount:1});
+ await waitFor('/Cycler rear power switch is moving toward the on position.*power not simulated/i.test(document.querySelector("#model-status").textContent)');
  await waitFor('/Cycler rear power switch is in the on position.*power not simulated/i.test(document.querySelector("#model-status").textContent)');
  await waitFor('[...document.querySelectorAll("#action-controls button")].some(b=>b.textContent==="Set off Cycler rear power switch")');
  await evaluate('[...document.querySelectorAll("#action-controls button")].find(b=>b.textContent==="Set off Cycler rear power switch").click()');

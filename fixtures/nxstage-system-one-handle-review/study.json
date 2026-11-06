@@ -1,0 +1,11 @@
+{
+  "sourceHash": "a2391dda03ab0bc51d88286403334a91ddd9e29452d4c10afb86fdf8ff4f0e89",
+  "hash": "0d19ddd9d36aa21173cc79ab92ef64b32148b7c485d53413ad466fe247aa9b77",
+  "omittedNodes": [
+    "Vertical black side rail",
+    "Vertical black side rail.001",
+    "Angled rail mount",
+    "Angled rail mount.001"
+  ],
+  "limitation": "Photo-informed comparison; the rail mechanism and hidden geometry are not verified."
+}

@@ -1,7 +1,7 @@
 {
   "schemaVersion": "model-manifest.v1",
   "format": "glb",
-  "sourceHash": "3f39654c055fca75e61c831ffc524b77ca1000ed43b1c411abece80cb1889846",
+  "sourceHash": "8de552b1678915cd6c96eb16b275fcccc78703a9c54dc1f06ba69afd7927644b",
   "unitSystem": "meter",
   "scaleMeters": 1,
   "upAxis": "Y",
@@ -9,11 +9,11 @@
   "origin": "bounding-box-center",
   "forwardAxis": "-Z",
   "normalizationStatus": "CANONICAL",
-  "sceneNodeCount": 193,
-  "meshCount": 184,
+  "sceneNodeCount": 201,
+  "meshCount": 192,
   "materialCount": 18,
   "textureCount": 55,
-  "triangleCount": 68715,
+  "triangleCount": 70395,
   "materials": [
     {
       "materialId": "material-0",
@@ -151,18 +151,18 @@
     },
     {
       "textureId": "texture-12",
-      "sha256": "de0bca8dd2b11d00e4a5926fb070aee6014f54dd7f71cf7c83b84af0755c80a6",
-      "byteLength": 3836
+      "sha256": "df00de43df7927b0c3b62d8be1c5cc69dceb24ed28ebd1906a9ec33580ff6694",
+      "byteLength": 3869
     },
     {
       "textureId": "texture-13",
-      "sha256": "a7c704129883205f11cc85be83cdf970ed2c585c4e217f7e17100d640f9dd66b",
-      "byteLength": 4057
+      "sha256": "24ddbd34d9fa96f61c447ac71ba21f5cf9ed9e8601bcab15269d8b6f533b9dff",
+      "byteLength": 4074
     },
     {
       "textureId": "texture-14",
-      "sha256": "f0cd6be466eef6422335c36a7764fd30a0b0233eee80a547cac87886124f16d8",
-      "byteLength": 3673
+      "sha256": "8ed0ceca7b9d3a068f57a44bfd784159e2ca562a8f51f0c0ddf4295c8c629c7a",
+      "byteLength": 3663
     },
     {
       "textureId": "texture-15",
@@ -181,18 +181,18 @@
     },
     {
       "textureId": "texture-18",
-      "sha256": "df00de43df7927b0c3b62d8be1c5cc69dceb24ed28ebd1906a9ec33580ff6694",
-      "byteLength": 3869
+      "sha256": "de0bca8dd2b11d00e4a5926fb070aee6014f54dd7f71cf7c83b84af0755c80a6",
+      "byteLength": 3836
     },
     {
       "textureId": "texture-19",
-      "sha256": "24ddbd34d9fa96f61c447ac71ba21f5cf9ed9e8601bcab15269d8b6f533b9dff",
-      "byteLength": 4074
+      "sha256": "a7c704129883205f11cc85be83cdf970ed2c585c4e217f7e17100d640f9dd66b",
+      "byteLength": 4057
     },
     {
       "textureId": "texture-20",
-      "sha256": "8ed0ceca7b9d3a068f57a44bfd784159e2ca562a8f51f0c0ddf4295c8c629c7a",
-      "byteLength": 3663
+      "sha256": "f0cd6be466eef6422335c36a7764fd30a0b0233eee80a547cac87886124f16d8",
+      "byteLength": 3673
     },
     {
       "textureId": "texture-21",
@@ -866,8 +866,8 @@
       }
     ]
   },
-  "modelVersionId": "preview:nxstage-system-one-interaction-review-v1",
-  "releaseBindingId": "preview:nxstage-system-one-interaction-review-v1",
+  "modelVersionId": "preview:nxstage-system-one-interaction-review-v3",
+  "releaseBindingId": "preview:nxstage-system-one-interaction-review-v3",
   "fidelity": {
     "status": "VISUAL_RECONSTRUCTION",
     "sourceType": "REFERENCE_IMAGES",

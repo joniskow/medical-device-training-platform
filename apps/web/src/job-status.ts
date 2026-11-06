@@ -475,6 +475,8 @@ function renderDraftModules() {
       markDraftDirty();renderDraftModules();
     };certification.append(configure);
   }else{
+    const issuanceLabel=document.createElement('label'),issuance=document.createElement('input');issuance.type='checkbox';issuance.checked=policy.credentialIssuance!=='DISABLED';
+    issuance.onchange=()=>{policy.credentialIssuance=issuance.checked?'ENABLED':'DISABLED';markDraftDirty();};issuanceLabel.append(issuance,document.createTextNode('Issue credentials when requirements are met (turn off for familiarization-only courses)'));certification.append(issuanceLabel);
     const publicSettings=(policy.publicVerification??{enabled:false,issuerName:'',courseTitle:''}) as Record<string,unknown>;
     const publicLabel=document.createElement('label'),publicEnabled=document.createElement('input');publicEnabled.type='checkbox';publicEnabled.checked=publicSettings.enabled===true;
     publicEnabled.onchange=()=>{publicSettings.enabled=publicEnabled.checked;policy.publicVerification=publicSettings;markDraftDirty();};publicLabel.append(publicEnabled,document.createTextNode('Enable public credential verification with the reviewed fields below'));certification.append(publicLabel);

@@ -24,6 +24,28 @@ export function interactionStateViolation(manifest: ModelManifest, transforms: R
   return undefined;
 }
 
+/** Mechanical availability only; the published procedure still decides whether an action advances the task. */
+export function modelInteractionOptions(manifest: ModelManifest, state: Pick<AuthoritativeModelState, 'transforms' | 'completed'>) {
+  return manifest.components.flatMap(component => (component.interactionTargets ?? []).flatMap(target => {
+    const positions: Array<{ label: string; transform?: Partial<ComponentTransform> }> = target.interactionType === 'open'
+      ? [
+        { label: target.openVerb ?? `Open ${target.displayName}`, transform: target.openTranslationMeters !== undefined ? { translationX: target.openTranslationMeters } : { rotationY: target.openRotationRadians ?? component.permittedTransforms?.rotationY?.max ?? 0 } },
+        { label: target.closeVerb ?? `Close ${target.displayName}`, transform: target.openTranslationMeters !== undefined ? { translationX: 0 } : { rotationY: 0 } }
+      ]
+      : [{ label: target.displayName }];
+    return positions.map(position => {
+      const normalized = position.transform ? applyPermittedTransform(component, state.transforms[component.componentId] ?? { rotationY: 0, translationX: 0 }, position.transform) : undefined;
+      const blockedReason = state.completed ? 'This attempt is complete.'
+        : position.transform && !normalized ? 'This movement is unavailable.'
+        : normalized ? interactionStateViolation(manifest, { ...state.transforms, [component.componentId]: normalized }, component.componentId) : undefined;
+      return { componentId: component.componentId, targetId: target.targetId, label: position.label,
+        type: position.transform ? 'transform_component' as const : 'activate_target' as const,
+        ...(position.transform ? { transform: position.transform } : {}), enabled: !blockedReason,
+        ...(blockedReason ? { blockedReason } : {}) };
+    });
+  }));
+}
+
 export function validateAuthoritativeModelState(manifest: ModelManifest, state: AuthoritativeModelState): boolean {
   if (state.releaseBindingId !== manifest.releaseBindingId || state.modelVersionId !== manifest.modelVersionId) return false;
   if (!Number.isSafeInteger(state.sequence) || state.sequence < 0 || !Number.isSafeInteger(state.nextSequence) || state.nextSequence !== state.sequence + 1) return false;

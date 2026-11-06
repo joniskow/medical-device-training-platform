@@ -1,5 +1,5 @@
 import {authenticatedFetch,getAccessToken,getSessionIdentity,setOrganizationId,clearAccessToken,rememberCandidateCourse} from './auth-session.js';
-type CertificationSummary={version:number;passScore:number;maxAttempts:number;cooldownSeconds:number;attemptTtlSeconds:number;repeatedFailureReviewAfter:number|null;expirationDays:number|null;resultSelection:string;requiredActivities:{title:string;kind:string;passScore:number|null}[]};
+type CertificationSummary={credentialIssuance?:'DISABLED';version:number;passScore:number;maxAttempts:number;cooldownSeconds:number;attemptTtlSeconds:number;repeatedFailureReviewAfter:number|null;expirationDays:number|null;resultSelection:string;requiredActivities:{title:string;kind:string;passScore:number|null}[]};
 type CatalogCourse={publishedRevision?:number|null;certification?:CertificationSummary|null;publicId:string;title:string;issuerName:string;revision:number;audience:string;productScope:string;prerequisites:string;issuerStatement:string;intendedUse:string;accessibilityPath:string;estimatedMinutes:number;costDesignation:string;enrollmentNotice?:{version:string;text:string}};
 const host=document.querySelector<HTMLElement>('#courses')!,message=document.querySelector<HTMLElement>('#message')!,reload=document.querySelector<HTMLButtonElement>('#reload')!,more=document.querySelector<HTMLButtonElement>('#more')!;
 const publicId=new URLSearchParams(location.search).get('course');
@@ -69,6 +69,7 @@ function renderRequirements(course:CatalogCourse,article:HTMLElement){
  article.append(text('h3','Published course and certification requirements'),text('p',course.publishedRevision==null?'Published revision is unavailable.':`Published revision ${course.publishedRevision}.`));
  const c=course.certification;
  if(!c){article.append(text('p','Certification requirements are unavailable. Ask the issuer before enrolling if you need a credential.'));return;}
+ if(c.credentialIssuance==='DISABLED'){article.append(text('p','This is a familiarization course. Activity results are recorded, but no credential is issued.'));return;}
  const percent=(value:number)=>`${Number((value*100).toFixed(4))}%`;
  article.append(text('p',`Certification policy version ${c.version}. Complete every required activity and meet an overall score of at least ${percent(c.passScore)} across scored activities. ${c.resultSelection==='best'?'The best completed result':'The latest attempt'} is used for each activity.`));
  const list=document.createElement('ul');for(const activity of c.requiredActivities)list.append(text('li',`${activity.title}: ${activity.kind==='assessment'?'assessment':activity.kind==='simulation'?'interactive simulation':'content completion'}${activity.passScore===null?'':`, passing score ${percent(activity.passScore)}`}.`));article.append(list);

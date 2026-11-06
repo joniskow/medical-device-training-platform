@@ -104,7 +104,8 @@ export interface InteractiveModelRuntime extends ModelRuntime {
   setInteractionEnabled(enabled: boolean): void;
   setCameraInteractive(enabled: boolean): void;
   fitModel(): void;
-  frameComponent(componentId: string): void;
+  frameComponent(componentId: string, view?: { alpha: number; beta: number }): void;
+  frameInteractionTargets(targetIds: string[], view?: { alpha: number; beta: number }): boolean;
   setInteractionHintsVisible(visible: boolean): void;
   interactionBlockReason(targetId: string, destination?: Partial<{ rotationY: number; translationX: number }>): string | undefined;
   listInteractionTargets(): Array<{ targetId: string; componentId: string; displayName: string; interactionType: "press" | "turn" | "open" | "activate"; isOpen: boolean; isFullyOpen: boolean; openVerb: string; closeVerb: string }>;

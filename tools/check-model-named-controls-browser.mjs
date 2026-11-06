@@ -160,6 +160,10 @@ try {
   assert(await evaluate('[...document.querySelectorAll("#action-controls button")].some(button=>button.textContent==="Close Safety cover latch")'), 'The named door action must reflect the accepted state');
   assert(!(await evaluate('window.doorLogs.some(text=>text.includes("select_component"))')), 'A named door action must not submit an extra selection');
   assert.equal(await evaluate('window.doorLogs.filter(text=>text.startsWith("accepted:")).length'), 1, 'A named door action must be accepted exactly once');
+  for (let attempt = 0; attempt < 100; attempt++) {
+    if (await evaluate('/Safety cover latch is open/.test(document.querySelector("#model-status").textContent)')) break;
+    await new Promise(wait => setTimeout(wait, 50));
+  }
   assert.match(await evaluate('document.querySelector("#model-status").textContent'), /Safety cover latch is open/, 'Accepted feedback must report the actual door position');
   await evaluate('new Promise(resolve=>setTimeout(resolve,1400))');
   assert.match(await evaluate('document.querySelector("#model-status").textContent'), /Safety cover latch is open/, 'Performance sampling must not erase the action feedback');
@@ -472,6 +476,17 @@ try {
   await command('Emulation.setTouchEmulationEnabled',{enabled:false});
   assert.equal(await evaluate('window.__testRuntime.getState().transforms["AIC-C04"].rotationY'),.5,'Canceling a direct touch must restore the confirmed dial position');
   assert.equal(boundRequests.filter(action=>action.type==='transform_component').length,1,'A canceled touch must not submit another dial movement');
+  const blurDialPoint=await evaluate('window.__testDialPoint()');
+  await command('Input.dispatchMouseEvent',{type:'mouseMoved',...blurDialPoint});
+  await command('Input.dispatchMouseEvent',{type:'mousePressed',...blurDialPoint,button:'left',buttons:1,clickCount:1});
+  assert.equal(await evaluate('window.__testRuntime.getState().pressedInteractionTargetId'),'AIC-C04-FLOW-DIAL','The focus-interruption check must grab the dial');
+  await command('Input.dispatchMouseEvent',{type:'mouseMoved',x:blurDialPoint.x,y:blurDialPoint.y+45,button:'left',buttons:1});
+  assert.notEqual(await evaluate('window.__testRuntime.getState().transforms["AIC-C04"].rotationY'),.5,'The dial must move before focus changes');
+  await evaluate('document.querySelector("#reset-view").focus()');
+  assert.equal(await evaluate('document.activeElement?.id'),'reset-view','Focus must leave the canvas during the interrupted dial drag');
+  await command('Input.dispatchMouseEvent',{type:'mouseReleased',x:blurDialPoint.x,y:blurDialPoint.y+45,button:'left',buttons:0,clickCount:1});
+  assert.equal(await evaluate('window.__testRuntime.getState().transforms["AIC-C04"].rotationY'),.5,'The interrupted dial must return to its confirmed position');
+  assert.equal(boundRequests.filter(action=>action.type==='transform_component').length,1,'An interrupted dial drag must not submit a movement');
   modelAvailable = true;
   boundState.sequence = 0;
   boundState.nextSequence = 1;

@@ -23,7 +23,7 @@ BEGIN
   END LOOP;
  END LOOP;
  IF jsonb_array_length(required)=0 THEN RETURN NULL;END IF;
- RETURN summary||jsonb_build_object('resultSelection',policy->>'resultSelection','requiredActivities',required);
+ RETURN summary||jsonb_build_object('resultSelection',policy->>'resultSelection','requiredActivities',required)||CASE WHEN policy->>'credentialIssuance'='DISABLED' THEN '{"credentialIssuance":"DISABLED"}'::jsonb ELSE '{}'::jsonb END;
 END $$;
 REVOKE ALL ON FUNCTION public.catalog_certification_summary(jsonb) FROM PUBLIC;
 

@@ -7,6 +7,9 @@ const base={releaseId:'release',releaseHash:'a'.repeat(64),policyId:'policy',pol
 const evidence=[{...base,evidenceId:'quiz-session',activityId:'quiz'},{...base,evidenceId:'sim-attempt',activityId:'sim'}];
 const run=(changes={})=>evaluateCertification({policy,activities,evidence,releaseId:'release',releaseHash:'a'.repeat(64),now:62000,...changes});
 assert.equal(run().eligible,true);assert.deepEqual(run(),run());
+const familiarization=run({policy:{...policy,credentialIssuance:'DISABLED'}});
+assert.equal(familiarization.eligible,false);assert(familiarization.missing.includes('CREDENTIAL_ISSUANCE_DISABLED'));assert(familiarization.activities.every(activity=>activity.passed));
+assert.equal(validCertificationPolicy({...policy,credentialIssuance:'sometimes'},activities),false);
 assert.equal(validCertificationPolicy({...policy,publicVerification:{enabled:true,issuerName:'',courseTitle:'Title'}},activities),false);
 assert.equal(validCertificationPolicy({...policy,publicVerification:{enabled:true,issuerName:'Issuer',courseTitle:'Title',learnerEmail:'private'}},activities),false);
 assert.equal(validCertificationPolicy({...policy,publicVerification:{enabled:false}},activities),true);

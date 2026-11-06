@@ -2,8 +2,8 @@
   "schemaVersion": "authored-model.v1",
   "source": "blender/nxstage_system_one_interaction_review.py",
   "blenderVersion": "5.2.3 LTS",
-  "sha256": "3f39654c055fca75e61c831ffc524b77ca1000ed43b1c411abece80cb1889846",
-  "bytes": 4562268,
+  "sha256": "8de552b1678915cd6c96eb16b275fcccc78703a9c54dc1f06ba69afd7927644b",
+  "bytes": 4746664,
   "reviewStatus": "REVIEW_REQUIRED",
   "fidelity": {
     "status": "VISUAL_RECONSTRUCTION",
