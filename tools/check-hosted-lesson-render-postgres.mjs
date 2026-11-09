@@ -126,7 +126,7 @@ try{
     execFileSync(ffmpeg,['-nostdin','-y','-v','error','-f','lavfi','-i','color=c=navy:s=640x360','-frames:v','1',png],{windowsHide:true});
     const bytes=await readFile(png);objects.set(org+'/'+imageId,{bytes,contentType:'image/png'});
     await pool.query(`UPDATE asset_versions SET size_bytes=$2,sha256=$3 WHERE asset_version_id=$1`,[imageId,bytes.length,sha(bytes)]);
-    const speech={async synthesize(){return {provider:{name:process.env.LESSON_ENGINEERING_SIGNAL==='1'?'engineering-audio-signal':'recorded-system-speech',voice:'local-engineering-voice'},audio:{bytes:await readFile(wav),contentType:'audio/wav',durationSeconds:3}};}};
+    const speech={async synthesize(request){return {provider:{name:process.env.LESSON_ENGINEERING_SIGNAL==='1'?'engineering-audio-signal':'recorded-system-speech',voice:request.voice},audio:{bytes:await readFile(wav),contentType:'audio/wav',durationSeconds:3}};}};
     const rough=await service.create(tenant,request('real-rough'));
     const rendered=await processJob(rough,{render:undefined,ffmpeg,ffprobe,speech});assert.equal(rendered.state,'SUCCEEDED',JSON.stringify(rendered.lastFailure));
     const roughResult=await service.get(tenant,rough.jobId);

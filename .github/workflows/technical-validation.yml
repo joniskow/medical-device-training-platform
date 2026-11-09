@@ -42,6 +42,7 @@ jobs:
           pnpm install --frozen-lockfile
       - name: Type and source lint gates
         run: |
+          pnpm build
           pnpm typecheck
           node tools/lint-source.mjs
       - name: Compile infrastructure with verified pinned compiler
@@ -55,9 +56,8 @@ jobs:
           printf '%s  %s\n' "${digest#sha256:}" output/technical-tools/bicep | sha256sum --check
           chmod +x output/technical-tools/bicep
           BICEP_CLI="$PWD/output/technical-tools/bicep" node tools/technical-validation.mjs --profile infrastructure
-      - name: Fresh build and controlled headless gates
+      - name: Controlled headless gates
         run: |
-          pnpm build
           node tools/technical-validation.mjs --profile pure
           node tools/technical-validation.mjs --profile auth
       - name: Provision disposable restricted-role infrastructure
