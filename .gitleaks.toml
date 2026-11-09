@@ -1,0 +1,9 @@
+title = "Medical device training secret scan"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Only the public Azurite emulator key and exact synthetic local HTTP test token"
+regexTarget = "secret"
+regexes = ['Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==', 'operational-test-secret-at-least-32-bytes']

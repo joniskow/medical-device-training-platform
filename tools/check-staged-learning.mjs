@@ -14,8 +14,8 @@ function provider(options = {}) {
   const calls = [];
   return { calls, async execute(req) {
     calls.push(structuredClone(req));
-    if (calls.length === 1) return draft(options.plan ?? plan);
     if (options.failAt === calls.length) return { ...draft(undefined), status: 'REJECTED', failure: { class: 'VALIDATION', code: 'AI_OUTPUT_INCOMPLETE', message: 'Incomplete' } };
+    if (calls.length === 1) return draft(options.plan ?? plan);
     const module = plan.modules[calls.length - 2];
     return draft({ schemaVersion: 'course-draft.v1', title: plan.title, citations: [citation], modules: [{ moduleId: module.moduleId, title: module.title, activities: [
       { activityId: `${module.moduleId}:teach`, type: 'rich_text', text: 'Check Ready.', objectiveIds: [`o:${calls.length - 1}`], evidenceIds: options.omitEvidence ? [] : ['e:0'], citations: [citation] },
@@ -30,6 +30,8 @@ const source = provider();
 const result = await createStagedLearningGateway(source).execute(request);
 assert.equal(result.status, 'DRAFT');
 assert.equal(source.calls.length, 3);
+assert.equal(source.calls[0].tokenBudget, 1500, 'The eight-category outline must have sufficient room within the shared ceiling.');
+assert.equal(source.calls[1].tokenBudget, 1250);
 assert(source.calls.reduce((sum, item) => sum + item.tokenBudget, 0) <= request.tokenBudget);
 assert.equal(result.output.modules.length, 2);
 assert.deepEqual(result.metrics, { inputTokens: 30, outputTokens: 60 });
@@ -82,6 +84,10 @@ const inconsistent = await createStagedLearningGateway({ execute: async req => {
 assert(inconsistent.output.learningCompleteness.objectives.every(o => !o.taught && !o.assessed), 'An unrelated allowed citation must not receive evidence coverage credit.');
 assert.deepEqual(inconsistent.output.learningCompleteness.untaughtEvidenceIds, ['e:0']);
 const partial = await createStagedLearningGateway(provider({ failAt: 3 })).execute(request);
+assert(partial.warnings.some(w => w.code === 'LEARNING_STAGE_FAILED' && w.message.includes('module')));
+const failedPlan = await createStagedLearningGateway(provider({ failAt: 1 })).execute(request);
+assert.equal(failedPlan.output, undefined);
+assert(failedPlan.warnings.some(w => w.code === 'LEARNING_STAGE_FAILED' && w.message.includes('plan')));
 assert.equal(partial.output, undefined);
 assert.equal(partial.status, 'REJECTED');
 assert.deepEqual(partial.metrics, { inputTokens: 30, outputTokens: 60 });

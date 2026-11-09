@@ -60,7 +60,7 @@ export function createStagedLearningGateway(gateway: AiGatewayPort): AiGatewayPo
     if (!Number.isSafeInteger(request.tokenBudget) || request.tokenBudget < 1 || request.tokenBudget > technicalLimits.maxAiTokensPerRun) return reject('TOKEN_BUDGET_INVALID', 'The requested token budget is outside the approved range.');
     if (request.tokenBudget < 2000) return reject('LEARNING_BUDGET_TOO_SMALL', 'Staged learning requires at least 2,000 output tokens shared across planning and module generation.');
     const input = record(request.input) ? request.input : {};
-    const planBudget = Math.min(1000, Math.floor(request.tokenBudget / 4));
+    const planBudget = Math.min(1500, Math.floor(request.tokenBudget * 3 / 8));
     const maxModules = Math.min(input.videoLesson === true ? 1 : 2, Math.floor((request.tokenBudget - planBudget) / 1200));
     const run = async (call: AiGatewayRequest) => {
       last = await gateway.execute(call);
@@ -69,8 +69,8 @@ export function createStagedLearningGateway(gateway: AiGatewayPort): AiGatewayPo
       return last;
     };
     const planned = await run({ ...request, tokenBudget: planBudget, outputSchemaVersion: 'learning-plan.v1', input: { ...input, learningStage: { kind: 'plan', maxModules } } });
-    const failed = (result: AiGatewayResult): AiGatewayResult => ({ ...result, operation: request.operation, output: undefined, citations: [], metrics: { ...metrics }, warnings: [...warnings] });
-    if (planned.status !== 'DRAFT') return failed(planned);
+    const failed = (result: AiGatewayResult, stage: string): AiGatewayResult => ({ ...result, operation: request.operation, output: undefined, citations: [], metrics: { ...metrics }, warnings: [...warnings, warning('LEARNING_STAGE_FAILED', `Generation failed at ${stage}; no partial draft was returned.`)] });
+    if (planned.status !== 'DRAFT') return failed(planned, 'plan');
     if (!validPlan(planned.output, request, maxModules)) return reject('LEARNING_PLAN_INVALID', 'The outline must cover all evidence categories, bind exact supplied citations and assign supported evidence to bounded, uniquely identified objectives and modules.');
     const plan = planned.output;
     const modules: Record<string, unknown>[] = [], videoLessons: Record<string, unknown>[] = [];
@@ -80,7 +80,7 @@ export function createStagedLearningGateway(gateway: AiGatewayPort): AiGatewayPo
     const moduleBudget = Math.floor((request.tokenBudget - planBudget) / plan.modules.length);
     for (const module of plan.modules) {
       const generated = await run({ ...request, tokenBudget: moduleBudget, input: { ...input, learningStage: { kind: 'module', module, evidence: plan.evidence } } });
-      if (generated.status !== 'DRAFT') return failed(generated);
+      if (generated.status !== 'DRAFT') return failed(generated, `module ${module.moduleId}`);
       const output = generated.output;
       if (!record(output) || output.schemaVersion !== request.outputSchemaVersion || !Array.isArray(output.modules) || output.modules.length !== 1 || !record(output.modules[0]) || output.modules[0].moduleId !== module.moduleId || !Array.isArray(output.modules[0].activities) || !output.modules[0].activities.length || ['model', 'simulation', 'policy', 'story'].some(key => output[key] !== undefined)) return reject('LEARNING_MODULE_INVALID', 'Each stage must return exactly its assigned module without replacing course authority.');
       const activities = output.modules[0].activities;
