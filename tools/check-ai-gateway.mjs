@@ -34,6 +34,8 @@ assert.deepEqual(result.metrics, {inputTokens:123, outputTokens:42});
 const invalid = await azure.execute({ ...request, tokenBudget: 20_000 });
 assert.equal(invalid.status, "REJECTED");
 assert.equal(invalid.failure.code, "TOKEN_BUDGET_INVALID");
+assert.equal((await azure.execute({...request,tokenBudget:4001})).failure?.code,'TOKEN_BUDGET_INVALID');
+assert.equal((await azure.execute({...request,tokenBudget:4000})).status,'DRAFT');
 
 const options={endpoint:'https://example.openai.azure.com',apiKey:'test-key',deployment:'training',model:'test-model',apiVersion:'2024-10-21'};
 const output={schemaVersion:'course-draft.v1',title:'Draft',modules:[]};
@@ -80,4 +82,34 @@ const service=createSourceGroundedDraftService({
 const rejectedRun=await service.generate({...request.tenant,courseVersionId:'course'}, {sourceArtifactIds:['source']});
 assert.equal(rejectedRun.appliedToCourse,false);assert.equal(applied,false);assert.equal(calls,0);
 assert.equal(recorded.result.failure.code,'AI_INPUT_TOO_LARGE');
+let retrievalRequest,retrievalScores=[0],retrievalMetadata={};
+const retrieval=createSourceGroundedDraftService({
+ knowledge:{listForAssetVersions:async()=>retrievalScores.map((retrievalScore,index)=>({assetVersionId:'source',sourceChunkCount:12,...retrievalMetadata,...(retrievalScore===undefined?{}:{retrievalScore}),text:'A control-panel description unrelated to the requested fault.',citation:{page:index+1}}))},
+ gateway:{execute:async input=>{retrievalRequest=input;return {operation:input.operation,status:'REJECTED',citations:[],warnings:[],metrics:{},providerMetadata:{provider:'deterministic',deployment:'test',model:'test',apiVersion:'test'}};}},
+ aiRuns:{record:async()=> 'ai:retrieval'}
+});
+const missed=await retrieval.generate(request.tenant,{sourceArtifactIds:['source'],userInstruction:'blocked pressure sensor failure'});
+assert(missed.result.warnings.some(w=>w.code==='SOURCE_QUERY_NO_MATCH'));
+assert(missed.result.warnings.some(w=>w.code==='SOURCE_CONTEXT_PARTIAL'));
+assert.equal(retrievalRequest.input.sourceCoverage[0].matchingPassages,0);
+retrievalScores=[0,0.3];
+const matched=await retrieval.generate(request.tenant,{sourceArtifactIds:['source'],userInstruction:'blocked pressure sensor failure'});
+assert.equal(matched.sourceCoverage[0].matchingPassages,1);assert(!matched.result.warnings.some(w=>w.code==='SOURCE_QUERY_NO_MATCH'));
+retrievalScores=[undefined];
+const unknown=await retrieval.generate(request.tenant,{sourceArtifactIds:['source'],userInstruction:'blocked pressure sensor failure'});
+assert.equal(Object.hasOwn(unknown.sourceCoverage[0],'matchingPassages'),false);assert(!unknown.result.warnings.some(w=>w.code==='SOURCE_QUERY_NO_MATCH'));
+retrievalScores=[0];retrievalMetadata={retrievalConfigurationId:'test:embedding-v1',retrievalRankScore:0.016};
+const hybridMiss=await retrieval.generate(request.tenant,{sourceArtifactIds:['source'],userInstruction:'blocked pressure sensor failure'});
+assert.equal(hybridMiss.sourceCoverage[0].matchingPassages,0,'A positive fused ordering rank must not manufacture lexical matches');
+assert(hybridMiss.result.warnings.some(w=>w.code==='SOURCE_QUERY_NO_MATCH'));
+assert.equal(retrievalRequest.input.retrievalVersion,'azure-pgvector-rrf1536.v1');
+assert.deepEqual(retrievalRequest.input.retrievalConfigurations,['test:embedding-v1']);
+assert.equal(retrievalRequest.input.sourceChunks[0].retrievalRankScore,0.016);
+retrievalScores=[undefined];
+const semanticOnly=await retrieval.generate(request.tenant,{sourceArtifactIds:['source'],userInstruction:'blocked pressure sensor failure'});
+assert.equal(Object.hasOwn(semanticOnly.sourceCoverage[0],'matchingPassages'),false,'An ordering-only score leaves lexical evidence unknown');
+assert(!semanticOnly.result.warnings.some(w=>w.code==='SOURCE_QUERY_NO_MATCH'));
+retrievalMetadata={retrievalConfigurationId:'test:embedding-v1'};
+await retrieval.generate(request.tenant,{sourceArtifactIds:['source'],userInstruction:'blocked pressure sensor failure'});
+assert.equal(Object.hasOwn(retrievalRequest.input.sourceChunks[0],'retrievalRankScore'),false,'Unknown fused rank stays absent');
 console.log('AI gateway passed: complete draft acceptance, input bounds without truncation, finish/refusal/schema rejection, usage preservation, safe failure classification and rejected-run audit without draft mutation.');

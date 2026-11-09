@@ -10,12 +10,15 @@ import type {
   ReviewTargetType,
   TenantContext
 } from "@medical-device/contracts";
-import { CoursePublicationValidationError, validateCourseForPublication,validateModelExploration } from "@medical-device/simulation-schema";
+import { CoursePublicationValidationError, validateCourseForPublication,validateModelExploration,validateLessonBrief,invalidateBriefArtifacts } from "@medical-device/simulation-schema";
 import { validateBrowserModelManifest,validateSimulationModelActions } from "@medical-device/model-runtime";
 import { withTenantTransaction } from "./tenant-transaction.js";
 import { publishSimulationRuntime } from "./publish-runtime.js";
 import {draftHistoryOperations} from './draft-history.js';
 import {draftSimulationOperations} from './draft-simulation.js';
+import { isCurrentLessonRenderManifest } from '@medical-device/contracts';
+import { lessonFinalPublicationBindingError } from '@medical-device/simulation-schema';
+import { lessonInstructionAuthors, type LessonAuthorHistoryRow } from './lesson-review-authors.js';
 
 type JsonObject = Record<string, unknown>;
 
@@ -231,6 +234,7 @@ export function createPostgresCourseReviewStore(pool: Pool, options: { releaseAr
 
     async saveDraft({ tenant, courseVersionId, revision, content }) {
       if (!tenant.actorId || !Number.isSafeInteger(revision) || revision < 1 || !object(content) || content.schemaVersion !== "course-draft.v1" || !text(content.title)) throw new Error("COURSE_DRAFT_INVALID");
+      if (content.lessonBrief !== undefined && !validateLessonBrief(content.lessonBrief).valid) throw new Error('LESSON_BRIEF_INVALID');
       return withTenantTransaction(pool, tenant, async (client) => {
         const version = await courseVersion(client, tenant, courseVersionId, true);
         if (!version) return null;
@@ -238,7 +242,7 @@ export function createPostgresCourseReviewStore(pool: Pool, options: { releaseAr
         if (version.revision !== revision) throw new Error("COURSE_VERSION_STALE");
         // Provenance belongs to the saved source, never to a browser-supplied field.
         const { _source: ignoredSource, _lineage: ignoredLineage, ...editable } = content;
-        const next = { ...editable, ...(version.content._source ? { _source: version.content._source } : {}),...(version.content._lineage?{_lineage:version.content._lineage}:{}) };
+        const next = invalidateBriefArtifacts(version.content, { ...editable, ...(version.content._source ? { _source: version.content._source } : {}),...(version.content._lineage?{_lineage:version.content._lineage}:{}) });
         if (hash(next) === hash(version.content)) return { revision };
         await client.query(
           `INSERT INTO audit_events (audit_event_id, organization_id, actor_id, event_type, resource_type, resource_id, details, created_at)
@@ -356,6 +360,8 @@ export function createPostgresCourseReviewStore(pool: Pool, options: { releaseAr
 
     async publish(input) {
       return withTenantTransaction(pool, input.tenant, async (client) => {
+        // Lock before source/version rows; withdrawal takes the same order, avoiding publication deadlocks.
+        await client.query("SELECT pg_advisory_xact_lock(hashtextextended('lifecycle:'||$1,0))",[input.tenant.organizationId]);
         const existingKey = await client.query<ReleaseRow & { request_hash: string }>(
           `SELECT release_id, organization_id, course_version_id, status, manifest, release_hash, published_by, created_at, request_hash
            FROM release_manifests WHERE organization_id = $1 AND idempotency_key = $2`,
@@ -384,7 +390,10 @@ export function createPostgresCourseReviewStore(pool: Pool, options: { releaseAr
           [input.tenant.organizationId, input.courseVersionId, version.revision]
         );
         const latest = new Map<string, DecisionRow>();
-        for (const decision of decisions.rows) latest.set(`${decision.target_type}:${decision.target_id}`, decision);
+        for (const decision of decisions.rows) {
+          const key=`${decision.target_type}:${decision.target_id}`;
+          if (!latest.has(key)) latest.set(key, decision);
+        }
         const courseApproval = [...latest.values()].find((item) => item.target_type === "COURSE" && item.target_id === input.courseVersionId);
         const aiApproval = [...latest.values()].find((item) => item.target_type === "AI_DRAFT" && item.decision === "APPROVE");
         const sourceArtifactIds = Array.isArray(version.content.sourceArtifactIds)
@@ -407,9 +416,9 @@ export function createPostgresCourseReviewStore(pool: Pool, options: { releaseAr
         });
         const videoLessonMediaIds=(Array.isArray(version.content.videoLessons)?version.content.videoLessons:[]).flatMap(lesson=>{
           const scenes=object(lesson)?.scenes;
-          return (Array.isArray(scenes)?scenes:[]).flatMap(scene=>{
+          return [...(text(object(object(lesson)?.finalReview)?.assetVersionId)?[String(object(object(lesson)?.finalReview)?.assetVersionId)]:[]),...(Array.isArray(scenes)?scenes:[]).flatMap(scene=>{
             const visual=object(scene)?.visual;const id=text(object(visual)?.assetVersionId);return id?[id]:[];
-          });
+          })];
         });
         const combinedSourceIds = [...new Set([...sourceArtifactIds, ...(aiRun.rows[0]?.source_artifact_ids ?? []),...mediaSourceIds,...videoLessonMediaIds])];
         const sources = combinedSourceIds.length === 0 ? [] : (await client.query<{ asset_version_id: string; sha256: string; state: string; source_type:string; content_type:string }>(
@@ -418,6 +427,27 @@ export function createPostgresCourseReviewStore(pool: Pool, options: { releaseAr
           [input.tenant.organizationId, combinedSourceIds]
         )).rows;
         if (sources.length !== combinedSourceIds.length || sources.some((source) => source.state !== "APPROVED")) throw new Error("SOURCE_ARTIFACT_NOT_APPROVED");
+        const lessonAuthorHistory = Array.isArray(version.content.videoLessons) && version.content.videoLessons.length ? (await client.query<LessonAuthorHistoryRow>(
+          `WITH RECURSIVE ancestry AS (
+             SELECT course_version_id, content, created_by FROM course_versions WHERE organization_id=$1 AND course_version_id=$2
+             UNION
+             SELECT parent.course_version_id, parent.content, parent.created_by FROM course_versions parent
+             JOIN ancestry child ON parent.course_version_id=child.content #>> '{_lineage,sourceCourseVersionId}'
+             WHERE parent.organization_id=$1
+           )
+           SELECT ancestry.created_by, audit.actor_id, audit.details FROM ancestry
+           LEFT JOIN audit_events audit ON audit.organization_id=$1 AND audit.resource_type='course_version' AND audit.resource_id=ancestry.course_version_id
+             AND jsonb_typeof(audit.details->'before')='object' AND jsonb_typeof(audit.details->'after')='object'`,
+          [input.tenant.organizationId, input.courseVersionId]
+        )).rows : [];
+        for (const item of Array.isArray(version.content.videoLessons)?version.content.videoLessons:[]) {
+          const lesson=object(item), review=object(lesson?.finalReview), artifact=object(lesson?.renderArtifact);
+          const media=sources.find(source=>source.asset_version_id===review?.assetVersionId);
+          const approval=latest.get(`VIDEO_LESSON:${lesson?.lessonId}`);
+          if (!lesson || !isCurrentLessonRenderManifest(artifact,lesson)) throw new Error('LESSON_FINAL_RENDER_STALE');
+          const bindingError=lessonFinalPublicationBindingError(lesson,{media:media?{assetVersionId:media.asset_version_id,sha256:media.sha256,sourceType:media.source_type,state:media.state}:undefined,approval:approval?{decision:approval.decision,actorId:approval.actor_id,revision:approval.revision}:undefined,authorId:version.created_by,authorIds:lessonInstructionAuthors(lesson,lessonAuthorHistory),revision:version.revision});
+          if(bindingError)throw new Error(bindingError);
+        }
         const publicationValidation = validateCourseForPublication({
           course: version.content,
           approvedSourceArtifactIds: sources.map((source) => source.asset_version_id),

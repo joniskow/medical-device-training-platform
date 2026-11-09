@@ -2,8 +2,13 @@ import type { Pool } from "pg";
 import {randomUUID,createHash} from 'node:crypto';
 import type { KnowledgeChunkRecord, KnowledgeStorePort, TenantContext } from "@medical-device/contracts";
 import { withTenantTransaction } from "./tenant-transaction.js";
+import type {SourceEmbeddingProvider} from '@medical-device/contracts';
+import {hybridKnowledgeRows,writeKnowledgeEmbeddings,prepareKnowledgeEmbeddings} from './knowledge-embeddings.js';
 
 interface ChunkRow {
+  retrieval_score?:number|null;
+  retrieval_rank_score?:number;
+  retrieval_configuration_id?:string;
   source_chunk_count?: number;
   source_hash?: string;
   chunk_id: string;
@@ -17,6 +22,9 @@ interface ChunkRow {
 function fromRow(row: ChunkRow): KnowledgeChunkRecord {
   return {
     chunkId: row.chunk_id,
+    ...(row.retrieval_score===undefined||row.retrieval_score===null?{}:{retrievalScore:Number(row.retrieval_score)}),
+    ...(row.retrieval_rank_score===undefined?{}:{retrievalRankScore:Number(row.retrieval_rank_score)}),
+    ...(row.retrieval_configuration_id===undefined?{}:{retrievalConfigurationId:row.retrieval_configuration_id}),
     ...(row.source_hash === undefined ? {} : {sourceHash:row.source_hash}),
     ...(row.source_chunk_count === undefined ? {} : {sourceChunkCount: Number(row.source_chunk_count)}),
     organizationId: row.organization_id,
@@ -27,7 +35,7 @@ function fromRow(row: ChunkRow): KnowledgeChunkRecord {
   };
 }
 
-export function createPostgresKnowledgeStore(pool: Pool): KnowledgeStorePort {
+export function createPostgresKnowledgeStore(pool: Pool, embeddings?:SourceEmbeddingProvider): KnowledgeStorePort {
   return {
     async reviewSource(tenant, assetVersionId, input) {
       if (!tenant.actorId || !/^[a-f0-9]{64}$/.test(input.sourceHash) || !['APPROVE','REJECT'].includes(input.decision) || !input.rationale.trim() || input.rationale.length>4000 || !input.idempotencyKey || input.idempotencyKey.length>200) throw Error('SOURCE_REVIEW_INVALID');
@@ -55,7 +63,7 @@ export function createPostgresKnowledgeStore(pool: Pool): KnowledgeStorePort {
            FROM knowledge_chunks k JOIN asset_versions v ON v.asset_version_id=k.asset_version_id AND v.organization_id=k.organization_id
            JOIN assets a ON a.asset_id=v.asset_id AND a.organization_id=v.organization_id
            WHERE k.organization_id=$1 AND k.asset_version_id=$2 AND ($3::text IS NULL OR k.chunk_id > $3)
-             AND v.state IN ('READY_FOR_REVIEW','APPROVED') AND a.status NOT IN ('QUARANTINED','REJECTED','RETIRED','SUSPENDED')
+             AND NOT public.lifecycle_asset_suppressed(v.asset_version_id) AND v.state IN ('READY_FOR_REVIEW','APPROVED') AND a.status NOT IN ('QUARANTINED','REJECTED','RETIRED','SUSPENDED')
            ORDER BY k.chunk_id LIMIT 21`, [tenant.organizationId, assetVersionId, after ?? null]
         );
         const first = result.rows[0];
@@ -71,7 +79,7 @@ export function createPostgresKnowledgeStore(pool: Pool): KnowledgeStorePort {
           `SELECT v.asset_version_id, v.file_name, v.state, count(k.chunk_id)::int AS chunk_count
            FROM asset_versions v JOIN assets a ON a.asset_id=v.asset_id AND a.organization_id=v.organization_id
            JOIN knowledge_chunks k ON k.asset_version_id=v.asset_version_id AND k.organization_id=v.organization_id
-           WHERE v.organization_id=$1 AND v.state IN ('READY_FOR_REVIEW','APPROVED')
+           WHERE v.organization_id=$1 AND NOT public.lifecycle_asset_suppressed(v.asset_version_id) AND v.state IN ('READY_FOR_REVIEW','APPROVED')
              AND a.status NOT IN ('QUARANTINED','REJECTED','RETIRED','SUSPENDED')
              AND ($2::text IS NULL OR v.asset_version_id > $2)
            GROUP BY v.asset_version_id, v.file_name, v.state ORDER BY v.asset_version_id LIMIT 51`,
@@ -83,10 +91,12 @@ export function createPostgresKnowledgeStore(pool: Pool): KnowledgeStorePort {
     },
 
     async replaceForAssetVersion(tenant, assetVersionId, chunks) {
+      const prepared=embeddings?await prepareKnowledgeEmbeddings(pool,tenant,assetVersionId,chunks,embeddings):undefined;
       return withTenantTransaction(pool, tenant, async (client) => {
-        const source = await client.query("SELECT sha256 FROM asset_versions WHERE organization_id=$1 AND asset_version_id=$2", [tenant.organizationId, assetVersionId]);
+        const source = await client.query("SELECT sha256 FROM asset_versions WHERE organization_id=$1 AND asset_version_id=$2 AND NOT public.lifecycle_asset_suppressed(asset_version_id)", [tenant.organizationId, assetVersionId]);
         if (!source.rows[0] || chunks.some(chunk => chunk.organizationId !== tenant.organizationId || chunk.assetVersionId !== assetVersionId)) throw new Error("SOURCE_ARTIFACT_NOT_FOUND");
-        await client.query("DELETE FROM knowledge_chunks WHERE organization_id=$1 AND asset_version_id=$2", [tenant.organizationId, assetVersionId]);
+        if(prepared&&prepared.sourceHash!==source.rows[0].sha256)throw Error('SOURCE_HASH_CHANGED');
+        await client.query("DELETE FROM knowledge_chunks WHERE organization_id=$1 AND asset_version_id=$2 AND NOT public.lifecycle_asset_suppressed(asset_version_id)", [tenant.organizationId, assetVersionId]);
         for (const chunk of chunks) {
           await client.query(
             `INSERT INTO knowledge_chunks (
@@ -96,18 +106,20 @@ export function createPostgresKnowledgeStore(pool: Pool): KnowledgeStorePort {
             [chunk.chunkId, tenant.organizationId, assetVersionId, chunk.text, JSON.stringify(chunk.citation), chunk.heading ?? null, source.rows[0].sha256]
           );
         }
+        if(embeddings&&prepared)await writeKnowledgeEmbeddings(client,tenant,chunks,prepared.vectors,embeddings,source.rows[0].sha256);
       });
     },
 
     async search(tenant, query, limit = 8) {
       const normalized = query.trim().slice(0, 256);
       if (!normalized) return [];
+      if(embeddings)return (await hybridKnowledgeRows(pool,tenant,undefined,normalized,Math.min(Math.max(limit,1),50),embeddings)).map(fromRow);
       return withTenantTransaction(pool, tenant, async (client) => {
         const result = await client.query<ChunkRow>(
           `SELECT k.chunk_id, k.organization_id, k.asset_version_id, k.chunk_text, k.citation, k.heading
            FROM knowledge_chunks k JOIN asset_versions v ON v.asset_version_id=k.asset_version_id AND v.organization_id=k.organization_id
            JOIN assets a ON a.asset_id=v.asset_id AND a.organization_id=v.organization_id
-           WHERE k.organization_id=$3 AND v.state IN ('READY_FOR_REVIEW','APPROVED')
+           WHERE k.organization_id=$3 AND NOT public.lifecycle_asset_suppressed(v.asset_version_id) AND v.state IN ('READY_FOR_REVIEW','APPROVED')
              AND a.status NOT IN ('QUARANTINED','REJECTED','RETIRED','SUSPENDED')
              AND lower(k.chunk_text) LIKE lower($1) ESCAPE '\\'
            ORDER BY k.created_at, k.chunk_id
@@ -122,6 +134,7 @@ export function createPostgresKnowledgeStore(pool: Pool): KnowledgeStorePort {
       if (typeof query !== "string" || query.length > 2000) throw new Error("RETRIEVAL_QUERY_INVALID");
       const ids = [...new Set(assetVersionIds.map((value) => value.trim()).filter(Boolean))].slice(0, 32);
       if (ids.length === 0) return [];
+      if(embeddings&&query.trim())return (await hybridKnowledgeRows(pool,tenant,ids,query,Math.min(Math.max(limit,1),100),embeddings)).map(fromRow);
       return withTenantTransaction(pool, tenant, async (client) => {
         const result = await client.query<ChunkRow>(
           `WITH terms AS (
@@ -129,12 +142,13 @@ export function createPostgresKnowledgeStore(pool: Pool): KnowledgeStorePort {
              FROM unnest(tsvector_to_array(to_tsvector('english',$4::text))) AS words(term)
            ), ranked AS (
              SELECT k.chunk_id, k.organization_id, k.asset_version_id, k.chunk_text, k.citation, k.heading, k.source_hash,
+               CASE WHEN numnode(terms.query)>0 THEN ts_rank_cd(to_tsvector('english',k.chunk_text),terms.query)::float8 ELSE NULL END AS retrieval_score,
                row_number() OVER (PARTITION BY k.asset_version_id ORDER BY ts_rank_cd(to_tsvector('english',k.chunk_text),terms.query) DESC,k.created_at,k.chunk_id) AS source_rank,
                count(*) OVER (PARTITION BY k.asset_version_id)::int AS source_chunk_count
              FROM knowledge_chunks k CROSS JOIN terms JOIN asset_versions v ON v.asset_version_id=k.asset_version_id AND v.organization_id=k.organization_id
              JOIN assets a ON a.asset_id=v.asset_id AND a.organization_id=v.organization_id
              WHERE k.organization_id=$3 AND k.asset_version_id = ANY($1::text[]) AND k.source_hash=v.sha256
-               AND v.state IN ('READY_FOR_REVIEW','APPROVED')
+               AND NOT public.lifecycle_asset_suppressed(v.asset_version_id) AND v.state IN ('READY_FOR_REVIEW','APPROVED')
                AND a.status NOT IN ('QUARANTINED','REJECTED','RETIRED','SUSPENDED')
            ) SELECT * FROM ranked ORDER BY source_rank,asset_version_id
            LIMIT $2`,

@@ -74,6 +74,7 @@ async function open(id: string) {
       const article=document.createElement("article");article.append(el("h4",activity.title),el("p",activity.instructions));host.append(article);
       const progress=result.progress?.find((item:Data)=>item.activityId===activity.activityId);
       if(progress)article.append(el("p",`Latest attempt: ${progress.status}${typeof progress.score==='number'?` · ${progress.score} / ${progress.maxScore}`:""}`));
+      if(progress?.status==='FAILED'&&activity.remediation)renderRemediation(article,activity.remediation,id,current);
       if(["text","rich_text"].includes(activity.type)) {
         article.append(el("p",activity.text));
         if(progress?.status==='ACKNOWLEDGED')article.append(el('p','You marked this reading as reviewed.'));
@@ -163,11 +164,23 @@ async function start(activityId:string,current:number) {
   if(current!==generation)return;
   startKeys.delete(binding);renderAssessment(session);
 }
+function renderRemediation(host:HTMLElement,remediation:Data,enrollmentId:string,current:number) {
+  const section=document.createElement('section');section.dataset.remediation='true';
+  section.append(el('h4','Review this learning objective'),el('p',String(remediation.objective)),el('p','Replay the approved scene, then return to the activity. This review does not change your score or retry rules.'));
+  const identity=getSessionIdentity();
+  mediaViews.push(renderLearnerMedia(section,'video',false,{
+    active:()=>current===generation&&identity===getSessionIdentity(),supplemental:true,startSeconds:remediation.startSeconds,
+    load:()=>api(`enrollments/${encodeURIComponent(enrollmentId)}/activities/${encodeURIComponent(remediation.activityId)}/media`) as any,
+    acknowledge:async()=>{}
+  }));host.append(section);
+}
 function renderAssessment(session:Data) {
   const render=++assessmentRender;
   const current=generation,host=q("#assessment");host.replaceChildren(el("h2",`Assessment · attempt ${session.attemptNumber}`));host.hidden=false;
   host.append(el("p",session.result ? `${session.status}: ${session.result.score} / ${session.result.maxScore}` : `${session.status} · expires ${new Date(session.expiresAt).toLocaleString()}`));
   if(session.status!=="IN_PROGRESS"){
+    const activity=course?.content?.modules?.flatMap((m:Data)=>m.activities).find((a:Data)=>a.activityId===session.activityId);
+    if(session.status==='FAILED'&&activity?.remediation&&course)renderRemediation(host,activity.remediation,course.enrollmentId,current);
     for(const [key,title] of [['demonstratedCompetencyIds','Demonstrated competencies'],['missedCompetencyIds','Competencies to review']]){
       const values=session.result?.[key];if(Array.isArray(values)&&values.length){host.append(el('h3',title));const list=document.createElement('ul');for(const value of values)list.append(el('li',String(value)));host.append(list);}
     }

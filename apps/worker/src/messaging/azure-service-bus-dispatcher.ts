@@ -18,6 +18,15 @@ export function canonicalJobMessage(job: JobEnvelope<unknown>): string {
   return canonicalize(job);
 }
 
+export function scheduledJobMessageId(job:JobEnvelope<unknown>):string {
+  const deferral=job.operatorMetadata?.admissionDeferral;
+  if(deferral!==undefined){
+    if(typeof deferral!=='string'||!/^[a-f0-9-]{36}$/.test(deferral))throw Error('INVALID_ADMISSION_DEFERRAL');
+    return `${job.jobId}:defer:${deferral}`;
+  }
+  return `${job.jobId}:retry:${job.attempt}`;
+}
+
 export function createAzureServiceBusDispatcher(options: AzureServiceBusDispatcherOptions): JobDispatcherPort & { enqueueAt<TPayload>(job: JobEnvelope<TPayload>, availableAt: string): Promise<{ jobId: string }>; close(): Promise<void> } {
   if (options.signingSecret.length < 32) throw new Error("SERVICE_BUS_SIGNING_SECRET_TOO_SHORT");
   const sender: ServiceBusSender = options.client.createSender(options.queueName);
@@ -25,7 +34,7 @@ export function createAzureServiceBusDispatcher(options: AzureServiceBusDispatch
   async function send<TPayload>(job: JobEnvelope<TPayload>, availableAt?: string) {
     const signature = createHmac("sha256", options.signingSecret).update(canonicalJobMessage(job)).digest("hex");
     const message: ServiceBusMessage = {
-      messageId: availableAt ? `${job.jobId}:retry:${job.attempt}` : job.jobId,
+      messageId: availableAt ? scheduledJobMessageId(job) : job.jobId,
       subject: job.jobType,
       correlationId: job.tenant.correlationId,
       contentType: "application/json",

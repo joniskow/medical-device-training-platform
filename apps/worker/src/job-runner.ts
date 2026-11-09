@@ -34,10 +34,16 @@ async function quarantineThenFail(input: {
   blobKey: string;
   reason: string;
   failure: FailureDetail;
+  lifecycleStore?: AssetLifecyclePort;
   now?: string;
 }): Promise<JobRecord<AssetProcessingRequest> | null> {
   try {
-    await input.storage.quarantine({ blobKey: input.blobKey, reason: input.reason });
+    // The store acquires the current job fence before quarantine I/O. A stale
+    // worker cannot delete the source, and failed quarantine rolls back state.
+    return await input.jobStore.fail(input.tenant, input.job.jobId, input.workerId, input.job.leaseGeneration ?? 0, input.failure, input.now, undefined, {
+      ...(input.lifecycleStore ? {assetTransition:{assetVersionId:input.job.payload.inputAssetVersionId,state:'QUARANTINED' as const,reason:input.reason}} : {}),
+      beforeCommit:()=>input.storage.quarantine({blobKey:input.blobKey,reason:input.reason})
+    });
   } catch {
     return input.jobStore.fail(
       input.tenant,
@@ -48,7 +54,6 @@ async function quarantineThenFail(input: {
       input.now
     );
   }
-  return input.jobStore.fail(input.tenant, input.job.jobId, input.workerId, input.job.leaseGeneration ?? 0, input.failure, input.now);
 }
 
 export async function processAssetJob(input: {
@@ -61,15 +66,17 @@ export async function processAssetJob(input: {
   lifecycleStore?: AssetLifecyclePort;
   scanner?: AssetScannerPort;
   now?: string;
+  signal?:AbortSignal;
 }): Promise<JobRecord<AssetProcessingRequest> | null> {
+  input.signal?.throwIfAborted();
   const job = await input.jobStore.claim<AssetProcessingRequest>(input.tenant, input.jobId, input.workerId, input.now, DEFAULT_LEASE_SECONDS);
   if (!job) return null;
 
   const request = job.payload;
-  await input.lifecycleStore?.transition({ tenant: input.tenant, assetVersionId: request.inputAssetVersionId, state: "PROCESSING" });
+  const assetTransition=(state: Parameters<AssetLifecyclePort['transition']>[0]['state'],reason?:string)=>input.lifecycleStore?{assetTransition:{assetVersionId:request.inputAssetVersionId,state,reason}}:undefined;
+  if(input.lifecycleStore&&!await input.lifecycleStore.transition({tenant:input.tenant,assetVersionId:request.inputAssetVersionId,state:'PROCESSING',jobLease:{jobId:job.jobId,workerId:input.workerId,leaseGeneration:job.leaseGeneration??0}}))return null;
   if (!request.blobKey.startsWith(`${job.tenant.organizationId}/`)) {
-    await input.lifecycleStore?.transition({ tenant: input.tenant, assetVersionId: request.inputAssetVersionId, state: "QUARANTINED", reason: "BLOB_TENANT_MISMATCH" });
-    return input.jobStore.fail(input.tenant, job.jobId, input.workerId, job.leaseGeneration ?? 0, tenantMismatch(job), input.now);
+    return input.jobStore.fail(input.tenant, job.jobId, input.workerId, job.leaseGeneration ?? 0, tenantMismatch(job), input.now, undefined, assetTransition('QUARANTINED','BLOB_TENANT_MISMATCH'));
   }
 
   let checksumMatches: boolean;
@@ -87,7 +94,6 @@ export async function processAssetJob(input: {
   }
 
   if (!checksumMatches) {
-    await input.lifecycleStore?.transition({ tenant: input.tenant, assetVersionId: request.inputAssetVersionId, state: "QUARANTINED", reason: "CHECKSUM_MISMATCH" });
     return quarantineThenFail({
       jobStore: input.jobStore,
       storage: input.storage,
@@ -101,6 +107,7 @@ export async function processAssetJob(input: {
         code: "CHECKSUM_MISMATCH",
         message: "Source checksum does not match the immutable asset version"
       },
+      lifecycleStore:input.lifecycleStore,
       now: input.now
     });
   }
@@ -110,19 +117,17 @@ export async function processAssetJob(input: {
     try {
       scan = await input.scanner.scan({ request, storage: input.storage });
     } catch {
-      await input.lifecycleStore?.transition({ tenant: input.tenant, assetVersionId: request.inputAssetVersionId, state: "SCAN_FAILED", reason: "SCANNER_EXCEPTION" });
       return input.jobStore.fail(
         input.tenant,
         job.jobId,
         input.workerId,
         job.leaseGeneration ?? 0,
         retryable("ASSET_SCAN_FAILED", "The asset scan failed and will be retried"),
-        input.now
+        input.now, undefined, assetTransition('SCAN_FAILED','SCANNER_EXCEPTION')
       );
     }
     if (scan.status === "QUARANTINE") {
       const reason = scan.reasons.join(",") || "SCAN_REJECTED";
-      await input.lifecycleStore?.transition({ tenant: input.tenant, assetVersionId: request.inputAssetVersionId, state: "QUARANTINED", reason });
       return quarantineThenFail({
         jobStore: input.jobStore,
         storage: input.storage,
@@ -136,6 +141,7 @@ export async function processAssetJob(input: {
           code: "ASSET_SCAN_REJECTED",
           message: reason
         },
+        lifecycleStore:input.lifecycleStore,
         now: input.now
       });
     }
@@ -156,7 +162,6 @@ export async function processAssetJob(input: {
   }
 
   if (!inspection.supported) {
-    await input.lifecycleStore?.transition({ tenant: input.tenant, assetVersionId: request.inputAssetVersionId, state: "QUARANTINED", reason: inspection.reasons.join(",") || "UNSUPPORTED_INPUT" });
     return quarantineThenFail({
       jobStore: input.jobStore,
       storage: input.storage,
@@ -170,27 +175,29 @@ export async function processAssetJob(input: {
         code: "UNSUPPORTED_INPUT",
         message: inspection.reasons.join(",") || "Asset source type is not supported"
       },
+      lifecycleStore:input.lifecycleStore,
       now: input.now
     });
   }
 
   try {
+    input.signal?.throwIfAborted();
     const result = await input.processor.process(request, job);
+    input.signal?.throwIfAborted();
     if (result.status === "FAILED") {
-      await input.lifecycleStore?.transition({ tenant: input.tenant, assetVersionId: request.inputAssetVersionId, state: "PROCESSING_FAILED", reason: result.failure?.code ?? "PROCESSING_FAILED" });
       return input.jobStore.fail(input.tenant, job.jobId, input.workerId, job.leaseGeneration ?? 0, result.failure ?? {
         class: "TERMINAL",
         code: "PROCESSING_FAILED",
         message: "Asset processor returned FAILED without a failure detail"
-      }, input.now, result);
+      }, input.now, result, assetTransition('PROCESSING_FAILED',result.failure?.code??'PROCESSING_FAILED'));
     }
-    await input.lifecycleStore?.transition({ tenant: input.tenant, assetVersionId: request.inputAssetVersionId, state: "READY_FOR_REVIEW", reason: result.status === "REVIEW_REQUIRED" ? "REVIEW_REQUIRED" : undefined });
-    return input.jobStore.succeed(input.tenant, job.jobId, input.workerId, job.leaseGeneration ?? 0, result, input.now);
+    return input.jobStore.succeed(input.tenant, job.jobId, input.workerId, job.leaseGeneration ?? 0, result, input.now, assetTransition('READY_FOR_REVIEW',result.status==='REVIEW_REQUIRED'?'REVIEW_REQUIRED':undefined));
   } catch (error) {
+    if(input.signal?.aborted)throw error;
     return input.jobStore.fail(input.tenant, job.jobId, input.workerId, job.leaseGeneration ?? 0, {
       class: "RETRYABLE",
       code: "WORKER_PROCESSING_EXCEPTION",
-      message: error instanceof Error ? error.message : "Unknown worker processing exception",
+      message: "The asset processing step failed and will be retried",
       retryAfterSeconds: 30
     }, input.now);
   }

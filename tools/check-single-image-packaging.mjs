@@ -1,0 +1,13 @@
+import assert from 'node:assert/strict';
+import {readFile} from 'node:fs/promises';
+import {spawnSync} from 'node:child_process';
+const docker=await readFile('Dockerfile.worker','utf8'),iac=await readFile('infra/azure/worker-app-foundation.bicep','utf8');
+assert.match(docker,/FROM python:3\.11\.11-slim-bookworm AS single-image-build/);
+assert.match(docker,/FROM runtime AS worker-single-image/);
+assert.match(docker,/FROM runtime AS worker\s*$/);
+for(const value of ['torch==2.6.0','107cefdc244c39106fa830359024f6a2f1c78871','bc36b08c62c5931e1dfc666581b3a8589278647f','--write-manifest','pip check','PHOTOGRAMMETRY_PYTHON=/opt/reconstruction-runtime/bin/python'])assert(docker.includes(value),value);
+assert.match(iac,/param singleImageEnabled bool = false/);
+assert.match(iac,/RECONSTRUCTION_ASSETS_DIR/);assert.match(iac,/singleImageEnabled \? '\/opt\/single-image\/runtime\/bin\/python'/);
+const result=spawnSync(process.env.PYTHON??'python',['tools/reconstruction/check_single_image_preflight.py'],{encoding:'utf8',windowsHide:true,timeout:30000});
+assert.equal(result.status,0,result.stderr||result.error?.message);
+console.log('Single-image packaging checks passed: explicit optional target, isolated interpreters, pinned sources, offline asset and code manifest tamper tests. Actual container build/inference acceptance remains required.');

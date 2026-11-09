@@ -602,14 +602,17 @@ export function validateCourseForPublication(input: PublicationValidationInput):
 
   const approvedReviews = new Set(input.approvedReviewTargets ?? []);
   const videoLessons = Array.isArray(course.videoLessons) ? course.videoLessons : [];
+  for (const issue of validateLessonVariants(videoLessons, modules.flatMap(module => isRecord(module) && Array.isArray(module.activities) ? module.activities : [])).findings) finding(findings, issue.code, `course.${issue.path}`, issue.message);
   const approvedMedia = new Map((input.approvedMediaAssets ?? []).map(asset => [asset.assetVersionId, asset]));
   for (const [lessonIndex, lesson] of videoLessons.entries()) {
     const path = `course.videoLessons[${lessonIndex}]`;
     const report = validateVideoLesson(lesson);
     for (const issue of report.findings) finding(findings, issue.code, `${path}.${issue.path}`, issue.message);
+    if (isRecord(lesson)) for (const issue of validateLessonFinalReview(lesson).findings) finding(findings, issue.code, `${path}.${issue.path}`, issue.message);
     if (isRecord(lesson) && text(lesson.lessonId) && !approvedReviews.has(`VIDEO_LESSON:${lesson.lessonId}`)) finding(findings, "REVIEW_REQUIRED", path, "The video lesson requires reviewer approval before publication.");
     if (isRecord(lesson)) for (const [sceneIndex, scene] of (Array.isArray(lesson.scenes) ? lesson.scenes : []).entries()) {
       const scenePath = `${path}.scenes[${sceneIndex}]`;
+      if (!isRecord(scene)) continue;
       for (const citation of Array.isArray(scene.citations) ? scene.citations : []) if (isRecord(citation) && text(citation.assetVersionId) && !approvedSources.has(citation.assetVersionId)) finding(findings, "CITATION_SOURCE_NOT_APPROVED", `${scenePath}.citations`, "Video scene citations must be approved sources.");
       const visual = isRecord(scene) && isRecord(scene.visual) ? scene.visual : {};
       if (text(scene.checkpointActivityId) && !activityIds.has(scene.checkpointActivityId)) finding(findings, "VIDEO_LESSON_CHECKPOINT_INVALID", `${scenePath}.checkpointActivityId`, "Video lesson checkpoints must link to activities in the same course.");
@@ -704,3 +707,13 @@ export * from './video-lesson.js';
 import {validateVideoLesson} from './video-lesson.js';
 
 export {remapCourseComponents,type ComponentMapping} from "./component-remapping.js";
+
+export * from './lesson-brief.js';
+
+export * from './lesson-direction.js';
+export * from './lesson-scene-takes.js';
+
+export * from './lesson-final-review.js';
+import {validateLessonFinalReview} from './lesson-final-review.js';
+export * from './lesson-variants.js';
+import {validateLessonVariants} from './lesson-variants.js';

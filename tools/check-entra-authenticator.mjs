@@ -40,13 +40,13 @@ const authenticator = createEntraRequestAuthenticator({
 });
 
 const valid = await authenticator.authenticate({ headers: { authorization: `Bearer ${makeToken()}` } });
-assert.deepEqual(valid, { subject: "user-1", issuer, identityTenant:tenantId, roles: ["operator"] });
+assert.deepEqual(valid, { subject: "user-1", issuer, identityTenant:tenantId, authenticationExpiresAt:new Date((now+300)*1000).toISOString(), roles: ["operator"] });
 
 const wrongAudience = await authenticator.authenticate({ headers: { authorization: `Bearer ${makeToken({ aud: "wrong-audience" })}` } });
 assert.equal(wrongAudience, null);
 
 const missingOrganizationClaim = await authenticator.authenticate({ headers: { authorization: `Bearer ${makeToken({ organization_id: "" })}` } });
-assert.deepEqual(missingOrganizationClaim, { subject: "user-1", issuer, identityTenant:tenantId, roles: ["operator"] });
+assert.deepEqual(missingOrganizationClaim, { subject: "user-1", issuer, identityTenant:tenantId, authenticationExpiresAt:new Date((now+300)*1000).toISOString(), roles: ["operator"] });
 
 const tampered = `${makeToken()}.tampered`;
 assert.equal(await authenticator.authenticate({ headers: { authorization: `Bearer ${tampered}` } }), null);

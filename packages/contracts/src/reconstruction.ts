@@ -22,7 +22,7 @@ export interface ReconstructionSourceStore {
 }
 export interface ReconstructionEngine {
   modes:readonly ReconstructionMode[];
-  generate(input:{job:JobRecord<ReconstructionPayload>;sources:Array<{source:ReconstructionSource;bytes:Uint8Array}>}):Promise<{
+  generate(input:{job:JobRecord<ReconstructionPayload>;sources:Array<{source:ReconstructionSource;bytes:Uint8Array}>;signal?:AbortSignal}):Promise<{
     candidate:Uint8Array;quality:Uint8Array;foreground?:Uint8Array;conditioningImage?:Uint8Array;
     sourceViews?:Array<{sourceName:string;timestampSeconds:number;bytes:Uint8Array}>;
   }>;

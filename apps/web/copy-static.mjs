@@ -1,9 +1,10 @@
-import { copyFile, mkdir, readFile, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, readFile, writeFile, stat, rm } from "node:fs/promises";
 import { gzipSync } from 'node:zlib';
 import { resolve } from "node:path";
 
 const root = resolve(import.meta.dirname);
 await mkdir(resolve(root, "dist"), { recursive: true });
+for (const name of ['admin.html', 'admin.css']) await copyFile(resolve(root, 'src', name), resolve(root, 'dist', name));
 await copyFile(resolve(root, 'src/api-docs.html'), resolve(root, 'dist/api-docs.html'));
 await copyFile(resolve(root, 'src/developer-starter.html'), resolve(root, 'dist/developer-starter.html'));
 await copyFile(resolve(root, "src/index.html"), resolve(root, "dist/index.html"));
@@ -40,7 +41,18 @@ await copyFile(resolve(root, "src/model/aurora-infusion-controller.reduced.glb")
 
 await mkdir(resolve(root, "dist/demo-assets"), { recursive: true });
 for (const index of Array.from({ length: 8 }, (_, value) => String(value).padStart(3, "0"))) {
-  await copyFile(resolve(root, `../../output/reconstruction-capture/images/view-${index}.png`), resolve(root, `dist/demo-assets/view-${index}.png`));
+  // Locally generated reconstruction captures are optional demo material. A fresh
+  // checkout must build the application without private/generated output files.
+  const source = resolve(root, `../../output/reconstruction-capture/images/view-${index}.png`);
+  const target = resolve(root, `dist/demo-assets/view-${index}.png`);
+  try { await stat(source); }
+  catch (error) {
+    if (error.code !== 'ENOENT') throw error;
+    await rm(target, { force: true });
+    console.log(`Optional reconstruction demo capture unavailable: view-${index}.png`);
+    continue;
+  }
+  await copyFile(source, target);
 }
 await copyFile(resolve(root, "../../fixtures/nxstage-system-one-interactive/nxstage-system-one-preview.png"), resolve(root, "dist/demo-assets/nxstage-system-one-preview.png"));
 await copyFile(resolve(root, "../../fixtures/nxstage-system-one/nxstage-clinical-photo-v4.png"), resolve(root, "dist/demo-assets/nxstage-clinical-photo-v4.png"));

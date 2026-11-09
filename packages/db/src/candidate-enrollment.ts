@@ -34,10 +34,10 @@ BEGIN
  PERFORM pg_advisory_xact_lock(hashtextextended('member-admin:'||selected_org,0));
  IF NOT EXISTS(SELECT 1 FROM public.organizations WHERE organization_id=selected_org AND status='ACTIVE') OR EXISTS(SELECT 1 FROM public.organization_memberships WHERE organization_id=selected_org AND subject=actor AND status<>'ACTIVE') THEN RAISE EXCEPTION 'CANDIDATE_COURSE_UNAVAILABLE';END IF;
  IF NOT public.has_verified_account(actor) THEN RAISE EXCEPTION 'CANDIDATE_VERIFIED_ACCOUNT_REQUIRED';END IF;
- SELECT * INTO released FROM public.release_manifests WHERE organization_id=selected_org AND release_id=COALESCE(consent.release_id,route.release_id) AND status='PUBLISHED' FOR SHARE;
+ SELECT * INTO released FROM public.release_manifests WHERE organization_id=selected_org AND release_id=COALESCE(consent.release_id,route.release_id) AND status='PUBLISHED' AND public.lifecycle_release_available(release_id) FOR SHARE;
  IF NOT FOUND THEN RAISE EXCEPTION 'CANDIDATE_COURSE_UNAVAILABLE';END IF;
  IF consent.enrollment_id IS NOT NULL THEN
-  SELECT * INTO enrollment FROM public.enrollments WHERE organization_id=selected_org AND enrollment_id=consent.enrollment_id AND learner_id=actor AND status='ACTIVE' FOR SHARE;
+  SELECT * INTO enrollment FROM public.enrollments WHERE organization_id=selected_org AND enrollment_id=consent.enrollment_id AND learner_id=actor AND status IN ('ACTIVE','COMPLETED') FOR SHARE;
   IF NOT FOUND THEN RAISE EXCEPTION 'CANDIDATE_ENROLLMENT_INACTIVE';END IF;
  ELSE
   SELECT * INTO offering FROM public.course_offerings WHERE organization_id=selected_org AND release_id=route.release_id AND mode IN ('PUBLIC','UNLISTED') FOR SHARE;
@@ -45,7 +45,7 @@ BEGIN
   IF offering.revision<>expected_revision THEN RAISE EXCEPTION 'CANDIDATE_DISCLOSURES_CHANGED';END IF;
   PERFORM pg_advisory_xact_lock(hashtextextended(jsonb_build_array(selected_org,actor,released.course_version_id)::text,0));
   SELECT * INTO enrollment FROM public.enrollments WHERE organization_id=selected_org AND learner_id=actor AND course_version_id=released.course_version_id ORDER BY (status='ACTIVE') DESC,created_at,enrollment_id LIMIT 1 FOR UPDATE;
-  IF FOUND AND enrollment.status<>'ACTIVE' THEN RAISE EXCEPTION 'CANDIDATE_ENROLLMENT_INACTIVE';END IF;
+  IF FOUND AND enrollment.status NOT IN ('ACTIVE','COMPLETED') THEN RAISE EXCEPTION 'CANDIDATE_ENROLLMENT_INACTIVE';END IF;
   IF enrollment.enrollment_id IS NULL THEN
    INSERT INTO public.enrollments(enrollment_id,organization_id,learner_id,course_version_id,status,created_at,updated_at) VALUES('enrollment:'||gen_random_uuid()::text,selected_org,actor,released.course_version_id,'ACTIVE',now(),now()) RETURNING * INTO enrollment;
   END IF;

@@ -1,4 +1,11 @@
 import {createMediaReview} from './media-review.js';
+import {renderLessonBriefEditor} from './lesson-brief-editor.js';
+import {renderVideoLessonAudioEditor} from './video-lesson-audio-editor.js';
+import {renderLessonDirectionEditor} from './video-lesson-editor.js';
+import {renderLessonVariantEditor,renderLessonVariantOutcomes} from './video-lesson-variants.js';
+import {renderLessonRoughCutEditor} from './lesson-rough-cut-editor.js';
+import {renderLessonSceneRevisionEditor} from './lesson-scene-revision-editor.js';
+import {renderLessonFinalReviewEditor} from './lesson-final-review-editor.js';
 import {createReconstructionPanel,type ReconstructionFiles} from './reconstruction-panel.js';
 import {renderDraftConflict} from './draft-conflict.js';
 import {createModelImportReview} from './model-import-review.js';
@@ -392,8 +399,21 @@ function contentRows(value: unknown): Array<Record<string, unknown>> {
   return Array.isArray(value) ? value as Array<Record<string, unknown>> : [];
 }
 
+// A malformed saved production section must not hide the rest of the recoverable draft.
+function renderLessonPanel(parent: HTMLElement, title: string, render: (host: HTMLElement) => void) {
+  const host = document.createElement('div');
+  parent.append(host);
+  try { render(host); }
+  catch {
+    const message = document.createElement('p'); message.setAttribute('role', 'alert');
+    message.textContent = `${title} contains invalid saved data. Restore a valid draft before editing this section; it cannot be approved in its current state.`;
+    host.replaceChildren(message);
+  }
+}
+
 function renderDraftModules() {
   draftModules.replaceChildren();
+  renderLessonBriefEditor(draftModules, editingContent, markDraftDirty);
   if(loadedReview){
    const version=loadedReview.courseVersion,identity=getSessionIdentity(),epoch=editorEpoch;
    const active=()=>identity===getSessionIdentity()&&epoch===editorEpoch;
@@ -408,6 +428,7 @@ function renderDraftModules() {
   if (videoLessons.length) {
     const box = document.createElement('fieldset'), legend = document.createElement('legend');
     legend.textContent = 'Video lesson builder'; box.append(legend);
+    renderLessonVariantOutcomes(box, editingContent, markDraftDirty);
     const note = document.createElement('p'); note.textContent = 'Edit the source-grounded narration and scene plan before requesting a cinematic render. Every scene remains reviewable against its cited source.'; box.append(note);
     for (const [lessonIndex, lesson] of videoLessons.entries()) {
       const lessonBox = document.createElement('fieldset'), lessonLegend = document.createElement('legend'); lessonLegend.textContent = `Lesson ${lessonIndex + 1}`; lessonBox.append(lessonLegend);
@@ -419,12 +440,18 @@ function renderDraftModules() {
       field('Lesson title', lesson.title, value => { lesson.title = value; });
       field('Duration (seconds)', lesson.durationSeconds, value => { lesson.durationSeconds = Number(value); });
       field('Safety boundary', lesson.safetyBoundary, value => { lesson.safetyBoundary = value; }, true);
+      renderLessonPanel(lessonBox, 'Shot direction', host => renderLessonDirectionEditor(host, lesson, markDraftDirty));
+      renderLessonPanel(lessonBox, 'Rough cut', host => renderLessonRoughCutEditor(host, lesson, markDraftDirty, renderDraftModules));
+      renderLessonPanel(lessonBox, 'Scene takes', host => renderLessonSceneRevisionEditor(host, lesson, markDraftDirty));
+      renderLessonPanel(lessonBox, 'Final review', host => renderLessonFinalReviewEditor(host, lesson, markDraftDirty));
+      renderLessonPanel(lessonBox, 'Learning variants', host => renderLessonVariantEditor(host, editingContent, lesson, () => { markDraftDirty(); renderDraftModules(); }));
       const scenes = contentRows(lesson.scenes);
       for (const [sceneIndex, scene] of scenes.entries()) {
         const sceneBox = document.createElement('fieldset'), sceneLegend = document.createElement('legend'); sceneLegend.textContent = `Scene ${sceneIndex + 1}: ${String(scene.visual && typeof scene.visual === 'object' ? (scene.visual as Record<string, unknown>).label ?? scene.sceneId : scene.sceneId)}`; sceneBox.append(sceneLegend);
         const sceneField = (labelText: string, value: unknown, update: (value: string) => void) => { const label = document.createElement('label'); label.append(document.createTextNode(labelText)); const input = document.createElement('textarea'); input.value = typeof value === 'string' ? value : String(value ?? ''); input.addEventListener('input', () => { update(input.value); markDraftDirty(); }); label.append(input); sceneBox.append(label); };
         sceneField('Narration', scene.narration, value => { scene.narration = value; });
         sceneField('On-screen text (one line per item)', Array.isArray(scene.onScreenText) ? scene.onScreenText.join('\n') : '', value => { scene.onScreenText = value.split('\n').map(item => item.trim()).filter(Boolean); });
+        renderLessonPanel(sceneBox, 'Narration delivery', host => host.append(renderVideoLessonAudioEditor(scene, markDraftDirty)));
         const sources = document.createElement('p'); sources.textContent = `Visual: ${JSON.stringify(scene.visual ?? {})} · Sources: ${JSON.stringify(scene.citations ?? [])}${scene.checkpointActivityId ? ` · Checkpoint: ${scene.checkpointActivityId}` : ''}`; sceneBox.append(sources);
         lessonBox.append(sceneBox);
       }

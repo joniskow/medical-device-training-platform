@@ -1,4 +1,8 @@
 import type {createMediaReviewService} from './media-review-service.js';
+import type {createEmailVerificationService} from './email-verification-service.js';
+import type { LessonRenderService } from './lesson-render-service.js';
+import type {createLifecycleHttp} from './lifecycle-http.js';
+import type {createMachineIntegrationHttp} from './machine-integration-http.js';
 import { learnerOpenApi } from '@medical-device/contracts';
 import type {createReconstructionService} from './reconstruction-service.js';
 import type {MediaAssetService} from './media-asset-service.js';
@@ -47,6 +51,8 @@ export interface AuthenticatedPrincipal {
   /** Only populated after signed identity claims explicitly attest email verification. */
   verifiedEmail?: string;
   verificationExpiresAt?:string;
+  authenticationExpiresAt?:string;
+  machineIdentity?:{clientId:string;servicePrincipalId:string;applicationRoles:readonly string[];issuedAt:string};
   /** Optional legacy claim. Tenant scope is resolved from server-side membership data. */
   organizationId?: string;
   roles: readonly string[];
@@ -70,6 +76,11 @@ export interface JobStatusService {
 }
 
 export interface JobStatusHttpOptions {
+  emailVerificationService?:ReturnType<typeof createEmailVerificationService>;
+  lessonRenders?:LessonRenderService;
+  lifecycleApi?:ReturnType<typeof createLifecycleHttp>;
+  machineIntegrationApi?:ReturnType<typeof createMachineIntegrationHttp>;
+  authenticatedAdmission?:(principal:AuthenticatedPrincipal)=>Promise<boolean>;
   mediaReviewService?:ReturnType<typeof createMediaReviewService>;
   reconstructionService?:ReturnType<typeof createReconstructionService>;
   modelImportService?:ReturnType<typeof createModelImportService>;
@@ -152,6 +163,10 @@ function writeHtml(response: ServerResponse, statusCode: number, body: string) {
 }
 
 const staticFiles: Record<string, { file: string; contentType: string; binary?: boolean }> = {
+  '/admin': {file:'admin.html',contentType:'text/html; charset=utf-8'},
+  '/admin.js': {file:'admin.js',contentType:'text/javascript; charset=utf-8'},
+  '/admin-viewer.js': {file:'admin-viewer.js',contentType:'text/javascript; charset=utf-8'},
+  '/admin.css': {file:'admin.css',contentType:'text/css; charset=utf-8'},
   '/developer/api': { file: 'api-docs.html', contentType: 'text/html; charset=utf-8' },
   '/developer/api-docs.js': { file: 'api-docs.js', contentType: 'text/javascript; charset=utf-8' },
   '/developer/training-viewer.js': { file: 'training-viewer.js', contentType: 'text/javascript; charset=utf-8' },
@@ -601,7 +616,7 @@ export function createJobStatusHttpServer(options: JobStatusHttpOptions): Server
           response.setHeader('Content-Length', contents.byteLength);
           setSecurityHeaders(response);
           // Babylon's bundled PBR lighting texture is an embedded data image.
-          const embeddedImages = url.pathname === '/learner/model' || url.pathname === '/demo' || url.pathname === '/developer/starter' ? ' data:' : '';
+          const embeddedImages = url.pathname === '/admin' || url.pathname === '/learner/model' || url.pathname === '/demo' || url.pathname === '/developer/starter' ? ' data:' : '';
           response.setHeader("Content-Security-Policy", `default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' blob:${embeddedImages} https://*.blob.core.windows.net; media-src 'self' blob: https://*.blob.core.windows.net; connect-src 'self' https://login.microsoftonline.com https://*.blob.core.windows.net; frame-ancestors 'none'`);
           if (options.browserAuthConfig) {
             const authorityOrigin = new URL(options.browserAuthConfig.authority).origin;
@@ -632,7 +647,7 @@ export function createJobStatusHttpServer(options: JobStatusHttpOptions): Server
       const draftHistoryId=courseReviewPath(url.pathname,'history');
       const isApprovedMedia=url.pathname==='/api/v1/approved-media';
       const isApprovedModels=url.pathname==='/api/v1/approved-models';
-      const mediaReviewMatch=url.pathname.match(/^\/api\/v1\/media-review(?:\/([^/]+)(?:\/(content|review|frames))?)?$/);
+      const mediaReviewMatch=url.pathname.match(/^\/api\/v1\/media-review(?:\/([^/]+)(?:\/(content|review|frames|rights))?)?$/);
       const reconstructionMatch=url.pathname.match(/^\/api\/v1\/reconstructions(?:\/([^/]+)(?:\/(candidate|quality|foreground|conditioning-image|views))?)?$/);
       const modelImportMatch=url.pathname.match(/^\/api\/v1\/model-imports(?:\/([^/]+)(?:\/(content|review|configuration))?)?$/);
       const reviewCourseVersionId = courseReviewPath(url.pathname);
@@ -650,6 +665,11 @@ export function createJobStatusHttpServer(options: JobStatusHttpOptions): Server
       const assessmentParts = pathParts(url.pathname);
       const isInvitation=assessmentParts?.[2]==='invitations'&&(assessmentParts.length===3||(assessmentParts.length===4&&['accept','preview'].includes(assessmentParts[3]))||(assessmentParts.length===5&&assessmentParts[4]==='revoke'));
       const isMember=assessmentParts?.[2]==='members'&&(assessmentParts.length===3||(assessmentParts.length===5&&['roles','status'].includes(assessmentParts[4])));
+      const emailVerificationRoute=/^\/api\/v1\/account\/email-verification\/(start|complete|revoke)$/.exec(url.pathname);
+      const lessonRenderRoute=/^\/api\/v1\/lesson-renders(?:\/([A-Za-z0-9._:%-]+)(?:\/(content|cancel|retry))?)?$/.exec(url.pathname);
+      const correctedLessonTakeRoute=url.pathname==='/api/v1/lesson-corrected-takes';
+      const lifecycleRoute=options.lifecycleApi?.matches(url.pathname)??false;
+      const integrationRoute=options.machineIntegrationApi?.matches(url.pathname)??false;
       const isPersonalAccount=url.pathname==='/api/v1/account';
       const isPersonalWallet=url.pathname==='/api/v1/my-credentials';
       const personalSharingMatch=/^\/api\/v1\/my-credentials\/([A-Za-z0-9._:%-]+)\/sharing$/.exec(url.pathname);
@@ -682,7 +702,7 @@ export function createJobStatusHttpServer(options: JobStatusHttpOptions): Server
       const isGet = request.method === "GET";
       const isRetry = request.method === "POST";
       const jobId = isGet ? jobIdFromPath(url.pathname) : jobIdFromPath(url.pathname, "retry");
-      if (!openMontageRoute && !reconstructionMatch && !mediaReviewMatch && !modelImportMatch && !isInspection && !isApprovedMedia && !isMedia && !isStory && !modelPreviewId && !createSimulationId && !bindModelId && !replaceModelId && !draftHistoryId && !isApprovedModels && !personalSharingMatch && !isPersonalWallet && !isCandidateLearningList && !isCandidateEnrollment && !courseOfferingMatch && !isPersonalAccount && !isOrganizationProfile && !isInvitation && !isMember && !isOrganizationContext && !isCourseChangeJob && !isCourseChange && !isNotification && !isAttemptInvalidation && !isAttemptReview && !jobId && !isUploadRoute && !isDraftRoute && !isReviewRoute && !isModelAssetRoute && !isModelSessionRoute && !isCourseCollection && !isSourceCollection && !sourceDetailId && !isAssessmentRoute && !isEnrollmentRoute && !isCredentialCollection && !isCredentialIssue && !isCredentialLifecycle && !isCredentialSharing) {
+      if (!integrationRoute && !lifecycleRoute && !correctedLessonTakeRoute && !lessonRenderRoute && !emailVerificationRoute && !openMontageRoute && !reconstructionMatch && !mediaReviewMatch && !modelImportMatch && !isInspection && !isApprovedMedia && !isMedia && !isStory && !modelPreviewId && !createSimulationId && !bindModelId && !replaceModelId && !draftHistoryId && !isApprovedModels && !personalSharingMatch && !isPersonalWallet && !isCandidateLearningList && !isCandidateEnrollment && !courseOfferingMatch && !isPersonalAccount && !isOrganizationProfile && !isInvitation && !isMember && !isOrganizationContext && !isCourseChangeJob && !isCourseChange && !isNotification && !isAttemptInvalidation && !isAttemptReview && !jobId && !isUploadRoute && !isDraftRoute && !isReviewRoute && !isModelAssetRoute && !isModelSessionRoute && !isCourseCollection && !isSourceCollection && !sourceDetailId && !isAssessmentRoute && !isEnrollmentRoute && !isCredentialCollection && !isCredentialIssue && !isCredentialLifecycle && !isCredentialSharing) {
         writeJson(response, 404, errorBody("NOT_FOUND", "The requested resource was not found."), origin);
         return;
       }
@@ -701,10 +721,66 @@ export function createJobStatusHttpServer(options: JobStatusHttpOptions): Server
         return;
       }
 
+      if(options.authenticatedAdmission){
+        try { if(!await options.authenticatedAdmission(principal)){response.setHeader('Retry-After','60');writeJson(response,429,errorBody('RATE_LIMITED','Retry this request later.'),origin);return;} }
+        catch {writeJson(response,503,errorBody('ADMISSION_UNAVAILABLE','Request admission is temporarily unavailable.'),origin);return;}
+      }
+      const signedEmailVerification=principal.verifiedEmail?{email:principal.verifiedEmail,expiresAt:principal.verificationExpiresAt}:undefined;
+      if(principal.machineIdentity){
+        if(!options.machineIntegrationApi){writeJson(response,403,errorBody('INTEGRATION_SCOPE_DENIED','This integration is unavailable.'),origin);return;}
+        await options.machineIntegrationApi.handleMachine({request,url,principal,
+          reply:(status,body)=>writeJson(response,status,status>=400&&isObject(body)&&typeof body.error==='string'?errorBody(body.error,'This integration request could not be completed.'):body,origin),
+          readBody:async()=>{if(request.headers['content-type']?.split(';',1)[0]?.trim().toLowerCase()!=='application/json')throw Error('INTEGRATION_INPUT_INVALID');return readJsonBody(request,Math.max(maxBodyBytes,65536));},idempotencyKey:()=>idempotencyKey(request)});
+        return;
+      }
+      if(options.emailVerificationService){
+        try { principal=await options.emailVerificationService.enrich(principal); }
+        catch { writeJson(response,503,errorBody('VERIFICATION_UNAVAILABLE','Account verification is temporarily unavailable.'),origin);return; }
+      }
       if(options.personalAccountStore&&!isPersonalAccount){
         if(!principal.issuer||!principal.identityTenant){writeJson(response,401,errorBody('ACCOUNT_IDENTITY_REQUIRED','A validated identity is required.'),origin);return;}
         try{await options.personalAccountStore.access({subject:principal.subject,issuer:principal.issuer,identityTenant:principal.identityTenant,verifiedEmail:principal.verifiedEmail},'GET');await options.personalAccountStore.observeVerification({subject:principal.subject,issuer:principal.issuer,identityTenant:principal.identityTenant,verifiedEmail:principal.verifiedEmail},principal.verificationExpiresAt);}
         catch(error){const locked=error instanceof Error&&error.message==='ACCOUNT_LOCKED';writeJson(response,locked?403:503,errorBody(locked?'ACCOUNT_LOCKED':'ACCOUNT_UNAVAILABLE','Your account is unavailable.'),origin);return;}
+      }
+      const lifecycleContext={request,url,principal,
+        reply:(status:number,body:unknown)=>writeJson(response,status,status>=400&&isObject(body)&&typeof body.error==='string'?errorBody(body.error,'This request could not be completed.'):body,origin),
+        readBody:async()=>{if(request.headers['content-type']?.split(';',1)[0]?.trim().toLowerCase()!=='application/json')throw Error('LIFECYCLE_REQUEST_INVALID');return readJsonBody(request,Math.max(maxBodyBytes,65536));},
+        idempotencyKey:()=>idempotencyKey(request),
+        sendBytes:(bytes:Uint8Array,contentType:string)=>{setSecurityHeaders(response);response.statusCode=200;response.setHeader('Content-Type',contentType);if(origin)response.setHeader('Access-Control-Allow-Origin',origin);response.end(bytes);}
+      };
+      if(lifecycleRoute&&await options.lifecycleApi!.handleAccount(lifecycleContext))return;
+      if(emailVerificationRoute){
+        if(request.method!=='POST'){writeJson(response,405,errorBody('METHOD_NOT_ALLOWED','Use POST.'),origin);return;}
+        if(!options.emailVerificationService){writeJson(response,503,errorBody('VERIFICATION_UNAVAILABLE','Email verification is unavailable.'),origin);return;}
+        if(!principal.issuer||!principal.identityTenant||!principal.authenticationExpiresAt||!Number.isFinite(Date.parse(principal.authenticationExpiresAt))||Date.parse(principal.authenticationExpiresAt)<=Date.now()){writeJson(response,401,errorBody('ACCOUNT_IDENTITY_REQUIRED','A current validated identity is required.'),origin);return;}
+        try {
+          if(url.search||request.headers['content-type']?.split(';',1)[0]?.trim().toLowerCase()!=='application/json'){writeJson(response,415,errorBody('UNSUPPORTED_MEDIA_TYPE','Use application/json without query parameters.'),origin);return;}
+          const body=await readJsonBody(request,maxBodyBytes);
+          if(!isObject(body))throw Error('VERIFICATION_INPUT_INVALID');
+          const identity={subject:principal.subject,issuer:principal.issuer,identityTenant:principal.identityTenant};
+          const action=emailVerificationRoute[1];
+          if(action==='start'){
+            if(typeof body.email!=='string'||Object.keys(body).some(key=>key!=='email'))throw Error('VERIFICATION_INPUT_INVALID');
+            writeJson(response,202,await options.emailVerificationService.start(identity,body.email),origin);
+          } else if(action==='complete') {
+            if(typeof body.challengeId!=='string'||typeof body.code!=='string'||Object.keys(body).some(key=>!['challengeId','code'].includes(key)))throw Error('VERIFICATION_INPUT_INVALID');
+            await options.emailVerificationService.complete(identity,{challengeId:body.challengeId,code:body.code});
+            const verified=await options.emailVerificationService.enrich(principal);
+            if(options.personalAccountStore)await options.personalAccountStore.observeVerification({...identity,verifiedEmail:verified.verifiedEmail},verified.verificationExpiresAt);
+            writeJson(response,200,{verified:true,verificationExpiresAt:verified.verificationExpiresAt},origin);
+          } else {
+            if(body.confirmed!==true||Object.keys(body).some(key=>key!=='confirmed'))throw Error('VERIFICATION_INPUT_INVALID');
+            await options.emailVerificationService.revoke(identity);
+            if(options.personalAccountStore)await options.personalAccountStore.observeVerification({...identity,verifiedEmail:signedEmailVerification?.email},signedEmailVerification?.expiresAt);
+            writeJson(response,200,{verified:Boolean(signedEmailVerification)},origin);
+          }
+        } catch(error) {
+          const code=error instanceof Error?error.message:'';
+          const status=code==='VERIFICATION_RATE_LIMITED'?429:code==='VERIFICATION_INPUT_INVALID'||error instanceof SyntaxError?422:code==='VERIFICATION_UNAVAILABLE'?403:503;
+          if(status===429)response.setHeader('Retry-After','60');
+          writeJson(response,status,errorBody(status===503?'VERIFICATION_UNAVAILABLE':code,'Email verification could not be completed.'),origin);
+        }
+        return;
       }
       if(personalSharingMatch){
         if(request.method!=='POST'){writeJson(response,405,errorBody('METHOD_NOT_ALLOWED','Use POST.'),origin);return;}
@@ -821,6 +897,48 @@ export function createJobStatusHttpServer(options: JobStatusHttpOptions): Server
         principal={...principal,roles:[...roles,...(principal.roles.includes('operator')?['operator']:[])]};
       }else if(organizations.length>1){writeJson(response,503,errorBody('ORGANIZATION_ROLES_UNAVAILABLE','Scoped authorization is unavailable.'),origin);return;}
       const tenant=tenantFor(request,principal,organizationId);
+      if(integrationRoute&&await options.machineIntegrationApi!.handleManagement({...lifecycleContext,principal,tenant}))return;
+      if(lifecycleRoute&&await options.lifecycleApi!.handleTenant({...lifecycleContext,principal,tenant}))return;
+      if(lessonRenderRoute||correctedLessonTakeRoute){
+        if(!canUpload(principal)){writeJson(response,403,errorBody('AUTHOR_ROLE_REQUIRED','An author role is required.'),origin);return;}
+        if(!options.lessonRenders){writeJson(response,503,errorBody('LESSON_RENDER_UNAVAILABLE','Lesson rendering is unavailable.'),origin);return;}
+        try{
+          const jobId=lessonRenderRoute?.[1]?decodeURIComponent(lessonRenderRoute[1]):undefined;
+          const action=lessonRenderRoute?.[2];
+          if(correctedLessonTakeRoute){
+            if(request.method!=='POST'){writeJson(response,405,errorBody('METHOD_NOT_ALLOWED','Use POST.'),origin);return;}
+            if(url.search||request.headers['content-type']?.split(';',1)[0]?.trim().toLowerCase()!=='application/json')throw Error('LESSON_TAKE_REQUEST_INVALID');
+            const body=await readJsonBody(request,maxBodyBytes),key=idempotencyKey(request);
+            if(!isObject(body)||!key||Object.keys(body).some(key=>!['courseVersionId','revision','lessonId','sceneId','assetVersionId','sourceHash','reason'].includes(key)))throw Error('LESSON_TAKE_REQUEST_INVALID');
+            writeJson(response,200,await options.lessonRenders.promoteCorrectedTake(tenant,{...body,idempotencyKey:key}),origin);
+          }else if(!jobId){
+            if(request.method!=='POST'){writeJson(response,405,errorBody('METHOD_NOT_ALLOWED','Use POST.'),origin);return;}
+            if(url.search||request.headers['content-type']?.split(';',1)[0]?.trim().toLowerCase()!=='application/json')throw Error('LESSON_RENDER_REQUEST_INVALID');
+            const body=await readJsonBody(request,Math.max(maxBodyBytes,65536)),key=idempotencyKey(request);
+            if(!isObject(body)||!key||Object.keys(body).some(key=>!['courseVersionId','revision','lessonId','mode'].includes(key)))throw Error('LESSON_RENDER_REQUEST_INVALID');
+            writeJson(response,202,await options.lessonRenders.create(tenant,{...body,idempotencyKey:key}),origin);
+          }else if(action==='content'){
+            if(request.method!=='GET'){writeJson(response,405,errorBody('METHOD_NOT_ALLOWED','Use GET.'),origin);return;}
+            const kind=url.searchParams.get('kind')??'video';
+            if([...url.searchParams.keys()].some(key=>key!=='kind')||url.searchParams.getAll('kind').length>1||!['video','captions','manifest'].includes(kind))throw Error('LESSON_RENDER_REQUEST_INVALID');
+            const content=await options.lessonRenders.content(tenant,jobId,kind as 'video'|'captions'|'manifest');
+            if(!content){writeJson(response,404,errorBody('LESSON_RENDER_NOT_FOUND','The requested render is unavailable.'),origin);return;}
+            setSecurityHeaders(response);response.statusCode=200;response.setHeader('Content-Type',content.contentType);if(origin)response.setHeader('Access-Control-Allow-Origin',origin);response.end(content.bytes);
+          }else if(action==='cancel'||action==='retry'){
+            if(request.method!=='POST'){writeJson(response,405,errorBody('METHOD_NOT_ALLOWED','Use POST.'),origin);return;}
+            if(url.search||request.headers['content-type']?.split(';',1)[0]?.trim().toLowerCase()!=='application/json')throw Error('LESSON_RENDER_REQUEST_INVALID');
+            const body=await readJsonBody(request,maxBodyBytes);
+            if(!isObject(body)||Object.keys(body).some(key=>key!=='reason')||typeof body.reason!=='string'||!body.reason.trim()||body.reason.length>(action==='cancel'?1000:2000))throw Error('LESSON_RENDER_REQUEST_INVALID');
+            const result=action==='cancel'?await options.lessonRenders.cancel(tenant,jobId,body.reason):await options.lessonRenders.retry(tenant,jobId,body.reason);
+            writeJson(response,result?200:404,result??errorBody('LESSON_RENDER_NOT_FOUND','The requested render is unavailable.'),origin);
+          }else{
+            if(request.method!=='GET'){writeJson(response,405,errorBody('METHOD_NOT_ALLOWED','Use GET.'),origin);return;}
+            if(url.search)throw Error('LESSON_RENDER_REQUEST_INVALID');
+            const result=await options.lessonRenders.get(tenant,jobId);writeJson(response,result?200:404,result??errorBody('LESSON_RENDER_NOT_FOUND','The requested render is unavailable.'),origin);
+          }
+        }catch(error){const code=error instanceof Error?error.message:'';const status=['LESSON_RENDER_REQUEST_INVALID','LESSON_TAKE_REQUEST_INVALID','LESSON_RENDER_CANCEL_REASON_INVALID'].includes(code)||error instanceof SyntaxError||error instanceof URIError?422:code==='LESSON_RENDER_CANCELLED'||code.includes('CHANGED')||code.includes('STALE')||code.includes('NOT_APPROVED')||code.includes('REVIEW_REQUIRED')||code==='LESSON_TAKE_DECODE_OR_DURATION_INVALID'||code==='LESSON_RENDER_CURRENT_PREVIEW_REQUIRED'||code==='IDEMPOTENCY_KEY_REUSED'?409:code.includes('DENIED')||code.includes('FORBIDDEN')||code.includes('ROLE_REQUIRED')?403:code.includes('NOT_FOUND')?404:503;writeJson(response,status,errorBody(status===503?'LESSON_RENDER_UNAVAILABLE':code,'The lesson render request could not be completed.'),origin);}
+        return;
+      }
       if (openMontageRoute) {
         if (openMontageRoute.collection === 'generations') {
           if (!options.openMontageGenerationService) { writeJson(response, 503, errorBody('OPENMONTAGE_GENERATION_UNAVAILABLE', 'OpenMontage generation is unavailable.'), origin); return; }
@@ -1243,6 +1361,10 @@ export function createJobStatusHttpServer(options: JobStatusHttpOptions): Server
         if(!service){writeJson(response,503,errorBody('MEDIA_IMPORT_UNAVAILABLE','Media review is unavailable.'),origin);return;}
         try{
           const id=mediaReviewMatch[1]?decodeURIComponent(mediaReviewMatch[1]):undefined,action=mediaReviewMatch[2];
+          if(action==='rights'){
+            const {handleAdminRights}=await import('./admin-rights.js');
+            await handleAdminRights({request,response,tenant,id,service,readBody:()=>readJsonBody(request,maxBodyBytes),key:()=>idempotencyKey(request)});return;
+          }
           if(request.method==='GET'&&!action){
             const result=id?await service.get(tenant,id):await service.list(tenant,url.searchParams.get('after')??'');
             writeJson(response,result?200:404,result??errorBody('MEDIA_UNAVAILABLE','Media unavailable.'),origin);return;

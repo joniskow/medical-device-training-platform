@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import {randomUUID} from 'node:crypto';
-import {readFile} from 'node:fs/promises';
+import {grantRuntimeDomainTables,runtimeDomainTables} from '../packages/db/dist/runtime-permissions.js';
 import {spawn} from 'node:child_process';
 import {Pool} from 'pg';
 
@@ -9,15 +9,13 @@ import {Pool} from 'pg';
 const connectionString=process.env.DATABASE_URL??'postgresql://local_app:local_only_change_me@127.0.0.1:54329/medical_device';
 const admin=new Pool({connectionString});
 const role=`session_check_${randomUUID().replaceAll('-','')}`;
-const bootstrap=await readFile(new URL('../apps/worker/src/postgres-bootstrap.ts',import.meta.url),'utf8');
-const tableBlock=bootstrap.match(/const runtimeTables = \[([\s\S]*?)\]\.join/)[1];
-const tables=[...tableBlock.matchAll(/"([a-z_]+)"/g)].map(match=>match[1]);
+const tables=runtimeDomainTables;
 assert.ok(tables.includes('simulation_sessions')&&tables.includes('audit_events'));
 let created=false;
 try{
  await admin.query(`CREATE ROLE ${role} NOLOGIN NOSUPERUSER NOBYPASSRLS`);created=true;
  await admin.query(`GRANT USAGE ON SCHEMA public TO ${role}`);
- await admin.query(`GRANT SELECT,INSERT,UPDATE,DELETE ON ${tables.join(',')} TO ${role}`);
+ await grantRuntimeDomainTables(admin,role);
  await admin.query(`GRANT SELECT,INSERT,UPDATE ON course_story_positions TO ${role}`);
  await admin.query(`GRANT SELECT,INSERT ON course_story_choices TO ${role}`);
  await admin.query(`GRANT EXECUTE ON FUNCTION public.has_verified_account(text),public.default_credential_sharing(text,text) TO ${role}`);

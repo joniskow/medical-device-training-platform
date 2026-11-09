@@ -1065,6 +1065,20 @@ import {ORGANIZATION_LIFECYCLE_MIGRATION_SQL} from './organization-lifecycle.js'
 import {PERSONAL_ACCOUNT_MIGRATION_SQL} from './personal-account.js';
 import {ACCOUNT_SECURITY_MIGRATION_SQL} from './account-security.js';
 import {ACCOUNT_VERIFICATION_MIGRATION_SQL} from './account-verification.js';
+import {EMAIL_CHALLENGE_MIGRATION_SQL} from './email-verification-challenge.js';
+import {OPERATIONS_MIGRATION_SQL} from './operations-store.js';
+import {LIFECYCLE_GOVERNANCE_MIGRATION_SQL} from './lifecycle-governance.js';
+import {DISCOVERY_INQUIRIES_MIGRATION_SQL} from './discovery-inquiries.js';
+import {CUSTOMER_WEBHOOK_MIGRATION_SQL} from './customer-webhooks.js';
+import {PROTECTED_EXPORT_MIGRATION_SQL} from './protected-exports.js';
+import {LIFECYCLE_NOTIFICATION_MIGRATION_SQL} from './lifecycle-notifications.js';
+import {RETENTION_GOVERNANCE_MIGRATION_SQL} from './retention-governance.js';
+import {EVIDENCE_INTEGRITY_MIGRATION_SQL} from './evidence-integrity.js';
+import {KNOWLEDGE_EMBEDDINGS_MIGRATION_SQL} from './knowledge-embeddings.js';
+import {RETENTION_RESOURCE_MIGRATION_SQL} from './retention-resources.js';
+import {LEARNING_REPORT_MIGRATION_SQL} from './learning-reports.js';
+import {MACHINE_INTEGRATION_MIGRATION_SQL} from './machine-integrations.js';
+import {configureLifecycleMaintenanceRouting} from './maintenance-routing.js';
 export async function applyProcessingJobMigration(pool: Pool): Promise<void> {
   await pool.query(PROCESSING_JOB_MIGRATION_SQL);
   await pool.query(TENANT_DOMAIN_MIGRATION_SQL);
@@ -1076,10 +1090,24 @@ export async function applyProcessingJobMigration(pool: Pool): Promise<void> {
   await pool.query(PERSONAL_ACCOUNT_MIGRATION_SQL);
   await pool.query(ACCOUNT_SECURITY_MIGRATION_SQL);
   await pool.query(ACCOUNT_VERIFICATION_MIGRATION_SQL);
+  await pool.query(EMAIL_CHALLENGE_MIGRATION_SQL);
   await pool.query(COURSE_OFFERING_MIGRATION_SQL);
   await pool.query(COURSE_CATALOG_MIGRATION_SQL);
   await pool.query(CANDIDATE_ENROLLMENT_MIGRATION_SQL);
   await pool.query(CANDIDATE_ACCESS_MIGRATION_SQL);
   await pool.query(PERSONAL_WALLET_MIGRATION_SQL);
   await pool.query(COURSE_STORY_MIGRATION_SQL);
+  await pool.query(OPERATIONS_MIGRATION_SQL);
+  await pool.query(LIFECYCLE_GOVERNANCE_MIGRATION_SQL);
+  await pool.query(DISCOVERY_INQUIRIES_MIGRATION_SQL);
+  await pool.query(CUSTOMER_WEBHOOK_MIGRATION_SQL);
+  await pool.query(PROTECTED_EXPORT_MIGRATION_SQL);
+  await pool.query(LIFECYCLE_NOTIFICATION_MIGRATION_SQL);
+  await pool.query(RETENTION_GOVERNANCE_MIGRATION_SQL);
+  await pool.query(EVIDENCE_INTEGRITY_MIGRATION_SQL);
+  await pool.query(KNOWLEDGE_EMBEDDINGS_MIGRATION_SQL);
+  await pool.query(RETENTION_RESOURCE_MIGRATION_SQL);
+  await pool.query(LEARNING_REPORT_MIGRATION_SQL);
+  await pool.query(MACHINE_INTEGRATION_MIGRATION_SQL);
+  await configureLifecycleMaintenanceRouting(pool);
 }

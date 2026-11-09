@@ -91,6 +91,11 @@ export interface UploadSessionStore {
 }
 
 export interface KnowledgeChunkRecord {
+  /** English lexical rank; zero explicitly reports no query term match, not complete relevance. */
+  retrievalScore?: number;
+  /** Hybrid ordering score, never evidence that a passage supports the instruction. */
+  retrievalRankScore?:number;
+  retrievalConfigurationId?:string;
   sourceChunkCount?: number;
   sourceHash?: string;
   chunkId: OpaqueId;
@@ -213,6 +218,8 @@ export interface AssetLifecyclePort {
     assetVersionId: OpaqueId;
     state: AssetLifecycleState;
     reason?: string;
+    /** Worker transitions must hold this job's current lease while writing the asset. */
+    jobLease?: {jobId: OpaqueId; workerId: string; leaseGeneration: number};
   }): Promise<boolean>;
 }
 
@@ -279,6 +286,8 @@ export interface AiGatewayPort {
 }
 
 export interface PrivateObjectStoragePort {
+  /** Only lifecycle-controlled retention workflows may remove private source objects. */
+  deleteObject?(input:{blobKey:string}):Promise<void>;
   createUploadUrl(input: { blobKey: string; contentType: string; expiresInSeconds: number }): Promise<string>;
   createDownloadUrl(input: { blobKey: string; expiresInSeconds: number }): Promise<string>;
   putObject(input: { blobKey: string; bytes: Uint8Array; contentType: string }): Promise<void>;
@@ -294,13 +303,20 @@ export interface JobDispatcherPort {
   enqueue<TPayload>(job: JobEnvelope<TPayload>): Promise<{ jobId: OpaqueId }>;
 }
 
+export interface JobCompletionOptions {
+  /** Applied in the same transaction as the fenced job outcome. */
+  assetTransition?: {assetVersionId: OpaqueId; state: AssetLifecycleState; reason?: string};
+  /** Only invoked after acquiring the current job fence. Failure rolls back finalization. */
+  beforeCommit?: () => Promise<void>;
+}
+
 export interface JobStorePort {
   enqueue<TPayload>(job: JobEnvelope<TPayload>): Promise<JobRecord<TPayload>>;
   get<TPayload>(tenant: TenantContext, jobId: OpaqueId): Promise<JobRecord<TPayload> | null>;
   retry<TPayload>(tenant: TenantContext, jobId: OpaqueId, request: OperatorRetryRequest): Promise<JobRecord<TPayload> | null>;
   claim<TPayload>(tenant: TenantContext, jobId: OpaqueId, workerId: string, now?: string, leaseSeconds?: number): Promise<JobRecord<TPayload> | null>;
-  succeed<TPayload>(tenant: TenantContext, jobId: OpaqueId, workerId: string, leaseGeneration: number, outcome: JobOutcome, now?: string): Promise<JobRecord<TPayload> | null>;
-  fail<TPayload>(tenant: TenantContext, jobId: OpaqueId, workerId: string, leaseGeneration: number, failure: FailureDetail, now?: string, outcome?: JobOutcome): Promise<JobRecord<TPayload> | null>;
+  succeed<TPayload>(tenant: TenantContext, jobId: OpaqueId, workerId: string, leaseGeneration: number, outcome: JobOutcome, now?: string, completion?: JobCompletionOptions): Promise<JobRecord<TPayload> | null>;
+  fail<TPayload>(tenant: TenantContext, jobId: OpaqueId, workerId: string, leaseGeneration: number, failure: FailureDetail, now?: string, outcome?: JobOutcome, completion?: JobCompletionOptions): Promise<JobRecord<TPayload> | null>;
 }
 
 export interface JobOutboxRecord {

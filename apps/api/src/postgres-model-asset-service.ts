@@ -73,8 +73,8 @@ export function createPostgresModelAssetService(input: {
         const release = await client.query<{ release_id: string; release_hash: string; manifest: unknown }>(
           `SELECT r.release_id, r.release_hash, r.manifest
            FROM release_manifests r
-           WHERE r.organization_id = $1 AND r.release_id = $2 AND r.status = 'PUBLISHED'
-           AND EXISTS(SELECT 1 FROM enrollments e WHERE e.organization_id=r.organization_id AND e.course_version_id=r.course_version_id AND e.learner_id=$3 AND e.status='ACTIVE')`,
+           WHERE r.organization_id = $1 AND r.release_id = $2 AND r.status = 'PUBLISHED' AND public.lifecycle_release_available(r.release_id)
+           AND EXISTS(SELECT 1 FROM enrollments e WHERE e.organization_id=r.organization_id AND e.course_version_id=r.course_version_id AND e.learner_id=$3 AND e.status IN ('ACTIVE','COMPLETED'))`,
           [tenant.organizationId, request.releaseId,tenant.actorId]
         );
         const releaseRow = release.rows[0];
@@ -137,7 +137,8 @@ export function createPostgresModelAssetService(input: {
       return withTenantTransaction(input.pool,tenant,async client=>{
         const row=(await client.query(`SELECT v.revision,v.content,m.model_version_id,m.manifest,m.blob_key FROM course_versions v
           JOIN model_versions m ON m.organization_id=v.organization_id AND m.model_version_id=v.content->'model'->>'modelVersionId'
-          WHERE v.organization_id=$1 AND v.course_version_id=$2 AND v.revision=$3 AND v.status IN ('DRAFT','IN_REVIEW') AND m.status='APPROVED' FOR SHARE OF v,m`,[tenant.organizationId,request.courseVersionId,request.revision])).rows[0];
+          WHERE v.organization_id=$1 AND v.course_version_id=$2 AND v.revision=$3 AND v.status IN ('DRAFT','IN_REVIEW') AND m.status='APPROVED'
+          AND NOT EXISTS(SELECT 1 FROM asset_versions a WHERE a.organization_id=m.organization_id AND public.lifecycle_asset_suppressed(a.asset_version_id) AND (m.asset_version_id=a.asset_version_id OR public.lifecycle_json_has_id(m.manifest,a.asset_version_id))) FOR SHARE OF v,m`,[tenant.organizationId,request.courseVersionId,request.revision])).rows[0];
         if(!row)return null;
         const course=object(row.content),binding=object(course?.model),definition=object(object(course?.simulation)?.definition),simulationModel=object(definition?.model),source=object(row.manifest);
         if(!source||!sha256(source.sourceHash)||binding?.manifestHash!==source.sourceHash||simulationModel?.manifestHash!==source.sourceHash||simulationModel?.modelVersionId!==row.model_version_id)return null;
@@ -154,10 +155,12 @@ export function createPostgresModelAssetService(input: {
         const object=await input.storage.readObject({blobKey:binding.manifestBlobKey,maxBytes:1024*1024});
         const manifest=validateBrowserModelManifest(JSON.parse(Buffer.from(object.bytes).toString('utf8')));
         if(manifest.sourceHash!==binding.manifestHash||manifest.modelVersionId!==binding.modelVersionId||manifest.releaseBindingId!==binding.releaseBindingId)throw Error('MODEL_CONTENT_MISMATCH');
+        if(!await resolveBinding(tenant,request))return null;
         return {bytes:object.bytes,contentType:'application/json'};
       }
       const object=await input.storage.readObject({blobKey:binding.modelBlobKey,maxBytes:64*1024*1024});
       if(createHash('sha256').update(object.bytes).digest('hex')!==binding.manifestHash)throw Error('MODEL_CONTENT_MISMATCH');
+      if(!await resolveBinding(tenant,request))return null;
       return {bytes:object.bytes,contentType:'model/gltf-binary'};
     },
     async getLearnerModel(tenant: TenantContext, request): Promise<LearnerModelAssetResponse | null> {
@@ -170,6 +173,7 @@ export function createPostgresModelAssetService(input: {
         input.storage.createDownloadUrl({ blobKey: binding.manifestBlobKey, expiresInSeconds: ttl }),
         input.storage.createDownloadUrl({ blobKey: binding.modelBlobKey, expiresInSeconds: ttl })
       ]);
+      if(!await resolveBinding(tenant,request))return null;
       return {
         releaseId: binding.releaseId,
         releaseHash: binding.releaseHash,

@@ -1,4 +1,4 @@
-import type { SpeechSynthesisPort, SpeechSynthesisRequest, SpeechSynthesisResult } from '@medical-device/contracts';
+import type { SpeechDelivery, SpeechSynthesisPort, SpeechSynthesisRequest, SpeechSynthesisResult } from '@medical-device/contracts';
 
 const maxText = 12_000;
 const defaultVoice = 'en-US-JennyNeural';
@@ -6,6 +6,34 @@ const defaultLocale = 'en-US';
 
 function xml(value: string): string {
   return value.replace(/[&<>"']/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&apos;' }[character] ?? character));
+}
+
+export function validateSpeechDelivery(text: string, value: unknown): value is SpeechDelivery {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const d = value as SpeechDelivery;
+  if (Object.keys(d).some(key => !['rate', 'emphasis', 'pauses', 'pronunciations'].includes(key))) return false;
+  if (d.rate !== undefined && (!Number.isFinite(d.rate) || d.rate < 0.75 || d.rate > 1.25)) return false;
+  if (d.emphasis !== undefined && !['none', 'reduced', 'moderate'].includes(d.emphasis)) return false;
+  const boundedText = (v: unknown) => typeof v === 'string' && v.trim().length > 0 && v.length <= 160;
+  if (d.pauses !== undefined && (!Array.isArray(d.pauses) || d.pauses.length > 24 || !d.pauses.every(p => p && Object.keys(p).every(k => ['afterText', 'milliseconds'].includes(k)) && boundedText(p.afterText) && text.split(p.afterText).length === 2 && Number.isInteger(p.milliseconds) && p.milliseconds >= 0 && p.milliseconds <= 5000) || new Set(d.pauses.map(p => p.afterText)).size !== d.pauses.length)) return false;
+  if (d.pronunciations !== undefined && (!Array.isArray(d.pronunciations) || d.pronunciations.length > 32 || !d.pronunciations.every(p => p && Object.keys(p).every(k => ['term', 'alias'].includes(k)) && boundedText(p.term) && boundedText(p.alias) && text.includes(p.term)) || new Set(d.pronunciations.map(p => p.term)).size !== d.pronunciations.length)) return false;
+  return true;
+}
+
+export function buildSpeechSsml(request: SpeechSynthesisRequest): string {
+  if (!request.text.trim() || request.text.length > maxText || (request.delivery !== undefined && !validateSpeechDelivery(request.text, request.delivery))) throw new Error('AZURE_SPEECH_TEXT_OR_DELIVERY_INVALID');
+  const delivery = request.delivery ?? {};
+  const pauses = new Map((delivery.pauses ?? []).map(p => [request.text.indexOf(p.afterText) + p.afterText.length, p.milliseconds]));
+  const terms = [...(delivery.pronunciations ?? [])].sort((a, b) => b.term.length - a.term.length);
+  let body = '';
+  for (let i = 0; i < request.text.length;) {
+    const term = terms.find(p => request.text.startsWith(p.term, i) && ![...pauses.keys()].some(end => end > i && end < i + p.term.length));
+    if (term) { body += `<sub alias="${xml(term.alias)}">${xml(term.term)}</sub>`; i += term.term.length; }
+    else { body += xml(request.text[i]!); i++; }
+    if (pauses.has(i)) body += `<break time="${pauses.get(i)}ms"/>`;
+  }
+  if (delivery.emphasis && delivery.emphasis !== 'none') body = `<emphasis level="${delivery.emphasis}">${body}</emphasis>`;
+  return `<speak version="1.0" xml:lang="${xml(request.locale)}"><voice name="${xml(request.voice)}"><prosody rate="${Math.round((delivery.rate ?? 1) * 100)}%">${body}</prosody></voice></speak>`;
 }
 
 function estimatedDuration(text: string): number {
@@ -42,7 +70,7 @@ async function fetchSpeech(endpoint: string, apiKey: string, request: SpeechSynt
         'ocp-apim-subscription-key': apiKey,
         'user-agent': 'medical-device-training-worker/1.0'
       },
-      body: `<speak version="1.0" xml:lang="${xml(request.locale)}"><voice name="${xml(request.voice)}">${xml(request.text)}</voice></speak>`
+      body: buildSpeechSsml(request)
     });
   } finally { clearTimeout(timer); }
   if (!response.ok) throw new Error(`AZURE_SPEECH_HTTP_${response.status}`);
@@ -65,6 +93,7 @@ export function createSpeechProvider(options: { mode?: string; endpoint?: string
   }
   return {
     async synthesize(request) {
+      buildSpeechSsml(request);
       const text = request.text.trim();
       if (!text || text.length > maxText) throw new Error('AZURE_SPEECH_TEXT_INVALID');
       const durationSeconds = estimatedDuration(text);

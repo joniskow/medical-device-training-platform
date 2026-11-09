@@ -1,0 +1,20 @@
+{
+  "schemaVersion": "technical-acceptance-policy.v1",
+  "maximumEvidenceAgeDays": 30,
+  "requiredImageServices": ["api", "worker", "reconstruction"],
+  "gates": [
+    {"id":"baseline-ci","tasks":["TC-01","TC-02","TC-03"],"execution":"hosted"},
+    {"id":"identity-security","tasks":["TC-04","TC-05","TC-06","TC-07","TC-08","TC-09"],"execution":"hosted"},
+    {"id":"certification-journey","tasks":["TC-10","TC-11","TC-12"],"execution":"hosted"},
+    {"id":"ai-retrieval","tasks":["TC-13","TC-14"],"execution":"hosted"},
+    {"id":"photo-video-reconstruction","tasks":["TC-15","TC-16","TC-17"],"execution":"hosted"},
+    {"id":"lesson-narration","tasks":["TC-18","TC-19"],"execution":"hosted"},
+    {"id":"rights-retention","tasks":["TC-20","TC-21"],"execution":"hosted"},
+    {"id":"discovery-reporting-integrations","tasks":["TC-22","TC-23","TC-24","TC-25","TC-26","TC-27"],"execution":"hosted"},
+    {"id":"operations-recovery","tasks":["TC-28","TC-29","TC-30","TC-31","TC-32","TC-33"],"execution":"hosted"},
+    {"id":"runtime-feasibility","tasks":["TC-34"],"execution":"physical-device"},
+    {"id":"independent-security","tasks":["TC-35"],"execution":"independent-review"},
+    {"id":"ui-handoff","tasks":["TC-36"],"execution":"hosted"}
+  ],
+  "deferredLaunchGates": ["finished UI accessibility and device journeys", "independent content and mechanical review", "source and engine license approval", "issuer wording", "pilot cohort and organization go/no-go"]
+}

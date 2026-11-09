@@ -42,7 +42,7 @@ export function createTrainingClient(options: TrainingClientOptions) {
     if (url.origin !== origin.origin || !url.pathname.startsWith('/api/v1/') || url.username || url.password) throw new TrainingApiError(400, 'API_DESTINATION_DENIED', 'The API destination is not allowed.');
     const identity = contextKey(), context = options.getContext();
     const headers = new Headers(request.headers);
-    if (url.pathname !== '/api/v1/auth/config') {
+    if (url.pathname !== '/api/v1/auth/config' && !url.pathname.startsWith('/api/v1/verify/')) {
       let token: string | undefined;
       try { token = await options.getAccessToken(); }
       catch { throw new TrainingApiError(401, 'AUTHENTICATION_REQUIRED', 'Sign in again to continue.'); }
@@ -84,13 +84,33 @@ export function createTrainingClient(options: TrainingClientOptions) {
     return data;
   }
   return {
+    /** Typed access to every generated operation with the same auth, context and error handling. */
+    request: <T>(run: (client: typeof api) => Promise<{ data?: T; error?: unknown; response: Response }>): Promise<T> => read(() => run(api)),
     getAuthConfig: (signal?: AbortSignal) => read(() => api.GET('/api/v1/auth/config', { signal })),
+    startEmailVerification: (email: string, signal?: AbortSignal) => read(() => api.POST('/api/v1/account/email-verification/start', { body: { email }, signal })),
+    completeEmailVerification: (challengeId: string, code: string, signal?: AbortSignal) => read(() => api.POST('/api/v1/account/email-verification/complete', { body: { challengeId, code }, signal })),
+    revokeEmailVerification: (signal?: AbortSignal) => read(() => api.POST('/api/v1/account/email-verification/revoke', { body: { confirmed: true }, signal })),
     getAccount: (signal?: AbortSignal) => read(() => api.GET('/api/v1/account', { signal })),
     listOrganizations: (signal?: AbortSignal) => read(() => api.GET('/api/v1/organization-contexts', { signal })),
     selectOrganization: (organizationId: string, idempotencyKey: string, signal?: AbortSignal) => read(() => api.POST('/api/v1/organization-contexts/{organizationId}/select', { params: { path: { organizationId }, header: { 'Idempotency-Key': idempotencyKey } }, body: {}, signal })),
     listEnrollments: (after?: string, signal?: AbortSignal) => read(() => api.GET('/api/v1/enrollments', { params: { header: organization(), query: { after } }, signal })),
     getEnrollment: (enrollmentId: string, signal?: AbortSignal) => read(() => api.GET('/api/v1/enrollments/{enrollmentId}', { params: { header: organization(), path: { enrollmentId } }, signal })),
     startActivity: (enrollmentId: string, activityId: string, signal?: AbortSignal) => read(() => api.POST('/api/v1/enrollments/{enrollmentId}/activities/{activityId}/start', { params: { header: organization(), path: { enrollmentId, activityId } }, body: {}, signal })),
+    getCourseVersion: (courseVersionId: string, signal?: AbortSignal) => read(() => api.GET('/api/v1/course-versions/{courseVersionId}', { params: { header: organization(), path: { courseVersionId } }, signal })),
+    saveCourseVersion: (courseVersionId: string, revision: number, content: Record<string, unknown>, signal?: AbortSignal) => read(() => api.PUT('/api/v1/course-versions/{courseVersionId}', { params: { header: organization(), path: { courseVersionId } }, body: { revision, content }, signal })),
+    reviewCourseVersion: (courseVersionId: string, decision: components['schemas']['ReviewRequest'], idempotencyKey: string, signal?: AbortSignal) => read(() => api.POST('/api/v1/course-versions/{courseVersionId}', { params: { header: { ...organization(), 'Idempotency-Key': idempotencyKey }, path: { courseVersionId } }, body: decision, signal })),
+    publishCourseVersion: (courseVersionId: string, idempotencyKey: string, signal?: AbortSignal) => read(() => api.POST('/api/v1/course-versions/{courseVersionId}/publish', { params: { header: { ...organization(), 'Idempotency-Key': idempotencyKey }, path: { courseVersionId } }, body: {}, signal })),
+    assignEnrollment: (learnerId: string, releaseId: string, signal?: AbortSignal) => read(() => api.POST('/api/v1/enrollments', { params: { header: organization() }, body: { learnerId, releaseId }, signal })),
+    acknowledgeActivity: (enrollmentId: string, activityId: string, signal?: AbortSignal) => read(() => api.POST('/api/v1/enrollments/{enrollmentId}/activities/{activityId}/acknowledge', { params: { header: organization(), path: { enrollmentId, activityId } }, body: {}, signal })),
+    startAssessment: (enrollmentId: string, releaseId: string, activityId: string, idempotencyKey: string, signal?: AbortSignal) => read(() => api.POST('/api/v1/assessment-sessions', { params: { header: { ...organization(), 'Idempotency-Key': idempotencyKey } }, body: { enrollmentId, releaseId, activityId }, signal })),
+    getAssessment: (sessionId: string, signal?: AbortSignal) => read(() => api.GET('/api/v1/assessment-sessions/{sessionId}', { params: { header: organization(), path: { sessionId } }, signal })),
+    submitAssessment: (sessionId: string, answers: components['schemas']['AssessmentAnswer'][], signal?: AbortSignal) => read(() => api.POST('/api/v1/assessment-sessions/{sessionId}/submit', { params: { header: organization(), path: { sessionId } }, body: { answers }, signal })),
+    listCredentials: (after?: string, learnerId?: string, signal?: AbortSignal) => read(() => api.GET('/api/v1/credentials', { params: { header: organization(), query: { after, learnerId } }, signal })),
+    issueCredential: (enrollmentId: string, signal?: AbortSignal) => read(() => api.POST('/api/v1/enrollments/{enrollmentId}/credential', { params: { header: organization(), path: { enrollmentId } }, body: {}, signal })),
+    setCredentialSharing: (credentialId: string, enabled: boolean, revision: number, idempotencyKey: string, signal?: AbortSignal) => read(() => api.POST('/api/v1/credentials/{credentialId}/sharing', { params: { header: { ...organization(), 'Idempotency-Key': idempotencyKey }, path: { credentialId } }, body: { enabled, revision }, signal })),
+    revokeCredential: (credentialId: string, reason: string, idempotencyKey: string, signal?: AbortSignal) => read(() => api.POST('/api/v1/credentials/{credentialId}/revoke', { params: { header: { ...organization(), 'Idempotency-Key': idempotencyKey }, path: { credentialId } }, body: { reason }, signal })),
+    supersedeCredential: (credentialId: string, replacementId: string, reason: string, idempotencyKey: string, signal?: AbortSignal) => read(() => api.POST('/api/v1/credentials/{credentialId}/supersede', { params: { header: { ...organization(), 'Idempotency-Key': idempotencyKey }, path: { credentialId } }, body: { replacementId, reason }, signal })),
+    verifyCredential: (publicId: string, signal?: AbortSignal) => read(() => api.GET('/api/v1/verify/{publicId}', { params: { path: { publicId } }, signal })),
     async getModelAsset(releaseId: string, modelVersionId: string, signal?: AbortSignal): Promise<ModelAsset> {
       const value = await read(() => api.GET('/api/v1/releases/{releaseId}/model-assets/{modelVersionId}', { params: { header: organization(), path: { releaseId, modelVersionId } }, signal }));
       if (!value || typeof value !== 'object' || !['releaseId','releaseHash','modelVersionId','releaseBindingId','variantId','manifestHash','manifestUrl','modelUrl','cacheControl'].every(key => typeof (value as Record<string, unknown>)[key] === 'string') || !('fallbackManifest' in value) || !value.fallbackManifest || typeof value.fallbackManifest !== 'object') throw new TrainingApiError(502, 'INVALID_MODEL_DESCRIPTOR', 'The approved model descriptor is invalid.');

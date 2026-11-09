@@ -1,0 +1,13 @@
+# Pass an approved supported official release including its immutable digest.
+# Example syntax: --build-arg CLAMAV_IMAGE=clamav/clamav:<reviewed-version>@sha256:<reviewed-digest>
+ARG CLAMAV_IMAGE
+FROM ${CLAMAV_IMAGE}
+ARG CLAMAV_IMAGE
+RUN printf '%s' "$CLAMAV_IMAGE" | grep -Eq '^clamav/clamav:[A-Za-z0-9_.-]+@sha256:[a-f0-9]{64}$'
+COPY infra/scanner/clamd.conf /etc/clamav/clamd.conf
+COPY infra/scanner/freshclam.conf /etc/clamav/freshclam.conf
+# Refresh before clamd enforces FailIfCvdOlderThan; starting both concurrently
+# leaves clamd permanently stopped when the bundled database is stale.
+COPY infra/scanner/start-scanner.sh /usr/local/bin/start-scanner.sh
+ENTRYPOINT ["/bin/sh", "/usr/local/bin/start-scanner.sh"]
+ENV CLAMAV_NO_FRESHCLAMD=false CLAMAV_NO_MILTERD=true FRESHCLAM_CHECKS=24

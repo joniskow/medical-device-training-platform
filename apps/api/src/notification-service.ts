@@ -8,9 +8,11 @@ export function createNotificationService(pool:Pool){return {
       const rows=(await client.query(`SELECT n.notification_id,n.notification_type,n.payload,n.created_at,n.read_at,
         CASE WHEN c.status='ACTIVE' AND c.expires_at<=now() THEN 'EXPIRED' ELSE c.status END AS credential_status
         FROM notifications n LEFT JOIN credentials c ON n.notification_type='CREDENTIAL_LIFECYCLE' AND c.organization_id=n.organization_id AND c.learner_id=n.recipient_id AND c.credential_id=n.payload->>'credentialId'
-        WHERE n.organization_id=$1 AND n.recipient_id=$2 AND n.notification_type IN ('COURSE_CHANGE','COURSE_RETRAINING_ASSIGNMENT','CREDENTIAL_LIFECYCLE') AND ($3::text IS NULL OR n.notification_id>$3) ORDER BY n.notification_id LIMIT 51`,[tenant.organizationId,tenant.actorId,after??null])).rows;
+        WHERE n.organization_id=$1 AND n.recipient_id=$2 AND n.notification_type IN ('COURSE_CHANGE','COURSE_RETRAINING_ASSIGNMENT','CREDENTIAL_LIFECYCLE','INQUIRY_LIFECYCLE','PROCESSING_LIFECYCLE') AND ($3::text IS NULL OR n.notification_id>$3) ORDER BY n.notification_id LIMIT 51`,[tenant.organizationId,tenant.actorId,after??null])).rows;
       return {items:rows.slice(0,50).map(row=>({notificationId:row.notification_id,title:row.payload.title,message:row.payload.message,
         ...(row.notification_type==='CREDENTIAL_LIFECYCLE'?{kind:'credential',lifecycleEvent:row.payload.lifecycleEvent,occurredAt:row.payload.occurredAt,currentStatus:row.credential_status??'UNAVAILABLE'}:
+          row.notification_type==='INQUIRY_LIFECYCLE'?{kind:'inquiry',inquiryId:row.payload.inquiryId,currentStatus:row.payload.status}:
+          row.notification_type==='PROCESSING_LIFECYCLE'?{kind:'processing',jobId:row.payload.jobId,currentStatus:row.payload.state}:
           {releaseNotes:row.payload.releaseNotes,effectiveAt:row.payload.effectiveAt,decision:row.payload.decision,...(typeof row.payload.enrollmentId==='string'?{enrollmentId:row.payload.enrollmentId}:{})}),
         createdAt:new Date(row.created_at).toISOString(),read:row.read_at!==null})),nextCursor:rows.length>50?rows[49].notification_id:null};
     });

@@ -43,4 +43,4 @@ Rollback is not complete merely because the old revision serves traffic. Existin
 
 Every incident or support action records: operator identity, reason, target, original input/version, current state, correlation ID, action, outcome, timestamps, and escalation/closure owner. The operator view should expose safe metadata only and must not provide a routine path around RLS, rights quarantine, publication review, or credential lifecycle rules.
 
-The dashboard and alert requirements are defined in [observability-contract.json](../config/observability-contract.json). Its status remains pending until the production telemetry sink and dashboard resources are wired and reconciled against source-of-truth records.
+The dashboard and alert requirements are defined in [observability-contract.json](../config/observability-contract.json). Runtime signals, four workbook definitions, safe aggregate samplers, diagnostics and alert IaC are implemented. Hosted deployment, KQL/native-metric validation, source-record reconciliation and named-responder alert receipt remain pending. See the implementation and response procedures in [technical-operations.md](technical-operations.md).

@@ -42,6 +42,8 @@ export function validateAssessmentDefinition(value: unknown): { valid: boolean; 
     const options = Array.isArray(question.options) ? question.options : [];
     const optionIds = options.map(option => object(option) ? option.optionId : undefined);
     if (options.length < 2 || options.length > 20 || !ids(optionIds) || options.some(option => !object(option) || !text(option.text))) error(path, "Provide two to 20 uniquely identified, labeled options.");
+    const labels = options.filter(object).filter(option => typeof option.text === 'string').map(option => (option.text as string).trim().replace(/\s+/gu, ' '));
+    if (new Set(labels).size !== labels.length) error(path, 'Answer options must have distinguishable text; label repeated actions by their stage or context.');
     if (!ids(question.correctOptionIds) || !question.correctOptionIds.length || question.correctOptionIds.some(option => !optionIds.includes(option))) error(path, "Correct answers must identify distinct available options.");
     else {
       if (question.type === "multiple_choice" && question.correctOptionIds.length !== 1) error(path, "Single-choice questions require exactly one correct answer.");

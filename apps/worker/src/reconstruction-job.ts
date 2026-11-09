@@ -4,23 +4,26 @@ import {inspectReconstructionCandidate} from '@medical-device/model-runtime';
 import {assertPhotogrammetryReport} from './photogrammetry-report.js';
 
 const sha=(bytes:Uint8Array)=>createHash('sha256').update(bytes).digest('hex');
-export async function processReconstructionJob(input:{jobStore:JobStorePort;storage:PrivateObjectStoragePort;sources:ReconstructionSourceStore;engine?:ReconstructionEngine;tenant:TenantContext;jobId:string;workerId:string}){
+export async function processReconstructionJob(input:{jobStore:JobStorePort;storage:PrivateObjectStoragePort;sources:ReconstructionSourceStore;engine?:ReconstructionEngine;tenant:TenantContext;jobId:string;workerId:string;signal?:AbortSignal}){
   const stored=await input.jobStore.get(input.tenant,input.jobId);if(stored?.jobType!=='reconstruction.generate')return null;
   const job=await input.jobStore.claim<ReconstructionPayload>(input.tenant,input.jobId,input.workerId,undefined,3600);if(!job)return null;
   const generation=job.leaseGeneration??0;
   let phase:'reading'|'engine'|'publishing'='reading';
   try{
+    input.signal?.throwIfAborted();
     if(job.payload.schemaVersion!=='reconstruction-request.v1'||!input.engine?.modes.includes(job.payload.mode))throw Error('RECONSTRUCTION_ENGINE_UNAVAILABLE');
     await input.sources.assertSourcesCurrent(job.tenant,job.payload);
     const sources:Parameters<ReconstructionEngine['generate']>[0]['sources']=[];
     for(const source of job.payload.sources){
+      input.signal?.throwIfAborted();
       if(!source.blobKey.startsWith(job.tenant.organizationId+'/'))throw Error('RECONSTRUCTION_SOURCE_CHANGED');
       const object=await input.storage.readObject({blobKey:source.blobKey,maxBytes:source.sizeBytes});
       if(object.bytes.length!==source.sizeBytes||sha(object.bytes)!==source.sourceHash)throw Error('RECONSTRUCTION_SOURCE_CONTENT_MISMATCH');
       sources.push({source,bytes:object.bytes});
     }
     phase='engine';
-    const output=await input.engine!.generate({job,sources});
+    const output=await input.engine!.generate({job,sources,signal:input.signal});
+    input.signal?.throwIfAborted();
     if(output.candidate.length<28||output.candidate.length>64*1024*1024||output.quality.length>256*1024)throw Error('RECONSTRUCTION_OUTPUT_INVALID');
     const quality=JSON.parse(Buffer.from(output.quality).toString('utf8')),geometry=inspectReconstructionCandidate(output.candidate);
     if(quality.schemaVersion!=='reconstruction-quality.v1'||quality.status!=='REVIEW_REQUIRED'||quality.candidate?.sha256!==sha(output.candidate)||quality.candidate?.triangles!==geometry.triangleCount||quality.candidate?.bytes!==output.candidate.length)throw Error('RECONSTRUCTION_OUTPUT_INVALID');
@@ -54,6 +57,7 @@ export async function processReconstructionJob(input:{jobStore:JobStorePort;stor
     phase='publishing';
     const prefix=`${job.tenant.organizationId}/derived/reconstruction/${encodeURIComponent(job.jobId)}/attempt-${job.attempt}/lease-${generation}/`;
     async function put(file:string,bytes:Uint8Array,contentType:string,limit:number){
+      input.signal?.throwIfAborted();
       if(bytes.length<1||bytes.length>limit)throw Error('RECONSTRUCTION_OUTPUT_INVALID');
       if(contentType==='image/png'&&Buffer.from(bytes.subarray(0,8)).toString('hex')!=='89504e470d0a1a0a')throw Error('RECONSTRUCTION_OUTPUT_INVALID');
       const artifact={blobKey:prefix+file,sha256:sha(bytes),bytes:bytes.length,contentType};
@@ -65,6 +69,7 @@ export async function processReconstructionJob(input:{jobStore:JobStorePort;stor
     if(output.conditioningImage)artifacts.conditioningImage=await put('input.png',output.conditioningImage,'image/png',32*1024*1024);
     if(output.sourceViews){artifacts.views=[];for(let index=0;index<output.sourceViews.length;index++){const view=output.sourceViews[index];artifacts.views.push({...await put(`view-${index}.png`,view.bytes,'image/png',25*1024*1024),sourceName:view.sourceName,timestampSeconds:view.timestampSeconds});}}
     await input.sources.assertSourcesCurrent(job.tenant,job.payload);
+    input.signal?.throwIfAborted();
     return input.jobStore.succeed(job.tenant,job.jobId,input.workerId,generation,{adapter:'reconstruction',adapterVersion:'reconstruction-workflow.v1',status:'REVIEW_REQUIRED',
       outputArtifactIds:[artifacts.candidate.blobKey,artifacts.quality.blobKey],warnings:[{code:'RECONSTRUCTION_REVIEW_REQUIRED',severity:'warning',message:'Scale, component mapping and device fidelity require review.'}],
       metrics:{inputBytes:sources.reduce((sum,source)=>sum+source.bytes.length,0),outputBytes:output.candidate.length+report.length},details:{artifacts,approvedForScoredUse:false,sourceImageHashes:quality.inputImages.map((image:{sha256:string})=>image.sha256),sourceVideoHash:quality.sourceVideo?.sourceSha256}});

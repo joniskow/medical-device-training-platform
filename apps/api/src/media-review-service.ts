@@ -2,6 +2,7 @@ import {createHash} from 'node:crypto';
 import type {Pool} from 'pg';
 import {withTenantTransaction,createPostgresKnowledgeStore} from '@medical-device/db';
 import type {TenantContext,PrivateObjectStoragePort} from '@medical-device/contracts';
+import {createAssetRightsAttestor} from './admin-rights.js';
 
 export function createMediaReviewService(pool:Pool,storage:PrivateObjectStoragePort){
  const reviews=createPostgresKnowledgeStore(pool);
@@ -25,6 +26,7 @@ export function createMediaReviewService(pool:Pool,storage:PrivateObjectStorageP
   return {assetVersionId:id,fileName:row.file_name,sourceType:row.source_type,contentType:row.content_type,sourceHash:row.sha256,state:row.state,width:report.width,height:report.height,durationSeconds:report.durationSeconds,videoCodec:report.videoCodec,audioCodec:report.audioCodec,contentUrl:`/api/v1/media-review/${encodeURIComponent(id)}/content`,frames,uniqueFrameCount,duplicateFrameCount:frames.length-uniqueFrameCount};
  }
  return {
+  attestRights: createAssetRightsAttestor(pool),
   async list(tenant:TenantContext,after=''){
    return withTenantTransaction(pool,tenant,async client=>{
     const rows=(await client.query(`SELECT v.asset_version_id AS "assetVersionId",v.file_name AS "fileName",v.state FROM asset_versions v JOIN assets a ON a.organization_id=v.organization_id AND a.asset_id=v.asset_id WHERE v.organization_id=$1 AND v.asset_version_id>$2 AND v.source_type IN ('image','video') AND v.state IN ('READY_FOR_REVIEW','APPROVED') AND a.status NOT IN ('QUARANTINED','REJECTED','RETIRED','SUSPENDED') ORDER BY v.asset_version_id LIMIT 21`,[tenant.organizationId,after])).rows;

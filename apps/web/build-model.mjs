@@ -2,6 +2,7 @@ import { build } from "esbuild";
 import { resolve } from "node:path";
 
 const root = resolve(import.meta.dirname);
+for (const entry of ['admin', 'admin-viewer']) await build({entryPoints:[resolve(root,`dist/${entry}.js`)],bundle:true,minify:true,external:['./admin-viewer.js'],format:'esm',platform:'browser',target:'es2022',outfile:resolve(root,`dist/${entry}.js`),allowOverwrite:true,sourcemap:false,legalComments:'none'});
 await build({
   entryPoints: [resolve(root, "dist/model-player.js")],
   bundle: true,

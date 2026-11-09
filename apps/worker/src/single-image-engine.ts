@@ -4,12 +4,14 @@ import {mkdtemp,mkdir,readFile,writeFile,rm,lstat,realpath} from 'node:fs/promis
 import {resolve,join,dirname,basename} from 'node:path';
 import {tmpdir} from 'node:os';
 import {randomUUID} from 'node:crypto';
+import {runReconstructionProcess} from './bounded-reconstruction-process.js';
 import type {ReconstructionEngine} from '@medical-device/contracts';
 
 const execute=promisify(execFile);
 type Runtime={kind:'python';executable:string}|{kind:'docker';executable:string;image:string};
 export function createSingleImageEngine(options:{runtime:Runtime;assetsDirectory:string;scriptsDirectory:string;workDirectory?:string}):ReconstructionEngine{
-  return {modes:['single-image'],async generate({job,sources}){
+  return {modes:['single-image'],async generate({job,sources,signal}){
+    signal?.throwIfAborted();
     if(job.payload.mode!=='single-image'||sources.length!==1)throw Error('RECONSTRUCTION_MODE_UNAVAILABLE');
     const root=resolve(options.workDirectory??tmpdir());await mkdir(root,{recursive:true});
     const work=await mkdtemp(join(root,'mdt-reconstruction-')),results=join(work,'results'),containerName='mdt-reconstruct-'+randomUUID();
@@ -24,8 +26,9 @@ export function createSingleImageEngine(options:{runtime:Runtime;assetsDirectory
         '--mount',`type=bind,source=${source},target=/input/source.${extension},readonly`,'--mount',`type=bind,source=${results},target=/runs`,runtime.image,
         '--image',`/input/source.${extension}`,'--assets','/assets','--output','/runs/output']:
         [join(scripts,'single_image.py'),'--image',source,'--assets',assets,'--output',join(results,'output')];
-      try{await execute(runtime.executable,args,{windowsHide:true,timeout:1_100_000,maxBuffer:1024*1024,env:{...process.env,HF_HUB_OFFLINE:'1',HF_HUB_DISABLE_TELEMETRY:'1'}});}
+      try{await runReconstructionProcess(runtime.executable,args,1_100_000,{...process.env,HF_HUB_OFFLINE:'1',HF_HUB_DISABLE_TELEMETRY:'1'},signal);}
       catch(error){
+        if((error as {processStillRunning?:boolean}).processStillRunning)safeCleanup=false;
         if(runtime.kind==='docker')try{await execute(runtime.executable,['rm','-f',containerName],{windowsHide:true,timeout:20_000,maxBuffer:64*1024});}
         catch(cleanupError){if(!String((cleanupError as {stderr?:string}).stderr).includes('No such container'))safeCleanup=false;}
         throw error;

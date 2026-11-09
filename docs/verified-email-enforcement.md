@@ -1,6 +1,6 @@
 # Verified email before membership and credential issuance
 
-The API trusts only the validated access token's explicit boolean `email_verified=true` and valid email claim. Its verification expiry comes from that token's signed `exp` claim. Profile text, HTTP body fields, login-name claims and historical display names cannot establish verification.
+The API trusts a validated access token's explicit boolean `email_verified=true` and valid email claim, or the server's independently completed identity-bound email-possession challenge. Signed claims retain precedence. Server assurance is usable only with a current signed identity and is capped at that token's expiry; profile text, request-body assertions, login-name claims and historical display names cannot establish verification. See [identity and provider trust operations](identity-security-operations.md) for the challenge protocol, revocation, rate limits and deployment acceptance boundaries.
 
 ## Application behavior
 

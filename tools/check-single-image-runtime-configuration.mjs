@@ -1,0 +1,17 @@
+import assert from 'node:assert/strict';
+import {initializeReconstructionEngine} from '../apps/worker/dist/reconstruction-engine-configuration.js';
+assert.equal(await initializeReconstructionEngine({}),undefined);
+await assert.rejects(initializeReconstructionEngine({RECONSTRUCTION_SINGLE_IMAGE_ENABLED:'true'}),/CONFIGURATION_MISSING/);
+await assert.rejects(initializeReconstructionEngine({RECONSTRUCTION_SINGLE_IMAGE_ENABLED:'maybe'}),/SINGLE_IMAGE_FEATURE_INVALID/);
+const env={RECONSTRUCTION_SINGLE_IMAGE_ENABLED:'true',RECONSTRUCTION_PYTHON:'python-fixture',RECONSTRUCTION_ASSETS_DIR:'assets-fixture',RECONSTRUCTION_SCRIPTS_DIR:'scripts-fixture',RECONSTRUCTION_SINGLE_IMAGE_CODE_DIR:'code-fixture',RECONSTRUCTION_SINGLE_IMAGE_MANIFEST:'manifest-fixture'};
+let inspected=false;
+const engine=await initializeReconstructionEngine(env,async(executable,args)=>{inspected=true;assert.equal(executable,'python-fixture');assert(args[0].endsWith('single_image_preflight.py'));assert(args.includes('assets-fixture'));});
+assert(inspected);assert.deepEqual(engine.modes,['single-image']);
+await assert.rejects(initializeReconstructionEngine(env,async()=>{throw Error('ASSET_HASH_MISMATCH');}),/PREFLIGHT_FAILED/);
+const photo={...env,PHOTOGRAMMETRY_OPENMVS_DIR:'openmvs',PHOTOGRAMMETRY_PYTHON:'photogrammetry-python',PHOTOGRAMMETRY_FFMPEG:'ffmpeg',PHOTOGRAMMETRY_FFPROBE:'ffprobe'};
+assert.deepEqual((await initializeReconstructionEngine(photo,async()=>{})).modes,['single-image','multi-view','video']);
+assert.deepEqual((await initializeReconstructionEngine({...photo,RECONSTRUCTION_MODES:'single-image,multi-view,video'},async()=>{})).modes,['single-image','multi-view','video']);
+await assert.rejects(initializeReconstructionEngine({...photo,RECONSTRUCTION_MODES:'multi-view,video'},async()=>{}),/CAPABILITY_CONFIGURATION_MISMATCH/);
+await assert.rejects(initializeReconstructionEngine({...photo,RECONSTRUCTION_MODES:'single-image,multi-view,multi-view'},async()=>{}),/CAPABILITY_CONFIGURATION_MISMATCH/);
+const disabled={...env,RECONSTRUCTION_SINGLE_IMAGE_ENABLED:'false'};assert.equal(await initializeReconstructionEngine(disabled),undefined);
+console.log('Single-image runtime admission passed: explicit capability, separate interpreter, manifest/assets preflight, failure before queue consumption, photo/video preserved.');

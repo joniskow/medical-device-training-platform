@@ -59,7 +59,7 @@ export async function enrollmentStoryFacts(client:PoolClient,tenant:TenantContex
  if(!tenant.actorId)throw Error('ENROLLMENT_NOT_FOUND');
  const result=await client.query(`SELECT r.release_id,r.release_hash,r.manifest FROM enrollments e
  JOIN release_manifests r ON r.organization_id=e.organization_id AND r.course_version_id=e.course_version_id
- WHERE e.organization_id=$1 AND e.learner_id=$2 AND e.enrollment_id=$3 AND e.status='ACTIVE' AND r.status='PUBLISHED'`,[tenant.organizationId,tenant.actorId,enrollmentId]);
+ WHERE e.organization_id=$1 AND e.learner_id=$2 AND e.enrollment_id=$3 AND e.status IN ('ACTIVE','COMPLETED') AND r.status='PUBLISHED' AND public.lifecycle_release_available(r.release_id)`,[tenant.organizationId,tenant.actorId,enrollmentId]);
  const row=result.rows[0];if(!row)throw Error('ENROLLMENT_NOT_FOUND');
  const content=row.manifest.content;
  const {activities,evidence,now}=await enrollmentEvidence(client,tenant,enrollmentId,row.release_id,row.release_hash,content);

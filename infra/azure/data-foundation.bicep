@@ -37,11 +37,18 @@ param serviceBusSigningSecret string
 @description('PostgreSQL database name.')
 param postgresDatabaseName string = 'medical_device'
 
+@minValue(7)
+@maxValue(35)
+param backupRetentionDays int = 35
+@description('Must be selected at server creation in a supported region. A value in config alone does not prove regional recovery.')
+@allowed(['Enabled', 'Disabled'])
+param geoRedundantBackup string = 'Disabled'
+
 var vnetName = 'mdt-${environmentName}-vnet'
 var acaEnvironmentName = 'mdt-${environmentName}-aca-private'
 var postgresServerName = 'mdt-${environmentName}-pg'
 var keyVaultName = 'mdt${environmentName}kv01'
-var blobPrivateDnsZoneName = 'privatelink.blob.core.windows.net'
+var blobPrivateDnsZoneName = 'privatelink.blob.${environment().suffixes.storage}'
 var postgresPrivateDnsZoneName = 'mdt-${environmentName}.postgres.database.azure.com'
 var keyVaultPrivateDnsZoneName = 'privatelink.vaultcore.azure.net'
 var acaSubnetName = 'aca-infrastructure'
@@ -234,7 +241,8 @@ resource keyVault 'Microsoft.KeyVault/vaults@2023-07-01' = {
     }
     enableRbacAuthorization: true
     publicNetworkAccess: 'Disabled'
-    softDeleteRetentionInDays: 7
+    softDeleteRetentionInDays: 90
+    enablePurgeProtection: true
   }
 }
 
@@ -263,7 +271,6 @@ resource keyVaultPrivateEndpoint 'Microsoft.Network/privateEndpoints@2023-11-01'
   }
   dependsOn: [
     vnet
-    keyVault
   ]
 }
 
@@ -299,11 +306,11 @@ resource postgres 'Microsoft.DBforPostgreSQL/flexibleServers@2024-08-01' = {
     version: '16'
     storage: {
       storageSizeGB: 32
-      autoGrow: 'Disabled'
+      autoGrow: 'Enabled'
     }
     backup: {
-      backupRetentionDays: 7
-      geoRedundantBackup: 'Disabled'
+      backupRetentionDays: backupRetentionDays
+      geoRedundantBackup: geoRedundantBackup
     }
     highAvailability: {
       mode: 'Disabled'
@@ -316,8 +323,16 @@ resource postgres 'Microsoft.DBforPostgreSQL/flexibleServers@2024-08-01' = {
   }
   dependsOn: [
     vnet
-    postgresPrivateDnsZone
   ]
+}
+
+resource postgresExtensions 'Microsoft.DBforPostgreSQL/flexibleServers/configurations@2024-08-01' = {
+  parent: postgres
+  name: 'azure.extensions'
+  properties: {
+    value: 'VECTOR'
+    source: 'user-override'
+  }
 }
 
 resource postgresDatabase 'Microsoft.DBforPostgreSQL/flexibleServers/databases@2024-08-01' = {
@@ -358,15 +373,20 @@ resource serviceBusSigningSecretResource 'Microsoft.KeyVault/vaults/secrets@2023
   }
 }
 
-resource keyVaultSecretsUserRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-  name: guid(keyVault.id, workerIdentity.id, 'key-vault-secrets-user')
-  scope: keyVault
+var workerSecretNames = ['postgres-runtime-password', 'postgres-outbox-password', 'service-bus-signing-secret']
+resource workerRuntimeSecrets 'Microsoft.KeyVault/vaults/secrets@2023-07-01' existing = [for name in workerSecretNames: {
+  parent: keyVault
+  name: name
+}]
+resource keyVaultSecretsUserRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = [for (name, i) in workerSecretNames: {
+  name: guid(keyVault.id, workerIdentity.id, name, 'worker-secret-reader')
+  scope: workerRuntimeSecrets[i]
   properties: {
     roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '4633458b-17de-408a-b874-0445c86b69e6')
     principalId: workerIdentity.properties.principalId
     principalType: 'ServicePrincipal'
   }
-}
+}]
 
 resource managedEnvironment 'Microsoft.App/managedEnvironments@2024-03-01' = {
   name: acaEnvironmentName

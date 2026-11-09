@@ -1,0 +1,46 @@
+import assert from 'node:assert/strict';
+import {validateLessonDirection,validateVideoLesson} from '../packages/simulation-schema/dist/index.js';
+import {validateDraftDirections,createSourceDirection} from '../packages/ai-gateway/dist/lesson-planner.js';
+import {createDeterministicAiGateway} from '../packages/ai-gateway/dist/index.js';
+
+const citation={assetVersionId:'source:manual',page:1};
+const source={assetVersionId:'source:manual',citation,text:'Before pressing Start, confirm Ready. Warning: keep the cover closed. Press Start because this opens the flow. Confirm Flowing.'};
+const narration=source.text;
+const lesson={schemaVersion:'video-lesson.v1',lessonId:'lesson:baseline',title:'Start flow',durationSeconds:30,learningObjectives:['Verify Flowing'],safetyBoundary:'Simulation only.',citations:[citation],scenes:[{sceneId:'scene:one',startSeconds:0,endSeconds:30,narration,onScreenText:['Start'],visual:{kind:'source_image',assetVersionId:'media:one',label:'Start'},citations:[citation]}]};
+lesson.direction={schemaVersion:'lesson-direction.v1',openingProblem:'How do you confirm flow has started?',outcome:'Confirm Flowing',beats:[{sceneId:'scene:one',sourceEvidence:[{citation,quote:source.text}],startingCondition:'confirm Ready',subject:'Start control',framing:'operator',attentionTarget:'Start',action:'Press Start',result:'Confirm Flowing.',narration,callouts:[{text:'Start',target:'Start',startSeconds:5,endSeconds:10}],observationHoldSeconds:3,prerequisites:['Before pressing Start, confirm Ready.'],warnings:['Warning: keep the cover closed.'],exactLabels:['Start'],causalExplanation:{text:'Press Start because this opens the flow.',quote:'Press Start because this opens the flow.',citation}}]};
+const report=value=>validateLessonDirection(value.direction,value.scenes,[source]);
+assert.equal(report(lesson).valid,true,JSON.stringify(report(lesson)));
+assert.equal(validateVideoLesson(lesson).valid,true);
+for (const malformed of [null, 42, {}]) {
+  const changed = structuredClone(lesson); changed.scenes[0].narration = malformed;
+  assert.equal(validateVideoLesson(changed).valid, false);
+  changed.scenes[0].narration = narration; changed.scenes[0].citations = malformed;
+  assert.equal(validateVideoLesson(changed).valid, false);
+}
+const mutate=fn=>{const value=structuredClone(lesson);fn(value,value.direction.beats[0]);return value;};
+const has=(value,code)=>assert(report(value).findings.some(f=>f.code===code),JSON.stringify(report(value)));
+has(mutate((v,b)=>{v.scenes[0].narration=b.narration=b.narration.replace('Before pressing Start, confirm Ready. ','');}),'LESSON_DIRECTION_REQUIRED_CLAIM_OMITTED');
+has(mutate((v,b)=>{b.causalExplanation.text='Press Start because it sterilizes the line.';}),'LESSON_DIRECTION_UNSUPPORTED_RATIONALE');
+has(mutate((v,b)=>{v.scenes[0].narration=b.narration=b.narration.replaceAll('Start','Go');}),'LESSON_DIRECTION_REQUIRED_CLAIM_OMITTED');
+has(mutate((v,b)=>{b.hiddenMechanics={text:'The hidden valve rotates.',quote:'The hidden valve rotates.',citation};}),'LESSON_DIRECTION_UNSUPPORTED_MECHANICS');
+has(mutate((v,b)=>{b.callouts[0].endSeconds=31;}),'LESSON_DIRECTION_CALLOUT_INVALID');
+has(mutate((v,b)=>{b.result='The device sterilizes the line.';}),'LESSON_DIRECTION_ACTION_UNSUPPORTED');
+has(mutate((v,b)=>{b.sourceEvidence[0].quote='Fabricated statement.';}),'LESSON_DIRECTION_EVIDENCE_INVALID');
+has(mutate((v,b)=>{b.sourceEvidence=[];}),'LESSON_DIRECTION_EVIDENCE_REQUIRED');
+const result={status:'DRAFT',operation:'generate_video_lesson',output:{videoLessons:[lesson]},warnings:[],citations:['source:manual'],metrics:{}};
+const input={lessonBrief:{referencePack:{exactLabels:['Start']}},sourceChunks:[source]};
+assert.equal(validateDraftDirections(result,input).status,'DRAFT');
+const removed=mutate((v,b)=>{v.scenes[0].narration=b.narration='Confirm Flowing.';b.sourceEvidence=[{citation,quote:'Confirm Flowing.'}];b.prerequisites=[];b.warnings=[];b.exactLabels=[];b.startingCondition=b.action=b.result='Confirm Flowing.';delete b.causalExplanation;});
+assert.equal(validateDraftDirections({...result,output:{videoLessons:[removed]}},input).status,'REJECTED','Dropping mandatory excerpts must not evade source comparison');
+const fallback=structuredClone(lesson);fallback.direction=createSourceDirection(fallback,[source]);
+assert.equal(report(fallback).valid,true,JSON.stringify(report(fallback)));
+assert(report(fallback).findings.some(f=>f.code==='LESSON_DIRECTION_RATIONALE_MISSING'));
+const brief={schemaVersion:'lesson-brief.v1',audience:'Operators',priorKnowledge:'Orientation complete',task:'Start flow',objective:'Verify Flowing',deviceRevision:'A',setting:'Simulation',format:'orientation',referencePack:{approvedViewIds:['media:one'],sourceArtifactIds:['source:manual'],exactLabels:['Start'],permittedStates:['Ready','Flowing'],permittedActions:['Press Start'],visualConventions:'Neutral light; operator view',terminology:['Start']}};
+const generated=await createDeterministicAiGateway().execute({operation:'generate_video_lesson',sourceArtifactIds:['source:manual'],outputSchemaVersion:'course-draft.v1',tokenBudget:2000,tenant:{organizationId:'org:test',actorId:'author:test',correlationId:'direction:test'},input:{videoLesson:true,lessonBrief:brief,sourceChunks:[source],mediaContext:[{assetVersionId:'media:one',sourceType:'image',contentType:'image/png'}]}});
+assert.equal(generated.status,'DRAFT');
+assert(generated.output.videoLessons[0].direction);
+assert.equal(generated.output.videoLessons[0].title, brief.task);
+assert.equal(generated.output.videoLessons[0].scenes.some(scene => scene.checkpointActivityId), false);
+assert.equal(JSON.stringify(generated.output).includes('AIC-'), false, JSON.stringify(generated.output));
+assert.equal(validateDraftDirections(generated,{...input,lessonBrief:brief}).status,'DRAFT');
+console.log('Lesson direction passed: coordinated golden script, omitted prerequisites, invented rationale, exact labels, unsupported mechanics, timed callouts, authoritative source comparison and deterministic gateway integration.');

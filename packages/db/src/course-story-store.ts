@@ -35,7 +35,7 @@ export function createCourseStoryStore(pool:Pool){
   if(!tenant.actorId||!id(enrollmentId))throw Error('STORY_NOT_FOUND');
   const result=await client.query(`SELECT r.release_id,r.release_hash,r.manifest FROM enrollments e
    JOIN release_manifests r ON r.organization_id=e.organization_id AND r.course_version_id=e.course_version_id
-   WHERE e.organization_id=$1 AND e.learner_id=$2 AND e.enrollment_id=$3 AND e.status='ACTIVE' AND r.status='PUBLISHED'
+   WHERE e.organization_id=$1 AND e.learner_id=$2 AND e.enrollment_id=$3 AND e.status IN ('ACTIVE','COMPLETED') AND r.status='PUBLISHED' AND public.lifecycle_release_available(r.release_id)
    FOR UPDATE OF e FOR SHARE OF r`,[tenant.organizationId,tenant.actorId,enrollmentId]);
   if(result.rows.length!==1)throw Error('STORY_NOT_FOUND');
   const release=result.rows[0],content=release.manifest.content;
@@ -88,7 +88,7 @@ export function createCourseStoryStore(pool:Pool){
 export async function assertStoryActivityAccess(client:PoolClient,tenant:TenantContext,enrollmentId:string,releaseId:string,activityId:string,runtimeActivity=false){
  const result=await client.query(`SELECT r.release_hash,r.manifest FROM enrollments e
  JOIN release_manifests r ON r.organization_id=e.organization_id AND r.course_version_id=e.course_version_id
- WHERE e.organization_id=$1 AND e.enrollment_id=$2 AND e.learner_id=$3 AND e.status='ACTIVE' AND r.release_id=$4 AND r.status='PUBLISHED'
+ WHERE e.organization_id=$1 AND e.enrollment_id=$2 AND e.learner_id=$3 AND e.status IN ('ACTIVE','COMPLETED') AND r.release_id=$4 AND r.status='PUBLISHED' AND public.lifecycle_release_available(r.release_id)
  FOR SHARE OF e,r`,[tenant.organizationId,enrollmentId,tenant.actorId,releaseId]);
  const release=result.rows[0];if(!release)throw Error('STORY_ACTIVITY_UNAVAILABLE');
  const content=release.manifest.content;if(content.story===undefined)return;

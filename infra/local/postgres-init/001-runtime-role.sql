@@ -10,7 +10,7 @@ ALTER ROLE local_runtime WITH LOGIN NOSUPERUSER NOBYPASSRLS PASSWORD 'local_runt
 GRANT CONNECT ON DATABASE medical_device TO local_runtime;
 GRANT USAGE ON SCHEMA public TO local_runtime;
 ALTER DEFAULT PRIVILEGES FOR ROLE local_app IN SCHEMA public
-  GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO local_runtime;
+  REVOKE SELECT, INSERT, UPDATE, DELETE ON TABLES FROM local_runtime;
 
 DO $$
 BEGIN
@@ -24,4 +24,4 @@ ALTER ROLE medical_device_outbox_publisher WITH LOGIN NOSUPERUSER NOBYPASSRLS PA
 GRANT CONNECT ON DATABASE medical_device TO medical_device_outbox_publisher;
 GRANT USAGE ON SCHEMA public TO medical_device_outbox_publisher;
 ALTER DEFAULT PRIVILEGES FOR ROLE local_app IN SCHEMA public
-  GRANT SELECT, UPDATE ON TABLES TO medical_device_outbox_publisher;
+  REVOKE SELECT, UPDATE ON TABLES FROM medical_device_outbox_publisher;

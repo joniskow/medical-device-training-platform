@@ -3,7 +3,7 @@ import type {PoolClient} from "pg";
 import type {TenantContext} from "@medical-device/contracts";
 
 export async function assignEnrollmentInTransaction(client:PoolClient,tenant:TenantContext,learnerId:string,releaseId:string){
-        const release = await client.query(`SELECT course_version_id FROM release_manifests WHERE organization_id=$1 AND release_id=$2 AND status='PUBLISHED' FOR SHARE`, [tenant.organizationId,releaseId]);
+        const release = await client.query(`SELECT course_version_id FROM release_manifests WHERE organization_id=$1 AND release_id=$2 AND status='PUBLISHED' AND public.lifecycle_release_available(release_id) FOR SHARE`, [tenant.organizationId,releaseId]);
         if (!release.rows[0]) throw new Error("ENROLLMENT_NOT_FOUND");
         const member = await client.query(`SELECT membership_id FROM organization_memberships WHERE organization_id=$1 AND subject=$2 AND status='ACTIVE'`,[tenant.organizationId,learnerId]);
         if (!member.rowCount) throw new Error("ENROLLMENT_MEMBER_REQUIRED");

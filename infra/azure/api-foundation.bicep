@@ -24,6 +24,38 @@ param storageAccountName string = 'mdtdevstorage01'
 @description('Container image to deploy.')
 param image string
 
+@allowed(['staging', 'production'])
+param appEnvironment string = 'staging'
+param azureOpenAiEndpoint string
+param azureOpenAiDeployment string
+param azureOpenAiModel string = 'gpt-4o-mini'
+param azureOpenAiApiVersion string = '2024-10-21'
+@description('Enable bounded evidence planning and per-module generation for Azure learning requests.')
+param aiStagedLearning bool = true
+@description('Optional evaluated instructional deployment on the same Azure OpenAI endpoint. Set together with its model name.')
+param azureOpenAiInstructionalDeployment string = ''
+param azureOpenAiInstructionalModel string = ''
+param azureEmbeddingEndpoint string
+param azureEmbeddingDeployment string
+@allowed(['text-embedding-3-small', 'text-embedding-3-large'])
+param azureEmbeddingModel string = 'text-embedding-3-small'
+@description('Optional reviewed versioned source-unit rates; absent rates remain explicitly unpriced.')
+param sourceUsageRatesJson string = '[]'
+param aiCostRatesJson string = '[]'
+param communicationServiceName string
+@description('Resource ID of the reviewed ACS email-send role; use an existing least-privilege custom role, not Owner/Contributor.')
+param communicationEmailSenderRoleDefinitionId string
+param emailVerificationEndpoint string
+param emailVerificationSender string
+param invitationActiveKeyId string
+@minValue(1)
+@maxValue(50000)
+@description('Reviewed worst-case per-generation reservation, including repeated input/context for the outline and up to two module calls plus their shared output budget. 100 cents is a planning placeholder, not measured pricing.')
+param aiMaxRunCostCents int = 100
+@allowed([true])
+@description('Explicit operator attestation that configured reservation prices cover worst-case enabled workloads.')
+param costReservationsReviewed bool
+
 @description('PostgreSQL private DNS hostname.')
 param postgresHost string = 'mdt-devcentral-pg.postgres.database.azure.com'
 
@@ -55,7 +87,7 @@ param minReplicas int = 0
 param maxReplicas int = 1
 
 @description('Reconstruction modes enabled for the deployed POC.')
-param reconstructionModes string = 'multi-view'
+param reconstructionModes string = 'multi-view,video'
 
 @description('Enable the managed browser authentication flow.')
 param browserAuthEnabled bool = false
@@ -90,6 +122,19 @@ resource storage 'Microsoft.Storage/storageAccounts@2023-05-01' existing = {
   name: storageAccountName
 }
 
+resource communication 'Microsoft.Communication/communicationServices@2023-03-31' existing = {
+  name: communicationServiceName
+}
+resource apiCommunicationRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(communication.id, apiIdentity.id, 'api-verification-email')
+  scope: communication
+  properties: {
+    roleDefinitionId: communicationEmailSenderRoleDefinitionId
+    principalId: apiIdentity.properties.principalId
+    principalType: 'ServicePrincipal'
+  }
+}
+
 resource apiIdentity 'Microsoft.ManagedIdentity/userAssignedIdentities@2023-01-31' = {
   name: apiIdentityName
   location: location
@@ -100,15 +145,20 @@ resource apiIdentity 'Microsoft.ManagedIdentity/userAssignedIdentities@2023-01-3
   }
 }
 
-resource apiKeyVaultRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-  name: guid(keyVault.id, apiIdentity.id, 'api-key-vault-secrets-user')
-  scope: keyVault
+var apiSecretNames = ['postgres-runtime-password', 'azure-openai-key', 'azure-embedding-api-key', 'operational-key-secret', 'email-verification-secret', 'webhook-keys-json', 'invitation-token-keys-json']
+resource apiSecrets 'Microsoft.KeyVault/vaults/secrets@2023-07-01' existing = [for name in apiSecretNames: {
+  parent: keyVault
+  name: name
+}]
+resource apiKeyVaultRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = [for (name, i) in apiSecretNames: {
+  name: guid(keyVault.id, apiIdentity.id, name, 'api-secret-reader')
+  scope: apiSecrets[i]
   properties: {
     roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '4633458b-17de-408a-b874-0445c86b69e6')
     principalId: apiIdentity.properties.principalId
     principalType: 'ServicePrincipal'
   }
-}
+}]
 
 resource apiAcrPullRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
   name: guid(containerRegistry.id, apiIdentity.id, 'api-acr-pull')
@@ -148,6 +198,7 @@ resource api 'Microsoft.App/containerApps@2024-03-01' = {
     apiAcrPullRole
     apiStorageBlobRole
     apiStorageBlobDelegatorRole
+    apiCommunicationRole
   ]
   tags: {
     project: 'medical-device-training'
@@ -177,6 +228,12 @@ resource api 'Microsoft.App/containerApps@2024-03-01' = {
         }
       ]
       secrets: [
+        { name: 'azure-openai-key', keyVaultUrl: '${keyVaultUri}/secrets/azure-openai-key', identity: apiIdentity.id }
+        { name: 'azure-embedding-api-key', keyVaultUrl: '${keyVaultUri}/secrets/azure-embedding-api-key', identity: apiIdentity.id }
+        { name: 'operational-key-secret', keyVaultUrl: '${keyVaultUri}/secrets/operational-key-secret', identity: apiIdentity.id }
+        { name: 'email-verification-secret', keyVaultUrl: '${keyVaultUri}/secrets/email-verification-secret', identity: apiIdentity.id }
+        { name: 'webhook-keys-json', keyVaultUrl: '${keyVaultUri}/secrets/webhook-keys-json', identity: apiIdentity.id }
+        { name: 'invitation-token-keys-json', keyVaultUrl: '${keyVaultUri}/secrets/invitation-token-keys-json', identity: apiIdentity.id }
         {
           name: 'database-runtime-password'
           keyVaultUrl: '${keyVaultUri}/secrets/postgres-runtime-password'
@@ -194,6 +251,35 @@ resource api 'Microsoft.App/containerApps@2024-03-01' = {
             memory: '0.5Gi'
           }
           env: [
+            { name: 'APP_ENV', value: appEnvironment }
+            { name: 'AUDIT_LOGGING_ENABLED', value: 'true' }
+            { name: 'AI_PROVIDER_MODE', value: 'azure-openai' }
+            { name: 'RETRIEVAL_MODE', value: 'hybrid' }
+            { name: 'AZURE_EMBEDDING_ENDPOINT', value: azureEmbeddingEndpoint }
+            { name: 'AZURE_EMBEDDING_DEPLOYMENT', value: azureEmbeddingDeployment }
+            { name: 'AZURE_EMBEDDING_MODEL', value: azureEmbeddingModel }
+            { name: 'AZURE_EMBEDDING_API_KEY', secretRef: 'azure-embedding-api-key' }
+            { name: 'SOURCE_USAGE_RATES_JSON', value: sourceUsageRatesJson }
+            { name: 'AI_COST_RATES_JSON', value: aiCostRatesJson }
+            { name: 'AZURE_OPENAI_ENDPOINT', value: azureOpenAiEndpoint }
+            { name: 'AZURE_OPENAI_DEPLOYMENT', value: azureOpenAiDeployment }
+            { name: 'AZURE_OPENAI_MODEL', value: azureOpenAiModel }
+            { name: 'AZURE_OPENAI_API_VERSION', value: azureOpenAiApiVersion }
+            { name: 'AI_STAGED_LEARNING', value: string(aiStagedLearning) }
+            { name: 'AZURE_OPENAI_INSTRUCTIONAL_DEPLOYMENT', value: azureOpenAiInstructionalDeployment }
+            { name: 'AZURE_OPENAI_INSTRUCTIONAL_MODEL', value: azureOpenAiInstructionalModel }
+            { name: 'AZURE_OPENAI_API_KEY', secretRef: 'azure-openai-key' }
+            { name: 'AI_MAX_OUTPUT_TOKENS', value: '4000' }
+            { name: 'AI_MAX_RUN_COST_CENTS', value: string(aiMaxRunCostCents) }
+            { name: 'COST_RESERVATIONS_REVIEWED', value: string(costReservationsReviewed) }
+            { name: 'WEBHOOK_KEYS_JSON', secretRef: 'webhook-keys-json' }
+            { name: 'INVITATION_TOKEN_KEYS_JSON', secretRef: 'invitation-token-keys-json' }
+            { name: 'INVITATION_ACTIVE_KEY_ID', value: invitationActiveKeyId }
+            { name: 'OPERATIONAL_KEY_SECRET', secretRef: 'operational-key-secret' }
+            { name: 'EMAIL_VERIFICATION_ENABLED', value: 'true' }
+            { name: 'EMAIL_VERIFICATION_SECRET', secretRef: 'email-verification-secret' }
+            { name: 'EMAIL_VERIFICATION_ENDPOINT', value: emailVerificationEndpoint }
+            { name: 'EMAIL_VERIFICATION_SENDER', value: emailVerificationSender }
             { name: 'AZURE_CLIENT_ID', value: apiIdentity.properties.clientId }
             { name: 'PORT', value: '8080' }
             { name: 'POSTGRES_HOST', value: postgresHost }
@@ -232,7 +318,7 @@ resource api 'Microsoft.App/containerApps@2024-03-01' = {
             {
               type: 'Readiness'
               httpGet: {
-                path: '/healthz'
+                path: '/readyz'
                 port: 8080
               }
               initialDelaySeconds: 5

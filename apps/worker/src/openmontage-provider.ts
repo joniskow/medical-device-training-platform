@@ -1,17 +1,17 @@
 import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import type { OpenMontageProviderPort, OpenMontageProviderRequest, OpenMontageProviderResult } from '@medical-device/contracts';
+import {readTechnicalLimits} from '@medical-device/contracts';
+import {approvedOrigin,approvedUrl,boundedHttpsRequest} from './provider-egress.js';
 
-function asMode(value: string | undefined): 'deterministic' | 'http' { return value?.trim().toLowerCase() === 'http' ? 'http' : 'deterministic'; }
+function asMode(value: string | undefined): 'deterministic' | 'http' {
+  const mode=value?.trim().toLowerCase()??'deterministic';
+  if(mode!=='http'&&mode!=='deterministic')throw Error('OPENMONTAGE_PROVIDER_MODE_INVALID');
+  if(mode==='deterministic'&&['production','staging'].includes(process.env.APP_ENV?.trim().toLowerCase()??''))throw Error('PRODUCTION_VIDEO_PROVIDER_REQUIRED');
+  return mode;
+}
 
 const wait = (milliseconds: number) => new Promise<void>(resolve => setTimeout(resolve, milliseconds));
-
-async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs: number): Promise<Response> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  try { return await fetch(url, { ...init, signal: controller.signal }); }
-  finally { clearTimeout(timer); }
-}
 
 export function createOpenMontageProvider(options: { mode?: string; endpoint?: string; apiKey?: string; fixturePath?: string } = {}): OpenMontageProviderPort {
   const mode = asMode(options.mode ?? process.env.OPENMONTAGE_PROVIDER_MODE);
@@ -19,20 +19,22 @@ export function createOpenMontageProvider(options: { mode?: string; endpoint?: s
     const endpoint = options.endpoint?.trim() || process.env.OPENMONTAGE_PROVIDER_URL?.trim();
     if (!endpoint) throw new Error('OPENMONTAGE_PROVIDER_URL_REQUIRED');
     const providerEndpoint = endpoint;
-    const timeoutMs = Number(process.env.OPENMONTAGE_PROVIDER_TIMEOUT_MS ?? 900_000);
-    const pollMs = Number(process.env.OPENMONTAGE_PROVIDER_POLL_MS ?? 2_000);
+    const limits=readTechnicalLimits(process.env);
+    const timeoutMs = limits.providerTimeoutMs;
+    const pollMs = 2_000;
+    const providerOrigin=approvedOrigin(providerEndpoint);
+    const providerOrigins=new Set([providerOrigin]);
+    const videoOrigins=new Set([providerOrigin,...(process.env.OPENMONTAGE_VIDEO_ORIGINS??'').split(',').map(value=>value.trim()).filter(Boolean).map(approvedOrigin)]);
     const headers = { 'content-type': 'application/json', ...(options.apiKey || process.env.OPENMONTAGE_PROVIDER_API_KEY ? { authorization: `Bearer ${options.apiKey || process.env.OPENMONTAGE_PROVIDER_API_KEY}` } : {}) };
     async function createJob(request: OpenMontageProviderRequest): Promise<any> {
-      const response = await fetchWithTimeout(providerEndpoint, { method: 'POST', headers, body: JSON.stringify(request) }, timeoutMs);
-      if (!response.ok) throw new Error(`OPENMONTAGE_PROVIDER_HTTP_${response.status}`);
-      return response.json();
+      const response = await boundedHttpsRequest({url:providerEndpoint,origins:providerOrigins,method:'POST',headers,body:JSON.stringify(request),timeoutMs,maxBytes:Math.min(Math.ceil(limits.maxProviderBytes*4/3)+4096,192*1024*1024)});
+      return JSON.parse(response.bytes.toString('utf8'));
     }
     async function pollJob(statusUrl: string): Promise<any> {
       const deadline = Date.now() + timeoutMs;
       while (Date.now() < deadline) {
-        const response = await fetchWithTimeout(statusUrl, { method: 'GET', headers }, Math.min(timeoutMs, 30_000));
-        if (!response.ok) throw new Error(`OPENMONTAGE_PROVIDER_HTTP_${response.status}`);
-        const body = await response.json() as any;
+        const response = await boundedHttpsRequest({url:statusUrl,origins:providerOrigins,headers,timeoutMs:Math.max(1,Math.min(deadline-Date.now(),30_000)),maxBytes:Math.ceil(limits.maxProviderBytes*4/3)+4096});
+        const body = JSON.parse(response.bytes.toString('utf8')) as any;
         const state = String(body.status ?? body.state ?? '').toLowerCase();
         if (typeof body.videoBase64 === 'string' || body.videoUrl || ['completed', 'succeeded', 'ready'].includes(state)) return body;
         if (['failed', 'error', 'cancelled'].includes(state)) throw new Error('OPENMONTAGE_PROVIDER_JOB_FAILED');
@@ -41,11 +43,17 @@ export function createOpenMontageProvider(options: { mode?: string; endpoint?: s
       throw new Error('OPENMONTAGE_PROVIDER_TIMEOUT');
     }
     async function retrieveVideo(body: any): Promise<Uint8Array> {
-      if (typeof body.videoBase64 === 'string') return Uint8Array.from(Buffer.from(body.videoBase64, 'base64'));
+      if (typeof body.videoBase64 === 'string') {
+        if(body.videoBase64.length>Math.ceil(limits.maxProviderBytes/3)*4 || body.videoBase64.length%4!==0 || /[^A-Za-z0-9+/=]/.test(body.videoBase64))throw Error('OPENMONTAGE_PROVIDER_VIDEO_INVALID');
+        const bytes=Buffer.from(body.videoBase64,'base64');
+        if(!bytes.length||bytes.length>limits.maxProviderBytes||bytes.toString('base64')!==body.videoBase64)throw Error('OPENMONTAGE_PROVIDER_VIDEO_INVALID');
+        return bytes;
+      }
       if (typeof body.videoUrl !== 'string') throw new Error('OPENMONTAGE_PROVIDER_RESPONSE_INVALID');
-      const response = await fetchWithTimeout(body.videoUrl, { method: 'GET', headers }, timeoutMs);
-      if (!response.ok) throw new Error(`OPENMONTAGE_PROVIDER_HTTP_${response.status}`);
-      return new Uint8Array(await response.arrayBuffer());
+      const url=approvedUrl(body.videoUrl,videoOrigins);
+      const response = await boundedHttpsRequest({url:url.href,origins:videoOrigins,headers:url.origin===providerOrigin?headers:{accept:'video/mp4,video/webm'},timeoutMs,maxBytes:limits.maxProviderBytes});
+      if(!response.bytes.length)throw Error('OPENMONTAGE_PROVIDER_VIDEO_INVALID');
+      return response.bytes;
     }
     return {
       async generate(request: OpenMontageProviderRequest): Promise<OpenMontageProviderResult> {

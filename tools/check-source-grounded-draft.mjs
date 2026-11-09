@@ -31,6 +31,16 @@ try {
   const inputEvidence=(await pool.query('SELECT input_evidence FROM ai_runs WHERE ai_run_id=$1',[generated.aiRunId])).rows[0].input_evidence;
   assert.equal(inputEvidence.schemaVersion,'ai-input-evidence.v1');assert.equal(inputEvidence.passages[0].chunkId,id+'_chunk');assert.equal(inputEvidence.passages[0].sourceHash,'a'.repeat(64));
   assert.equal(inputEvidence.retrievalVersion,'english-lexical-interleaved.v1');assert.deepEqual(inputEvidence.sourceCoverage,[{assetVersionId,selectedPassages:1,totalPassages:1}]);assert.ok(!JSON.stringify(inputEvidence).includes('Prime the controller'));
+  assert.equal(Object.hasOwn((await knowledge.listForAssetVersions(tenant,[assetVersionId]))[0],'retrievalScore'),false,'Without a query, zero relevance has not been measured');
+  const matchedGeneration=await service.generate(tenant,{sourceArtifactIds:[assetVersionId],userInstruction:'controller'});
+  assert.equal(matchedGeneration.sourceCoverage[0].matchingPassages,1);
+  assert(!matchedGeneration.result.warnings.some(w=>w.code==='SOURCE_QUERY_NO_MATCH'));
+  const missedGeneration=await service.generate(tenant,{sourceArtifactIds:[assetVersionId],userInstruction:'pressure failure'});
+  assert.equal(missedGeneration.sourceCoverage[0].matchingPassages,0);
+  assert(missedGeneration.result.warnings.some(w=>w.code==='SOURCE_QUERY_NO_MATCH'));
+  const stopwordGeneration=await service.generate(tenant,{sourceArtifactIds:[assetVersionId],userInstruction:'the and'});
+  assert.equal(Object.hasOwn(stopwordGeneration.sourceCoverage[0],'matchingPassages'),false);
+  assert(!stopwordGeneration.result.warnings.some(w=>w.code==='SOURCE_QUERY_NO_MATCH'));
   await pool.query("UPDATE knowledge_chunks SET source_hash=$2 WHERE asset_version_id=$1",[assetVersionId,'f'.repeat(64)]);
   assert.deepEqual(await knowledge.listForAssetVersions(tenant,[assetVersionId]),[]);await assert.rejects(service.generate(tenant,{sourceArtifactIds:[assetVersionId]}),/SOURCE_KNOWLEDGE_NOT_FOUND/);
   await pool.query("UPDATE knowledge_chunks SET source_hash=$2 WHERE asset_version_id=$1",[assetVersionId,'a'.repeat(64)]);

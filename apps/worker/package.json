@@ -15,8 +15,10 @@
     "@azure/service-bus": "^7.10.0",
     "@azure/storage-blob": "^12.34.0",
     "@medical-device/contracts": "workspace:*",
+    "@medical-device/ai-gateway": "workspace:*",
     "@medical-device/db": "workspace:*",
     "@medical-device/model-runtime": "workspace:*",
+    "@medical-device/simulation-schema": "workspace:*",
     "@medical-device/storage": "workspace:*",
     "long": "^5.3.2",
     "pg": "^8.23.1"

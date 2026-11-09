@@ -12,7 +12,7 @@ export function createLearnerSimulationService(pool: Pool, sessions: ModelSessio
     if (!tenant.actorId || ![enrollmentId,activityId].every(value=>/^[A-Za-z0-9._:-]{1,128}$/.test(value))) throw new Error("SIMULATION_REQUEST_INVALID");
     const request = await withTenantTransaction(pool,tenant,async client => {
       const result=await client.query(`SELECT r.release_id,r.release_hash,r.manifest FROM enrollments e JOIN release_manifests r ON r.organization_id=e.organization_id AND r.course_version_id=e.course_version_id
-        WHERE e.organization_id=$1 AND e.enrollment_id=$2 AND e.learner_id=$3 AND e.status='ACTIVE' AND r.status='PUBLISHED' FOR UPDATE OF e FOR SHARE OF r`,[tenant.organizationId,enrollmentId,tenant.actorId]);
+        WHERE e.organization_id=$1 AND e.enrollment_id=$2 AND e.learner_id=$3 AND e.status IN ('ACTIVE','COMPLETED') AND r.status='PUBLISHED' FOR UPDATE OF e FOR SHARE OF r`,[tenant.organizationId,enrollmentId,tenant.actorId]);
       if (!result.rows[0]) throw new Error("SIMULATION_NOT_FOUND");
       const row=result.rows[0], content=row.manifest.content;
       await assertStoryActivityAccess(client,tenant,enrollmentId,row.release_id,activityId);

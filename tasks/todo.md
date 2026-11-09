@@ -2144,3 +2144,322 @@ The backlog is complete for the design when every item in the source document’
 - [x] Bind the locked-interactive local fallback to the calibrated photo-backed 960×540/30 fps loop and verify the moving plate plus transparent model overlay in Chrome.
 - [ ] Connect and validate the production tracked/offline compositor against the configured external provider, rights evidence, and deployed Blob artifact path. Local deterministic tracking, directional browser grounding, camera-locked interactive overlay, current model hash `e5d6c95b2a66e03c06b8ef6a71e059bfd10925ea8cba83c652d5416f58f88df8`, and cinematic composite hash `9853a25bced42bc1fcb236bbb14ddf688ec39e1a299fcec11bae5fd68b8194d9` pass; external/deployed evidence remains open.
 - [ ] Run provider rights/licensing review, output visual regression, temporal-flicker/halo/scale checks, deployed Blob review, and named-device accessibility/performance evidence. Local `pnpm nxstage-visual:validate` now passes safe-region, model-only bounds, directional-grounding, halo, and 144-frame exposure-stability checks; external rights/deployed/named-device evidence remains open.
+
+## Training-video fidelity and learning extension - 2026-11-06
+
+Design and evidence: [training-video enhancement plan](../docs/training-video-enhancement-plan.md). All items below are proposed and unimplemented. They extend the existing AI/training-scene scope; prior tasks remain unchanged. File lists are likely implementation touch points, with generated clients updated when an API changes.
+
+### TV-01: Establish one reviewed lesson baseline
+
+Description: Define a 90-120 second fictional AIC-001 lesson, its audience, source facts, required steps and expected learner decisions.
+- [ ] Capture exact supporting pages, media ranges, required elements and permitted model actions in a small versioned fixture.
+- [ ] Record current learner experience and a reviewer rubric covering factual, visual and instructional fidelity.
+- [ ] Include missing-evidence, conflicting-source and wrong-revision variants.
+Verification: Reviewer comparison against the source; existing pnpm video-lesson:validate remains green.
+Dependencies: None. Scope: Small. Likely files: fixtures/reference/video-lesson-baseline.json; fixtures/reference/README.md; tools/check-video-lesson.mjs.
+
+### TV-02: Validate scene evidence and model bindings
+
+Description: Extend lesson contracts with explicit evidence and visual/action references while preserving existing draft compatibility.
+- [ ] Require valid bound model/component references for model scenes and bounded source ranges for clip scenes.
+- [ ] Validate claim/evidence links, media type, unique lesson IDs and supported action references before readiness/publication.
+- [ ] Missing/foreign/conflicting evidence and unknown actions produce actionable findings without silently substituting content.
+Verification: Extend tools/check-video-lesson.mjs with meaningful negative/positive fixtures; run pnpm video-lesson:validate and pnpm build.
+Dependencies: TV-01. Scope: Medium. Likely files: packages/simulation-schema/src/video-lesson.ts; packages/simulation-schema/src/index.ts; packages/ai-gateway/src/draft-grounding.ts; tools/check-video-lesson.mjs.
+
+### TV-03: Review each claim beside its source
+
+Description: Provide source comparison and persistent claim-level review using the current draft/reviewer workflow.
+- [ ] Reviewer can open the exact page/clip and mark support, conflict or missing evidence with rationale.
+- [ ] Review binds to source and draft hashes; relevant edits invalidate readiness without changing published releases.
+- [ ] An unsupported critical claim/action blocks lesson readiness and publication.
+Verification: Focused reviewer HTTP/store checks plus browser comparison, stale-edit and keyboard checks; affected builds.
+Dependencies: TV-02. Scope: Medium. Likely files: apps/web/src/source-review-editor.ts; apps/web/src/job-status.ts; packages/db/src/course-review-store.ts; tools/check-video-lesson-review.mjs.
+
+Checkpoint: Evidence foundation
+- [ ] TV-01 through TV-03 pass; independently compare the complete baseline with its cited sources before rendering.
+
+### TV-04: Edit and preview a visual storyboard
+
+Description: Replace JSON-only scene references with a focused timeline editor using existing draft saves/history.
+- [ ] Select source crops/clip ranges or validated model views and edit narration, callouts and checkpoint links.
+- [ ] Preview scene order and intended learner view; reject overlap, invalid references and omitted required evidence.
+- [ ] Save/reload and undo preserve stable scene/evidence IDs; changed scenes become stale for rendering/review.
+Verification: Browser edit/save/reload, invalid-reference, concurrent-edit and keyboard journeys; web build and lesson validation.
+Dependencies: TV-03. Scope: Medium. Likely files: apps/web/src/video-lesson-editor.ts; apps/web/src/job-status.ts; apps/web/src/demo.css; tools/check-video-lesson-editor.mjs.
+
+### TV-05: Produce timed narration and captions
+
+Description: Synthesize scene audio with measured duration and reviewed terminology; preserve a path for expert-recorded audio.
+- [ ] Persist measured duration and word/sentence offsets with audio/script/voice hashes; deterministic silence remains identified as test output.
+- [ ] Generate editable WebVTT captions and descriptive transcript with exact device terms and no truncated narration.
+- [ ] Changed text or pronunciation invalidates affected audio/timing; scene duration accommodates speech and demonstration.
+Verification: Real decoded audio/offset fixture, caption bounds, pronunciation listening review and retry checks; affected builds.
+Dependencies: TV-04. Scope: Medium. Likely files: packages/contracts/src/speech.ts; apps/worker/src/speech-provider.ts; apps/worker/src/lesson-audio.ts; tools/check-lesson-audio.mjs.
+
+### TV-06: Render one deterministic lesson artifact
+
+Description: Assemble approved images/clips, callouts and narration from one timeline using a bounded durable job. Start without generated environments or animated 3D.
+- [ ] Produce MP4, captions, transcript, poster and source/render manifest with exact input/output hashes.
+- [ ] Independently decode and measure output; failures leave review-required artifacts and preserve retry identity.
+- [ ] Cache reusable scene outputs and invalidate final assembly when relevant source/timeline/audio changes.
+Verification: Actual worker/FFmpeg fixture through assembly, decode, synchronization and changed-input retry; affected builds.
+Dependencies: TV-05. Scope: Medium. Likely files: apps/worker/src/lesson-render-job.ts; apps/worker/src/job-runner.ts; packages/contracts/src/lesson-render.ts; tools/render-video-lesson.mjs; tools/check-lesson-render.mjs.
+
+### TV-07: Publish and play the assembled lesson
+
+Description: Connect author render submission and reviewed output to the existing media publication/private delivery path.
+- [ ] Author can request rendering for a saved revision and inspect preview/status without losing edits.
+- [ ] Exact reviewed render, caption/transcript and dependency hashes bind to the immutable release; stale results cannot replace it.
+- [ ] An enrolled learner can play the resulting lesson; rejected or unreviewed renders remain unavailable.
+Verification: Author-to-learner HTTP/browser rehearsal with real media, stale job results and tenant/release denial; pnpm build and media regressions.
+Dependencies: TV-06. Scope: Medium. Likely files: apps/api/src/entrypoint.ts; packages/db/src/course-review-store.ts; apps/web/src/job-status.ts; apps/api/src/media-asset-service.ts; tools/check-lesson-publication.mjs.
+
+Checkpoint: First complete lesson
+- [ ] TV-04 through TV-07 pass using real worker output and learner playback; compare every scene, narration and caption with the reviewed baseline.
+
+### TV-08: Add interactive playback and remediation
+
+Description: Connect published scene cues to existing assessment/story/simulation services and accessible learner controls.
+- [ ] Chapters, replay, caption toggle, transcript/source access and keyboard navigation work with the published timeline.
+- [ ] A checkpoint pauses playback, records answers through existing authoritative services, gives source-linked feedback and resumes correctly.
+- [ ] Seeking/reloading cannot fabricate a score; text equivalents remain usable and watching stays distinct from competence.
+Verification: Browser success/error/remediation/resume journeys and server evidence checks; screen-reader/keyboard review and affected builds.
+Dependencies: TV-07. Scope: Medium. Likely files: apps/web/src/learner-media.ts; apps/web/src/learner.ts; apps/web/src/lesson-player.ts; tools/check-lesson-player.mjs.
+
+### TV-09: Index reviewed transcript and frame observations
+
+Description: Add a first bounded multimodal-evidence increment: timestamped speech transcription plus author-verified frame/label observations. Complex table/diagram extraction is a later increment after this path is evaluated.
+- [ ] Transcript segments retain original timestamps/hash and uncertain recognition; author annotations retain exact image regions/frame times.
+- [ ] Review/correction persists versioned evidence before it is used as instructional support.
+- [ ] Generation receives selected evidence content, not just filenames/MIME metadata; silence and uncertain labels never become invented facts.
+Verification: Real speech/media fixture, terminology corrections, uncertain/missing content and source-lifecycle cases; worker/API/AI builds.
+Dependencies: TV-03, TV-08. Scope: Medium. Likely files: apps/worker/src/media-evidence-processor.ts; packages/contracts/src/document.ts; apps/web/src/media-review.ts; packages/ai-gateway/src/index.ts; tools/check-media-evidence.mjs.
+
+### TV-10: Retrieve evidence for each objective
+
+Description: Add bounded multi-pass generation that covers required prerequisites, steps, warnings and exceptions.
+- [ ] Each objective receives its own evidence set and a required-element coverage report, including reviewed TV-09 media observations.
+- [ ] Conflicting revisions and missing required facts remain visible; request/token limits fail explicitly rather than silently truncating.
+- [ ] Final scenes/claims reference preserved exact evidence, with prompt/retrieval/model versions and measured usage.
+Verification: Long-manual, late-warning, mixed-source, conflicting-revision and prompt-injection fixtures; AI validation and affected builds.
+Dependencies: TV-09. Scope: Medium. Likely files: packages/db/src/knowledge-store.ts; packages/ai-gateway/src/index.ts; packages/ai-gateway/src/lesson-planner.ts; tools/check-lesson-coverage.mjs.
+
+Checkpoint: Learning and source coverage
+- [ ] TV-08 through TV-10 pass; reviewer confirms the pilot's required evidence and learner decision/feedback path, including accessible equivalents.
+
+### TV-11: Render a validated 3D demonstration
+
+Description: Extend the controlled renderer with one source-backed model action and camera path, preserving model identity and semantic action limits.
+- [ ] Device geometry, exact labels, component IDs and intended movement match reviewed evidence; unvalidated mechanics are excluded.
+- [ ] Operator view and detail shots preserve legibility, stable contact/occlusion and appropriate observation time.
+- [ ] Frame review against references records scale/motion uncertainty and avoids treating synthetic benchmarks as real-device validation.
+Verification: Model/action regression, rendered frames and independent side-by-side review on intended display profiles; affected builds.
+Dependencies: TV-06, TV-10. Scope: Medium. Likely files: tools/render-video-lesson.mjs; packages/model-runtime/src/simulation-actions.ts; packages/contracts/src/scene-manifest.ts; tools/check-lesson-model-render.mjs.
+
+### TV-12: Pass and verify the complete production brief
+
+Description: Complete the optional external scene-provider contract and validate returned media independently before lesson use.
+- [ ] Pass calibrated camera, lighting, safe-region and scoped reference assets along with model/version identity; provider contract tests verify forwarding.
+- [ ] Inspect actual decoded dimensions/timing and source comparison instead of relying only on reported metadata or tracking PASS.
+- [ ] Record rights/visual review and distinguish deterministic fixtures from external output; failed checks fall back to a supported controlled scene.
+Verification: Provider contract fixtures, malformed/mismatched outputs and one configured provider acceptance run with independently reviewed artifacts; scene regressions.
+Dependencies: TV-11; existing external-provider/rights workstream. Scope: Medium. Likely files: packages/contracts/src/openmontage-generation.ts; apps/worker/src/openmontage-generation-job.ts; apps/worker/src/openmontage-provider.ts; tools/check-openmontage-generation.mjs; docs/training-scene-production.md.
+
+### TV-13: Evaluate the pilot before broader rollout
+
+Description: Compare current content and the new lesson format using the same objectives and source evidence.
+- [ ] Report factual/action errors, required-element coverage, accessibility findings, author correction time, cost per approved minute and render latency.
+- [ ] Measure immediate performance, critical errors, delayed recall and a new supported scenario; use engagement metrics diagnostically.
+- [ ] Document sample/test conditions, limitations and a retain/change/reject decision; production claims require production evidence.
+Verification: Execute the evaluation protocol, independent fidelity review and device/accessibility acceptance. A small usability sample is not proof of statistical learning improvement.
+Dependencies: TV-08, TV-10, TV-11, TV-19; TV-12 only when external scenes are included; TV-20 only when learning variants are evaluated. Scope: Medium, with elapsed time for delayed follow-up. Likely files: config/training-video-evaluation.json; tools/check-training-video-quality.mjs; docs/training-video-pilot-results.md.
+
+Checkpoint: Pilot decision
+- [ ] Required tasks and review evidence pass; no unresolved critical unsupported claim/action; clearly record which provider, device and learning claims are actually supported.
+## Generated training content improvements - 2026-11-06
+
+These tasks extend the same [training-video plan](../docs/training-video-enhancement-plan.md). Implement TV-14/15 with storyboard authoring, TV-16 before final rendering, and TV-17/18/19 before the TV-13 pilot. Task numbers identify work; dependencies determine execution order. TV-20 is an additional learning-format increment. Engineering implementation and remaining acceptance evidence are recorded below; unchecked criteria still require their complete verification.
+
+### TV-14: Capture an instructional brief and reference pack
+
+Description: Let authors choose the audience, task and teaching format while keeping a consistent device and production identity.
+
+- [ ] Save audience/prior knowledge, objective, device revision, setting and orientation/procedure/troubleshooting/refresher format with the draft.
+- [ ] Bind approved reference views, exact labels, permitted states/actions, visual conventions and terminology; flag formats unsupported by the uploads.
+- [ ] Generation uses the saved brief and references; changing them invalidates affected generated artifacts without altering published releases.
+
+Verification: Brief save/reload, incompatible-evidence and stale-generation fixtures; author keyboard walkthrough and affected builds.
+Dependencies: TV-03. Scope: Medium. Likely files: packages/simulation-schema/src/video-lesson.ts; packages/ai-gateway/src/lesson-planner.ts; apps/web/src/video-lesson-editor.ts; tools/check-lesson-brief.mjs.
+
+### TV-15: Generate coordinated scripts and shot specifications
+
+Description: Produce reviewable narration and shots around observable cues, supported actions and visible outcomes.
+
+- [ ] Each instructional beat specifies source evidence, starting condition, subject/framing, action/result, narration, callout timing and observation hold.
+- [ ] Preserve prerequisites, warnings, exact terminology and causal explanations from the source; unsupported rationales or hidden mechanics produce findings.
+- [ ] Author can inspect/edit the script and shot plan before rendering; required source claims survive concise rewrites.
+
+Verification: Golden baseline plus omitted-prerequisite, invented-rationale and incorrect-label fixtures; script/source comparison and affected builds.
+Dependencies: TV-04, TV-14. Scope: Medium. Likely files: packages/simulation-schema/src/video-lesson.ts; packages/ai-gateway/src/lesson-planner.ts; apps/web/src/video-lesson-editor.ts; tools/check-lesson-direction.mjs.
+
+Checkpoint: Generated-content direction
+
+- [ ] TV-14 and TV-15 produce a brief, script and shot plan that explain a complete source-supported task; an author reviews them before final generation.
+
+### TV-16: Preview a narrated rough cut
+
+Description: Assemble a low-resolution preview of the intended shots, actual narration and callouts before final rendering.
+
+- [ ] Preview uses the same timeline and approved source bindings as final output, with clear placeholders for unfinished shots.
+- [ ] Author can flag timestamped pacing, framing or instruction defects and adjust holds/transitions while preserving required evidence.
+- [ ] Preview acceptance binds to its input revision; subsequent relevant edits invalidate it, and preview artifacts cannot masquerade as final approved media.
+
+Verification: Actual rough-cut playback, changed-narration timing, revision invalidation and preview/final separation checks; affected builds.
+Dependencies: TV-05, TV-15. Scope: Medium. Likely files: tools/render-video-lesson.mjs; apps/worker/src/lesson-render-job.ts; apps/web/src/video-lesson-editor.ts; tools/check-lesson-rough-cut.mjs.
+
+### TV-17: Finish narration and instructional sound
+
+Description: Improve natural delivery and intelligibility using reviewed pronunciation, deliberate pauses and consistent sound levels.
+
+- [ ] Author controls supported pace, emphasis, pauses and terminology pronunciations; actual synthesized or recorded speech is reviewable against the script.
+- [ ] Measure clipping/levels and normalize the mix using a documented profile; preserve verified instructional device sounds and offer speech-only output.
+- [ ] Changes regenerate affected audio, caption timing and render inputs; listening review confirms no truncated words or misleading audio cues.
+
+Verification: Real synthesis/recorded-audio fixtures, glossary listening review on intended speakers, measured mix/caption checks and affected builds.
+Dependencies: TV-05, TV-15. Scope: Medium. Likely files: packages/contracts/src/speech.ts; apps/worker/src/speech-provider.ts; apps/worker/src/lesson-audio.ts; tools/check-lesson-audio.mjs.
+
+### TV-18: Compare takes and revise individual scenes
+
+Description: Add bounded alternate takes and timestamped corrections while protecting accepted evidence, identity and neighboring transitions.
+
+- [ ] Author can compare a small configured number of takes against the same source/shot specification, with provider/model/configuration provenance.
+- [ ] Regenerate only the selected scene for a specific defect; reuse unchanged outputs and maintain a bounded generation budget.
+- [ ] Accepting a take invalidates final assembly/review; adjacent-state continuity is checked and selection is explicit and revision-safe.
+
+Verification: Controlled take generation, budget exhaustion, stale selection, unchanged-scene reuse and adjacent-transition cases; affected builds.
+Dependencies: TV-06, TV-16. Scope: Medium. Likely files: apps/worker/src/lesson-render-job.ts; packages/contracts/src/lesson-render.ts; apps/web/src/video-lesson-editor.ts; tools/check-lesson-scene-revision.mjs.
+
+### TV-19: Review the final audiovisual content
+
+Description: Establish a practical finished-video quality gate with independent review of the exact artifact.
+
+- [ ] Report factual/procedural fidelity, identity continuity, action visibility, label/caption legibility, audio/timing and instructional purpose as separate dimensions; critical errors cannot be averaged away.
+- [ ] Review complete critical action intervals and the final sound/motion; automated checks flag anomalies but cannot approve clinical meaning or mechanics.
+- [ ] Save timestamped findings and reviewer disposition against final hashes; define representative-device thresholds and block unresolved critical defects before pilot release.
+
+Verification: Deliberately altered label, hidden control, mid-action discontinuity, caption occlusion, clipped speech and stale-review fixtures; independent full-video review and affected builds.
+Dependencies: TV-07, TV-17, TV-18. Scope: Medium. Likely files: config/training-video-evaluation.json; tools/check-training-video-quality.mjs; apps/web/src/media-review.ts; packages/db/src/course-review-store.ts; tools/check-lesson-final-review.mjs.
+
+Checkpoint: Generated-video quality
+
+- [ ] TV-16 through TV-19 pass for the baseline final video, including natural speech, purposeful editing and source comparison across complete action intervals; feed results into TV-13.
+
+### TV-20: Generate reviewed learning variants
+
+Description: Produce beginner, refresher and targeted-remediation cuts from the same approved claims and learning objectives.
+
+- [ ] Format changes adjust explanation/pacing/practice while preserving mandatory warnings, prerequisites, exact labels and source revision.
+- [ ] Each variant has its own complete timeline, caption/audio bindings, review and published identity; mistakes can link to the appropriate reviewed remediation scene.
+- [ ] Compare variant outcomes on the same objectives; no automatic adaptation changes approved instructions or scoring policy.
+
+Verification: Required-element equivalence, independent variant publication/review and remediation browser journeys; affected builds. Translation remains a separately scoped later increment.
+Dependencies: TV-08, TV-10, TV-15, TV-19. Scope: Medium. Likely files: packages/ai-gateway/src/lesson-planner.ts; packages/simulation-schema/src/video-lesson.ts; apps/web/src/video-lesson-editor.ts; tools/check-lesson-variants.mjs.
+
+### TV-14–TV-20 implementation evidence — 2026-11-06
+
+Seven separate implementation agents delivered the brief/reference pack, source-linked script and shots, narrated rough cut, narration/sound finishing, bounded scene takes, exact-artifact final review, and reviewed learning variants. Separate agents reviewed requirements/bugs and tested developer and learner workflows.
+
+- Authoring uses the existing draft save/revision mechanism. Rendering and individual scene generation use the documented [local developer workflow](../docs/training-video-render-workflow.md), followed by verified author imports; no hosted lesson-render queue was added.
+- Final publication requires an approved uploaded video's actual asset hash and a current independent reviewer decision. JSONB key reordering preserves input identity; actual content edits invalidate approvals.
+- Focused fixtures cover source preservation, malformed inputs, stale revisions, sound mixing, scene budgets, distinct variant identities and immutable publication. The enhanced PostgreSQL publication fixture verifies hash mismatch, author self-approval and old review revision rejection before a successful independent publication.
+- Native integrated-browser fixtures exercise author save/reload, preview/final import, review persistence, variant creation and failed-attempt remediation playback without scoring changes. Fixtures use controlled API responses; PostgreSQL checks exercise the real store separately.
+- Real FFmpeg checks encode/decode audio and video, measure levels, compare speech-only/device-cue mixes and check captions/timing. Their generated tones are explicitly engineering signals, not pronunciation or teaching-quality acceptance.
+
+After building, run `pnpm training-video:checks`, `pnpm training-video:media` and, with local test PostgreSQL available, `pnpm training-video:postgres`. Media checks require `LESSON_RECORDED_FIXTURE` containing the reviewed fixture speech or explicit `LESSON_ENGINEERING_SIGNAL=1` for signal-only coverage. The browser fixture also supports `--serve` for an integrated-browser run where external Chrome execution is restricted.
+
+Still required before pilot acceptance: real spoken narration and pronunciation listening; independent factual/mechanical review of a finished lesson; representative laptop/tablet measurements; and learning/pilot evidence from TV-13. These are not established by passing synthetic fixtures. Release preparation subsequently passed the production API Docker build, including the final bundled web application and packaged developer artifacts.
+
+Follow-up adversarial testing reproduced and corrected asynchronous import races, revoked-preview final imports, incomplete render timelines, stale final-review media/context, later-author self-approval, selected-take loss in variants, stale recorded delivery, and truthy nonboolean asset approvals. Regressions cover native author/learner/adversarial browser journeys, actual CLI rough/final output, media processing and PostgreSQL publication/history. Selected corrected takes now fail closed during variant creation until promoted and rebound as approved source visuals; this remaining handoff and the manual source-comparison boundary are documented in the [render workflow](../docs/training-video-render-workflow.md#review-and-handoff-boundaries).
+
+## Technical completion before UI - 2026-11-07
+
+Planning extension of the existing MVP, not a replacement backlog. See [scope, dependencies and checkpoints](../docs/technical-completion-plan.md). All TC tasks are initially open. Suggested areas identify where to investigate, not instructions to rewrite whole packages. Sizes: S = 1-2 likely source files, M = 3-5; split larger discoveries into children before implementation. Every task also runs relevant type/build checks and records sanitized evidence tied to a commit and environment. External approvals remain explicit dependencies.
+
+### Phase A: Reproducible baseline
+
+- [ ] **TC-01 Reconcile source and deployed capability inventory.** Acceptance: map original E0-E10/TV requirements to implementation, tests, current cloud image/configuration and missing evidence; distinguish implemented/unverified/missing/deferred UI. Verification: read-only cloud/resource inventory and requirements traceability review. Dependencies: none. Areas: evidence registry, current delivery, deployment manifests. Size: M.
+- [ ] **TC-02 Bootstrap disposable integration infrastructure.** Acceptance: one documented command provisions isolated PostgreSQL with required extensions/migrations and restricted runtime/outbox roles; fixtures cannot overwrite real accounts/data and cleanup is bounded. Verification: fresh bootstrap, tenant read/write denials, teardown/recreate. Dependencies: TC-01. Areas: tools, database bootstrap/migrations. Size: M.
+- [ ] **TC-03 Establish substantive CI release gates.** Acceptance: frozen install, type/build, actual lint and named pure/DB/auth suites run on a clean runner; no-op test commands cannot count as coverage; tested image/SBOM/dependency and secret-scan evidence is retained. Verification: deliberately failing test blocks promotion, clean branch passes. Dependencies: TC-02. Areas: CI config, root scripts, focused test runner. Size: M; split image/security jobs if needed.
+
+Checkpoint A: reproducible clean build and restricted-role integration checks pass; acceptance evidence identifies exact source and artifact versions.
+
+### Phase B: Identity and trust
+
+- [ ] **TC-04 Resolve real email-verification assurance.** Acceptance: document and demonstrate existing Entra/External ID verification or specify a bounded Azure-hosted email-code protocol with expiry, attempt limits and replay protection; no fabricated claims or weakened trust. Verification: real-account protocol spike plus forged/expired/wrong-identity rejection. Dependencies: TC-01. Areas: authenticator, verification service/contract. Size: M; external identity configuration required.
+- [ ] **TC-05 Complete account lifecycle integration.** Acceptance: fresh registration, verified organization creation, intended-recipient invite acceptance, token renewal, recovery, account lock and background issuance waiting/resumption work under TC-04's authority. Verification: real identity staging tests plus restricted-role lifecycle/concurrency regressions. Dependencies: TC-02, TC-04. Areas: account/verification services, invitation and credential checks. Size: M per lifecycle slice; split implementation children.
+- [ ] **TC-06 Replace deterministic scanning in production.** Acceptance: trusted malware verdict is required before parsing/generation; pending/error/unavailable scanner quarantines; verdict binds exact content hash and tenant. Verification: safe-malicious fixtures, tamper, outage and delayed verdict/retry checks with real scanning integration. Dependencies: TC-02. Areas: scanner, worker wiring, lifecycle store. Size: M; service selection required.
+- [ ] **TC-07 Restrict outbound provider destinations.** Acceptance: approved HTTPS origins only, private/link-local destinations and unsafe redirects denied, credentials forwarded only to their intended origin, downloads/JSON/base64/time bounded. Verification: hostile status/video URLs, redirect/DNS changes, oversized streams and normal provider lifecycle. Dependencies: TC-03. Areas: OpenMontage provider, shared egress policy, provider tests. Size: M.
+- [ ] **TC-08 Fail closed on production configuration.** Acceptance: production cannot start with deterministic AI/video/speech, absent scanning/audit/limits, wildcard CORS or invalid provider settings; IaC/configuration deploys explicit approved modes and secret references. Verification: startup negative matrix and clean staging redeployment from checked-in configuration. Dependencies: TC-04, TC-06, TC-07. Areas: entrypoints/config validation, API/worker IaC. Size: M per service.
+- [ ] **TC-09 Enforce public/API abuse controls.** Acceptance: bounded request sizes/timeouts and shared multi-replica rate/admission controls cover verification, upload, generation, auth-related endpoints and sensitive/public lookup; safe retry errors reveal no private existence. Verification: burst, sustained traffic, concurrent replica and account/tenant isolation tests. Dependencies: TC-03, TC-04. Areas: HTTP middleware, limiter store/config. Size: M.
+
+Checkpoint B: real verification and scanning work; malicious/expired inputs fail closed; production fixture modes and unsafe egress are denied. Named threat cases pass.
+
+### Phase C: Headless certification and contracts
+
+- [ ] **TC-10 Prove the complete real-auth certification slice.** Acceptance: source/manual+GLB approval, actual AI draft, independent review, publish, candidate enrollment, required reading/procedure/fault/assessment, one credential and public verification work through production APIs; author/reviewer/learner are distinct. Verification: durable staging runner with real identity, Blob, Service Bus and provider evidence. Dependencies: TC-03, TC-05, TC-06, TC-08; repeat after TC-13/16/20. Areas: headless acceptance runner, representative fixtures. Size: M; fix discovered gaps as separately tracked children.
+- [ ] **TC-11 Close certification lifecycle adversarial cases.** Acceptance: stale release/review/model binding, answer tampering, parallel completion, retries, account locks, expiry/revocation, requalification and old credential verification preserve intended evidence and exactly-once issuance. Verification: real restricted-role PostgreSQL concurrency/tamper suite and hosted replay. Dependencies: TC-10. Areas: enrollment/assessment/credential tests and any proven service defects. Size: M per defect group.
+- [ ] **TC-12 Complete UI-facing and integration contracts.** Acceptance: versioned schemas/client cover author/admin/learner/operator/discovery/integration surfaces, permissions, safe errors, pagination, idempotency, revision conflicts, job capabilities and equivalent paths; machine authentication/scopes/rotation specified where required. Verification: generated-contract drift and client compatibility tests with runnable headless examples. Dependencies: TC-10, TC-11; extend with TC-20-27. Areas: contracts, generated client, API documentation. Size: M per surface.
+
+Checkpoint C: primary headless workflow passes with real dependencies; API contract is sufficient for future screens without browser-only business authority.
+
+### Phase D: Production AI, reconstruction and media
+
+- [ ] **TC-13 Validate real AI generation and provenance.** Acceptance: approved Azure deployment/version, source coverage/citations and input evidence persist; unsafe/unsupported/stale output cannot publish; actual provider budgets and failures are visible. Verification: held-out manuals, unsupported claims, prompt injection, provider timeout/quota and exact artifact lineage in staging. Dependencies: TC-03, TC-06, TC-08. Areas: AI gateway, draft service/evaluation fixtures. Size: M per quality or persistence slice.
+- [ ] **TC-14 Close retrieval relevance and completeness evidence.** Acceptance: representative long/multiple manuals retain balanced source coverage, retrieval misses/partial coverage are explicit, and latency/relevance thresholds are recorded; semantic pgvector path is implemented/verified if required by approved retrieval baseline rather than implied by config. Verification: held-out relevance/coverage dataset with measured comparison and tenant/rights filters. Dependencies: TC-13. Areas: knowledge retrieval, evaluation harness. Size: M.
+- [ ] **TC-15 Package approved reconstruction engines.** Acceptance: pinned reproducible worker image includes required photo/video/single-image dependencies and preparation tools; supported capture profiles, resource limits and engine distribution/license decision are documented. Verification: exact image runs one accepted fixture per supported mode and rejects unavailable dependencies. Dependencies: TC-03, TC-06; engine/license clearance required. Areas: Dockerfile/engine configuration, deployment manifest. Size: M per engine.
+- [ ] **TC-16 Prove real capture reconstruction through cloud transport.** Acceptance: representative rights-cleared photos and video produce reviewable candidates via actual upload/outbox/queue/private storage; quality uncertainty, cancel/timeout/crash/retry and usage evidence persist. Verification: actual capture benchmark and hosted durable job acceptance without fixture storage or renderer calibration. Dependencies: TC-15, TC-28, TC-29. Areas: reconstruction adapters/job tests, approved capture fixtures. Size: M per input mode.
+- [ ] **TC-17 Complete model preparation and runtime packaging.** Acceptance: scale/orientation/component mapping, approval linkage, source/model hashes and optimized variants are durable; unsafe geometry or missing critical interactions cannot become scored content; equivalent-path contract remains available. Verification: prepared candidate -> approved model -> published course with changed-geometry/invalid-mapping tests and measured runtime budgets. Dependencies: TC-16, TC-11. Areas: model import/preparation/variant services. Size: M per preparation slice; qualified fidelity review remains external.
+- [ ] **TC-18 Move lesson rendering into durable hosted jobs.** Acceptance: authenticated tenant/revision-bound request resolves approved private assets server-side, renders in a bounded worker, stores private video/captions/manifest hashes and exposes status/cancel/retry; manual local asset maps are not production authority. Verification: real FFmpeg rough/final output, restart/replay, stale inputs, revoked assets and cross-tenant denial through cloud job transport. Dependencies: TC-07, TC-08, TC-12, TC-28, TC-29. Areas: lesson job contract, worker renderer, API/store adapters. Size: M per admission/render/delivery slice.
+- [ ] **TC-19 Finish real narration and lesson artifact lifecycle.** Acceptance: actual speech provider or reviewed recordings, pronunciation/delivery controls, measured audio/captions, corrected-take promotion and variants preserve source/asset identity and invalidate stale reviews; deterministic silence cannot satisfy acceptance. Verification: real spoken fixture, audio/video timing checks and independent publication/hashing regressions. Dependencies: TC-18, TC-13. Areas: speech/audio and lesson review/variant services. Size: M per audio or variant slice; human listening/content acceptance remains external.
+
+Checkpoint D: real AI and each required reconstruction path run in approved images; hosted lesson generation succeeds and fails safely. Measured engineering quality is distinguished from qualified content/fidelity approval.
+
+### Phase E: Lifecycle and integrations
+
+- [ ] **TC-20 Propagate rights withdrawal through published dependencies.** Acceptance: source/model/media withdrawal suppresses dependent delivery/new work, invalidates affected pending approvals and updates projections; immutable release/attempt evidence is preserved and credential consequences are explicit. Verification: multi-level published dependency graph, concurrent withdrawal/publication, expired private URL exposure window and idempotent replay. Dependencies: TC-02, TC-11. Areas: lifecycle/dependency store, publication/delivery checks. Size: M per propagation slice.
+- [ ] **TC-21 Enforce retention, legal holds and tombstones.** Acceptance: resource-specific retention schedule, authorized hold/purge/takedown and backup restoration rules are implemented; held evidence cannot be purged and deletion does not resurrect on replay. Verification: clock-controlled expiry/hold tests, dry-run purge manifest and isolated restoration replay. Dependencies: TC-20. Areas: lifecycle scheduler/store, operator audit. Size: M per lifecycle action; policy/legal decision required.
+- [ ] **TC-22 Implement privacy-safe discovery projection/search.** Acceptance: default-off consent, limited/coarse profile fields, current eligible credentials, bounded search and no raw tenant data leakage; withdrawal/revocation removes results. Verification: opt-in/out/revocation races, cross-org projection isolation and anti-scraping limits. Dependencies: TC-09, TC-11, TC-20. Areas: discovery projection/store and search API. Size: M per projection/query slice.
+- [ ] **TC-23 Implement consent-based inquiries and abuse lifecycle.** Acceptance: authorized employer request and learner accept/reject disclose only permitted contact data; withdrawal/revocation, block/report, expiry and abuse limits are enforced at creation and acceptance. Verification: race/replay/permission/harassment fixtures and audit checks. Dependencies: TC-22, TC-09. Areas: inquiry store/service and API. Size: M per request/consent slice.
+- [ ] **TC-24 Complete reports and usage reconciliation APIs.** Acceptance: tenant-scoped learning/completion/credential/cost and authoring-effort aggregates have stable pagination/filter contracts and reconcile with authoritative records. Verification: known dataset, corrected/invalidated evidence, tenant boundaries and query budgets. Dependencies: TC-11, TC-29. Areas: reporting queries and API contracts. Size: M per report family.
+- [ ] **TC-25 Implement protected evidence/data exports.** Acceptance: least-privilege asynchronous export binds requester/tenant, applies field minimization/retention, records audit and offers expiring private delivery without secrets or answer keys. Verification: CSV injection, size bounds, revoked access, wrong tenant, expiry and source reconciliation. Dependencies: TC-12, TC-21, TC-24. Areas: export job/service, private artifact delivery. Size: M per export type.
+- [ ] **TC-26 Complete signed customer webhooks.** Acceptance: scoped subscription management, HTTPS/SSRF-safe destinations, versioned minimized events, signatures/key rotation, bounded retry/DLQ/operator recovery and stable event identities are implemented. Verification: controlled receiver sees valid signatures, duplicate IDs and documented at-least-once delivery; malicious URLs, revoked subscription and rotation tests pass. Dependencies: TC-07, TC-12, TC-20. Areas: webhook subscription/delivery worker and API. Size: M per subscription/delivery slice.
+- [ ] **TC-27 Complete lifecycle notification delivery.** Acceptance: invitation, credential/course change and inquiry notifications follow explicit channel/consent rules; existing in-app records are not represented as external delivery; transactional outbox prevents duplicate events and suppression/recovery is audited. Verification: bounce/provider outage/replay, recipient privacy and subscription changes. Dependencies: TC-20, TC-23, TC-26. Areas: existing Azure email/notification stores and consumer. Size: M per notification family.
+
+Checkpoint E: withdrawal, consent and retention are enforced across all dependent services; reports/exports reconcile and external deliveries are signed/minimized/replay-safe.
+
+### Phase F: Operations and infrastructure
+
+- [ ] **TC-28 Wire actionable production telemetry.** Acceptance: safe correlated metrics/logs cover API/DB/queues/providers/content/credentials/cost; dashboards reconcile to source records and alerts reach named responders. Verification: deliberately trigger failure/queue growth/issuance anomaly, receive alert and follow correlation without source text/tokens/SAS leakage. Dependencies: TC-01, TC-03. Areas: telemetry adapter, service wiring, Azure monitoring IaC. Size: M per signal family.
+- [ ] **TC-29 Enforce shared economics and capacity admission.** Acceptance: approved pilot budget/concurrency/token limits are authoritative across replicas; expensive jobs reserve/reconcile usage and can be paused; AI 4,000-token policy cannot silently become 12,000; provider/storage/egress costs and 80% alerts are accounted for. Verification: concurrent admission, crash/retry reconciliation and actual processing cost samples against $500/month pilot envelope. Dependencies: TC-02, TC-08, TC-28. Areas: usage/admission store, provider/job configuration. Size: M per resource family.
+- [ ] **TC-30 Measure readiness and service capacity.** Acceptance: separate liveness from bounded DB/schema/dependency readiness; documented degraded behavior, DB pool/queue/backpressure and worker scaling fit a measured pilot envelope. Verification: dependency outage, sustained/concurrent load, scale-in lease fencing, storage exhaustion and recovery tests. Dependencies: TC-10, TC-16, TC-18, TC-28, TC-29. Areas: health/readiness, runtime scaling/load harness. Size: M per service.
+- [ ] **TC-31 Reproduce protected environments and promotion.** Acceptance: IaC creates isolated staging/production with least-privilege identities, private networking, secret references, DNS/TLS and migrations/grants; tested artifact digests promote without environment drift. Verification: fresh isolated deployment, public storage denial, restricted DB/queue access and previous-version compatibility. Dependencies: TC-03, TC-08, TC-28. Areas: Azure templates/deployment pipeline. Size: M per infrastructure boundary.
+- [ ] **TC-32 Implement and rehearse data recovery.** Acceptance: DB plus Blob/release evidence and keys/config restore to isolated target; configured 15-minute RPO is demonstrated, explicit agreed RTO is measured, regional recovery is real and withdrawn data/projections are reconciled before service resumes. Verification: controlled incident-window writes/deletions, restore and pre/post credential/hash checks. Dependencies: TC-21, TC-31, TC-28. Areas: backup/recovery IaC/scripts/runbook. Size: M per backup/restore/reconciliation slice.
+- [ ] **TC-33 Rehearse rollback, drain and secret rotation.** Acceptance: compatible app rollback, queue pause/drain/DLQ replay and overlapping key/secret rotation preserve immutable evidence and avoid duplicate effects; operators can execute safe audited actions. Verification: staging incident drill across API/worker/DB/blob/queue/email/webhook keys and health checks. Dependencies: TC-26, TC-27, TC-30, TC-31, TC-32. Areas: deployment/recovery/operator scripts and runbook. Size: M per drill.
+
+Checkpoint F: alerts are received, capacity/cost limits are measured/enforced, exact artifacts promote, and timed recovery/rollback/rotation drills preserve evidence.
+
+### Phase G: Independent validation and UI handoff
+
+- [ ] **TC-34 Validate technical runtime and equivalent-path feasibility.** Acceptance: actual representative optimized GLBs/private media are exercised on named physical device/browser classes through a minimal engineering harness; measure <=5s interactivity, >=30 FPS, context-loss recovery and equivalent-path API behavior. Verification: recorded versions/device/network/performance traces, media decode/memory checks; final UI accessibility and screen behavior explicitly remain deferred. Dependencies: TC-17, TC-19, TC-30. Areas: renderer/performance harness and device evidence. Size: M; physical devices required.
+- [ ] **TC-35 Complete independent technical security review.** Acceptance: identity/tenant/public verification/discovery/upload/parser/provider/webhook/export boundaries are threat-modeled and independently tested; dependency/container/secret findings resolved or explicitly accepted with owner and expiry. Verification: signed findings register, retests and evidence of denied abuse paths; no content/legal approval inferred. Dependencies: TC-09, TC-20-27, TC-31. Areas: threat model, security checks and proven defects. Size: M per reviewed boundary.
+- [ ] **TC-36 Run hosted technical acceptance and publish UI handoff.** Acceptance: all TC checkpoints pass on known digests using real dependencies; generated contracts/client, permissions/state/error/retry rules, runnable examples, staging provisioning and evidence matrix are complete; outstanding human/UI launch gates remain visible. Verification: fresh independent headless run covering author/reviewer/learner/operator/employer roles, replay/withdrawal/recovery checks and contract consumption by a small client. Dependencies: TC-01-35. Areas: acceptance runner, evidence registry, integration documentation. Size: M per acceptance/handoff slice.
+
+Final checkpoint: technically ready for UI integration; no claim of production certification launch until UI/device/accessibility acceptance, independent content/license/issuer review, cohort measurement and DEC-020 admission are separately complete. No dates or completion status are inferred from this plan.
+### Technical implementation checkpoint - 2026-11-07
+
+Shared contracts, tenant runtime grants, fail-closed deployment policy, immutable evidence controls and substantive validation gates were implemented before the seven workstream integrations. Dedicated implementation agents completed baseline/CI, identity/security, certification APIs, processing, lifecycle/integrations, operations, and acceptance/handoff source work. Follow-up review closed hybrid retrieval, production single-image packaging, corrected private scene-take promotion, derived-resource/orphan retention, filtered reports, full webhook event families, source usage/billed reconciliation and OAuth client-credentials integration gaps.
+
+Independent focused testing returned stale-export overwrite, retention scan starvation and transaction-rollback orphan findings to the original agents; fixes and focused independent retests passed. Full frozen integration validation is the next checkpoint. See [execution evidence](./technical-execution.md), [technical plan](../docs/technical-completion-plan.md), [security review](../docs/technical-security-review.md) and [UI handoff](../docs/ui-integration-handoff.md).
+
+TC-01 through TC-36 remain acceptance-tracked: implementation presence or local controlled tests do not satisfy real identity/provider/scanner/cloud, recovery/rotation/load, physical runtime, source/license or independent human approval requirements. No cloud deployment or launch acceptance is claimed. Pre-existing staged work is preserved.

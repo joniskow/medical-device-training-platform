@@ -52,7 +52,7 @@ BEGIN
    'issuerStatement',f.details->>'issuerStatement','intendedUse',f.details->>'intendedUse','accessibilityPath',f.details->>'accessibilityPath',
    'estimatedMinutes',f.details->'estimatedMinutes','costDesignation','free-in-MVP') || CASE WHEN target_id IS NOT NULL THEN jsonb_build_object('publishedRevision',CASE WHEN jsonb_typeof(r.manifest->'revision')='number' THEN r.manifest->'revision' ELSE NULL END,'certification',public.catalog_certification_summary(r.manifest->'content')) ELSE '{}'::jsonb END INTO projected
   FROM public.course_offerings f JOIN public.release_manifests r ON r.release_id=f.release_id AND r.organization_id=f.organization_id JOIN public.organizations o ON o.organization_id=f.organization_id
-  WHERE f.release_id=route.release_id AND f.organization_id=route.organization_id AND o.status='ACTIVE' AND r.status='PUBLISHED'
+  WHERE f.release_id=route.release_id AND f.organization_id=route.organization_id AND o.status='ACTIVE' AND r.status='PUBLISHED' AND public.lifecycle_release_available(r.release_id)
    AND ((target_id IS NULL AND f.mode='PUBLIC') OR (target_id IS NOT NULL AND f.mode IN ('PUBLIC','UNLISTED')));
   IF projected IS NOT NULL THEN items:=items||jsonb_build_array(projected);END IF;
  END LOOP;

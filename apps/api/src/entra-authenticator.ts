@@ -178,6 +178,17 @@ export function createEntraRequestAuthenticator(options: EntraAuthenticatorOptio
         const publicKey = createPublicKey({ key: { kty: "RSA", n: key.n, e: key.e }, format: "jwk" });
         const valid = verify("RSA-SHA256", Buffer.from(`${encodedHeader}.${encodedClaims}`), publicKey, decodeBase64Url(encodedSignature));
         if (!valid) return null;
+        // App-only tokens are never treated as personal identities. Require Entra's
+        // explicit idtyp optional claim and reject ambiguous role-only app tokens.
+        const clientId=stringClaim(claims,'azp')??stringClaim(claims,'appid');
+        const machine=claims.idtyp==='app';
+        if(machine){
+          const servicePrincipalId=stringClaim(claims,'oid');
+          const guid=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+          if(!clientId||!servicePrincipalId||!guid.test(clientId)||!guid.test(servicePrincipalId)||claims.scp!==undefined||!Number.isSafeInteger(claims.iat)||Number(claims.iat)>now+clockSkewSeconds||claims.exp<=now)return null;
+          return {subject:servicePrincipalId,issuer:expectedIssuer,identityTenant:options.tenantId,authenticationExpiresAt:new Date(claims.exp*1000).toISOString(),roles:[],machineIdentity:{clientId:clientId.toLowerCase(),servicePrincipalId:servicePrincipalId.toLowerCase(),applicationRoles:stringArrayClaim(claims,rolesClaim),issuedAt:new Date(Number(claims.iat)*1000).toISOString()}};
+        }
+        if(clientId&&typeof claims.scp!=='string')return null;
         // A login name, email address, or string "true" alone is not verification.
         const email=stringClaim(claims,'email')?.trim().toLowerCase();
         const verifiedEmail=claims.email_verified===true&&email&&email.length<=254&&/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)?email:undefined;
@@ -185,6 +196,7 @@ export function createEntraRequestAuthenticator(options: EntraAuthenticatorOptio
           subject,
           issuer:expectedIssuer,
           identityTenant:options.tenantId,
+          authenticationExpiresAt:new Date(claims.exp*1000).toISOString(),
           ...(verifiedEmail?{verifiedEmail}:{}),
           ...(verifiedEmail?{verificationExpiresAt:new Date(claims.exp*1000).toISOString()}:{}),
           ...(organizationId ? { organizationId } : {}),

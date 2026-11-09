@@ -165,7 +165,7 @@ try {
   const updated=await store.publish({tenant,courseVersionId:fork.courseVersionId,idempotencyKey:'publish-revision',requestHash:'publish-revision'});
   assert.notEqual(updated.releaseId,first.releaseId);assert.equal(updated.manifest.aiRun.aiRunId,aiRunId);assert.equal(updated.manifest.content.title,'Updated pilot course');
   assert.deepEqual(updated.manifest.content.releaseChange,releaseChange);
-  const changeEvent=(await pool.query(`SELECT payload FROM outbox_events WHERE organization_id=$1 AND payload->>'releaseId'=$2`,[tenant.organizationId,updated.releaseId])).rows[0];assert.equal(changeEvent.payload.changeApplicationRequested,true);assert.deepEqual(changeEvent.payload.releaseChange,releaseChange);
+  const changeEvents=(await pool.query(`SELECT payload FROM outbox_events WHERE organization_id=$1 AND event_type='course.release.published' AND payload->>'releaseId'=$2`,[tenant.organizationId,updated.releaseId])).rows;assert.equal(changeEvents.length,1,'Exactly one publication event must describe the updated release');const changeEvent=changeEvents[0];assert.equal(changeEvent.payload.changeApplicationRequested,true);assert.deepEqual(changeEvent.payload.releaseChange,releaseChange);
   const noticeStore=createCourseChangeNotificationStore(runtime),inbox=createNotificationService(runtime);
   const job=(await pool.query(`SELECT outbox_event_id FROM outbox_events WHERE organization_id=$1 AND event_type='course.change.notify'`,[tenant.organizationId])).rows[0].outbox_event_id;
   const dispatchRole=id+'_dispatch',dispatchPolicy=id+'_dispatch_read';

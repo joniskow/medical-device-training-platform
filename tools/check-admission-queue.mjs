@@ -1,0 +1,26 @@
+import assert from 'node:assert/strict';
+import {createAzureServiceBusDispatcher} from '../apps/worker/dist/messaging/azure-service-bus-dispatcher.js';
+import {handleAzureServiceBusJobMessage,verifyAzureServiceBusJobMessage} from '../apps/worker/dist/messaging/azure-service-bus-consumer.js';
+
+const signingSecret='s'.repeat(32),messages=[];
+const dispatcher=createAzureServiceBusDispatcher({queueName:'fixture',signingSecret,client:{createSender(){return {async sendMessages(message){messages.push(message);},async close(){}};}}});
+const envelope={jobId:'admission-job',jobType:'reconstruction.generate',attempt:1,maxAttempts:3,idempotency:{key:'admission',requestHash:'fixture'},tenant:{organizationId:'org',actorId:'actor',correlationId:'corr'},payload:{}};
+const stored={...envelope,state:'QUEUED',createdAt:new Date().toISOString(),updatedAt:new Date().toISOString(),availableAt:new Date().toISOString()};
+await dispatcher.enqueue(envelope);
+const settle={completed:0,abandoned:0,async complete(){this.completed++;},async abandon(){this.abandoned++;},async deadLetter(){throw Error('unexpected');}};
+const invoke=(message,handler)=>handleAzureServiceBusJobMessage({message,signingSecret,dispatcher,jobStore:{async get(){return stored;}},storage:{},processor:{},workerId:'worker',processReconstruction:handler,settle:{complete:()=>settle.complete(),abandon:()=>settle.abandon(),deadLetter:()=>settle.deadLetter()}});
+await invoke(messages[0],async()=>{throw Error('ADMISSION_CAPACITY');});
+const firstDeferral=messages.at(-1);
+assert.match(firstDeferral.messageId,/^admission-job:defer:/);
+assert.equal(settle.completed,1);assert.equal(settle.abandoned,0);
+assert.ok(new Date(firstDeferral.scheduledEnqueueTimeUtc)>new Date());
+const roundTrip={...firstDeferral,body:JSON.parse(JSON.stringify(firstDeferral.body))};
+assert.equal(verifyAzureServiceBusJobMessage(roundTrip,signingSecret).jobId,envelope.jobId);
+await invoke(roundTrip,async()=>{throw Error('ADMISSION_CAPACITY');});
+assert.notEqual(messages.at(-1).messageId,firstDeferral.messageId,'successive deferrals must survive queue duplicate detection');
+await invoke(messages.at(-1),async()=>({...stored,state:'RETRY_SCHEDULED',attempt:2,availableAt:new Date(Date.now()+30000).toISOString()}));
+const retry=messages.at(-1);
+assert.equal(retry.messageId,'admission-job:retry:2');
+assert.equal(verifyAzureServiceBusJobMessage({...retry,body:JSON.parse(JSON.stringify(retry.body))},signingSecret).attempt,2);
+assert.equal('admissionDeferral' in retry.body.envelope.operatorMetadata,false);
+console.log('Admission queue passed: signed delayed capacity retries, distinct deduplication IDs, serialized signature integrity and authoritative processing retry attempt.');

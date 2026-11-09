@@ -6,9 +6,20 @@ import type {
   JobOutcome,
   JobRecord,
   JobStorePort,
+  JobCompletionOptions,
   OperatorRetryRequest,
   TenantContext
 } from "@medical-device/contracts";
+import {transitionPostgresAsset} from './asset-lifecycle-store.js';
+
+async function completeAsset(client: PoolClient, row: ProcessingJobRow, completion?: JobCompletionOptions) {
+  if (completion?.assetTransition) {
+    const payload=row.payload as {inputAssetVersionId?: unknown}|null;
+    if(row.job_type!=='asset.process'||payload?.inputAssetVersionId!==completion.assetTransition.assetVersionId)throw Error('ASSET_JOB_BINDING_INVALID');
+    if(!await transitionPostgresAsset(client,completion.assetTransition))throw Error('ASSET_TRANSITION_REJECTED');
+  }
+  await completion?.beforeCommit?.();
+}
 
 interface ProcessingJobRow {
   job_id: string;
@@ -194,6 +205,7 @@ export function createPostgresJobStore(pool: Pool): JobStorePort {
            WHERE job_id = $1
              AND state IN ('FAILED', 'DEAD_LETTERED')
              AND error_class = 'RETRYABLE'
+             AND operator_metadata->>'cancelled' IS DISTINCT FROM 'true'
              AND last_failure IS NOT NULL`,
           [jobId]
         );
@@ -221,6 +233,7 @@ export function createPostgresJobStore(pool: Pool): JobStorePort {
            WHERE job_id = $1
              AND state IN ('FAILED', 'DEAD_LETTERED')
              AND error_class = 'RETRYABLE'
+             AND operator_metadata->>'cancelled' IS DISTINCT FROM 'true'
            RETURNING ${rowColumns}`,
           [jobId, timestamp, json({ lastOperatorRetry: { actorId, reason, at: timestamp, ...details } })]
         );
@@ -275,7 +288,7 @@ export function createPostgresJobStore(pool: Pool): JobStorePort {
       });
     },
 
-    async succeed<TPayload>(tenant: TenantContext, jobId: string, workerId: string, leaseGeneration: number, outcome: JobOutcome, now?: string) {
+    async succeed<TPayload>(tenant: TenantContext, jobId: string, workerId: string, leaseGeneration: number, outcome: JobOutcome, now?: string, completion?: JobCompletionOptions) {
       return withTenantTransaction(pool, tenant, async (client) => {
         const result = await client.query<ProcessingJobRow>(
           `UPDATE processing_jobs
@@ -289,11 +302,12 @@ export function createPostgresJobStore(pool: Pool): JobStorePort {
            RETURNING ${rowColumns}`,
           [jobId, workerId, leaseGeneration, outcome.outputArtifactIds, json(outcome), outcome.adapterVersion, nowIso(now)]
         );
+        if(result.rows[0])await completeAsset(client,result.rows[0],completion);
         return result.rows[0] ? recordFromRow<TPayload>(result.rows[0]) : null;
       });
     },
 
-    async fail<TPayload>(tenant: TenantContext, jobId: string, workerId: string, leaseGeneration: number, failure: FailureDetail, now?: string, outcome?: JobOutcome) {
+    async fail<TPayload>(tenant: TenantContext, jobId: string, workerId: string, leaseGeneration: number, failure: FailureDetail, now?: string, outcome?: JobOutcome, completion?: JobCompletionOptions) {
       const timestamp = nowIso(now);
       const isRetryable = failure.class === "RETRYABLE";
       return withTenantTransaction(pool, tenant, async (client) => {
@@ -334,6 +348,7 @@ export function createPostgresJobStore(pool: Pool): JobStorePort {
             outcome?.outputArtifactIds ?? null
           ]
         );
+        if(result.rows[0])await completeAsset(client,result.rows[0],completion);
         return result.rows[0] ? recordFromRow<TPayload>(result.rows[0]) : null;
       });
     }

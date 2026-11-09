@@ -401,3 +401,26 @@ Implemented the first provider-backed NxStage/System One integration slice. Scen
 Validation passed: contracts/API/worker/web builds; generation/provider contract; packaged Aurora + NxStage scene composite/hash checks; image-generation guard checks; existing OpenMontage HTTP approval-gate regression; NxStage GLB and Chrome interaction regression. Remaining evidence: actual rights-cleared provider output, final PBR texture authoring from the full photo set, cinematic tracking/compositor acceptance, visual regression screenshots on named device profiles, and deployed provider/Blob review evidence.
 
 Photorealistic integration follow-up: deterministic PBR maps, calibrated browser grounding, provider job lifecycle, and a gated offline cinematic composite now pass local validation. Remaining acceptance is rights-cleared photo-derived texture authoring, external provider/deployed Blob evidence, and named-device visual/temporal regression.
+
+## Training-video fidelity and learning extension - 2026-11-06
+
+Extend the existing AI lesson and training-scene work into a complete source-to-lesson workflow. Current code produces editable cited storyboards and separate background/narration previews; synchronized lesson assembly and learner checkpoint integration remain to be connected. Preserve existing open work and release boundaries.
+
+The [training-video assessment and enhancement plan](../docs/training-video-enhancement-plan.md) records current behavior, concrete gaps, evidence strategy, visual production rules, sample lesson and acceptance criteria. Tasks TV-01 through TV-20 in [the backlog](todo.md) cover fidelity, one playable lesson, active learning, source understanding, validated realism, generated-content direction and finishing, learning variants and pilot evaluation. The initial baseline remains fictional Aurora/AIC-001.
+
+Planning verification: source inspection and pnpm video-lesson:validate passed. No runtime implementation or deployment was performed for this extension.
+Generated-content expansion: add audience/task briefs and reusable reference packs; evidence-linked scripts and purposeful shot sequences; narrated rough-cut review; natural speech and sound finishing; bounded alternative takes and scene-specific corrections; final audiovisual quality review; and evidence-preserving beginner/refresher/remediation variants. TV-14 through TV-19 feed the baseline pilot; TV-20 feeds it when variants are evaluated. These are planned capabilities, not completed implementation.
+## Technical completion before UI - 2026-11-07
+
+User direction: assume the UI will be built later and plan completion of the remaining technical product. The [technical completion plan](../docs/technical-completion-plan.md) extends this MVP plan without replacing its open work. TC-01 through TC-36 in [the backlog](todo.md#technical-completion-before-ui---2026-11-07) define the ordered closure work and acceptance checkpoints.
+
+Sequence: reproducible baseline/CI -> identity and trust -> headless certification journey/API contracts -> production AI/reconstruction/hosted rendering -> rights/retention/discovery/reporting/integrations -> telemetry/budgets/recovery/capacity -> security review and hosted technical handoff.
+
+Completion means services are technically ready for UI integration. It does not close final UI/device/accessibility acceptance, independent content/license review, cohort measurement or DEC-020 launch admission. Existing implementation is reused; missing deployment evidence is not automatically missing code. This update records planning only.
+### Technical implementation checkpoint - 2026-11-07
+
+Shared contracts, tenant runtime grants, fail-closed deployment policy, immutable evidence controls and substantive validation gates were implemented before the seven workstream integrations. Dedicated implementation agents completed baseline/CI, identity/security, certification APIs, processing, lifecycle/integrations, operations, and acceptance/handoff source work. Follow-up review closed hybrid retrieval, production single-image packaging, corrected private scene-take promotion, derived-resource/orphan retention, filtered reports, full webhook event families, source usage/billed reconciliation and OAuth client-credentials integration gaps.
+
+Independent focused testing returned stale-export overwrite, retention scan starvation and transaction-rollback orphan findings to the original agents; fixes and focused independent retests passed. Full frozen integration validation is the next checkpoint. See [execution evidence](./technical-execution.md), [technical plan](../docs/technical-completion-plan.md), [security review](../docs/technical-security-review.md) and [UI handoff](../docs/ui-integration-handoff.md).
+
+TC-01 through TC-36 remain acceptance-tracked: implementation presence or local controlled tests do not satisfy real identity/provider/scanner/cloud, recovery/rotation/load, physical runtime, source/license or independent human approval requirements. No cloud deployment or launch acceptance is claimed. Pre-existing staged work is preserved.

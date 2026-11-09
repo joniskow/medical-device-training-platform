@@ -1,4 +1,6 @@
 export * from "./common.js";
+export * from "./deployment-policy.js";
+export * from './hosted-lesson-render.js';
 export * from "./document.js";
 export * from "./ports.js";
 export * from './reconstruction.js';
@@ -6,6 +8,10 @@ export * from './scene-manifest.js';
 export * from './openmontage-brief.js';
 export * from './openmontage-generation.js';
 export * from './speech.js';
+export * from './lesson-render.js';
 export * from './image-generation-prompt.js';
 export * from './model-session.js';
 export { learnerOpenApi } from './learner-openapi.js';
+export * from './source-usage.js';
+export * from './embeddings.js';
+export * from './machine-integration-openapi.js';

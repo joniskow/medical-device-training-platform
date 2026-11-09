@@ -1,0 +1,23 @@
+import assert from 'node:assert/strict';
+import {createBudgetedJobHandler} from '../apps/worker/dist/budgeted-job.js';
+
+const reservations=new Map(),events=[];
+let charges=0,calls=0;
+const job={jobId:'job-test',jobType:'lesson.render',tenant:{organizationId:'org',correlationId:'corr-test'},state:'QUEUED',attempt:1,leaseGeneration:0,availableAt:new Date(Date.now()-1000).toISOString(),updatedAt:new Date().toISOString()};
+const store={async reserve(key){if(reservations.has(key))return {status:'BUSY',token:'old'};reservations.set(key,true);return {status:'ACCEPTED_WARNING',token:'token'};},async renew(){return true;},async settle(){charges++;return true;}};
+const handler=createBudgetedJobHandler({store,jobStore:{async get(){return job;}},secret:'budgeted-test-secret-at-least-32-bytes',estimateCents:100,handler:async({signal})=>{calls++;signal.throwIfAborted();job.state='SUCCEEDED';return job;},sink:line=>events.push(JSON.parse(line))});
+const request={tenant:job.tenant,jobId:job.jobId,workerId:'worker'};
+assert.equal((await handler(request)).state,'SUCCEEDED');
+await handler(request);
+assert.equal(calls,1);assert.equal(charges,1,'terminal redelivery cannot charge again');
+assert.equal(events.filter(event=>event.event==='budget_threshold').length,1);
+assert.equal(events.filter(event=>event.event==='job_finished').length,1);
+job.state='RUNNING';job.leaseExpiresAt=new Date(Date.now()+60000).toISOString();
+await assert.rejects(()=>handler(request),/ADMISSION_BUSY/);
+assert.equal(charges,1);
+job.state='QUEUED';job.availableAt=new Date(Date.now()+60000).toISOString();
+await assert.rejects(()=>handler(request),/ADMISSION_NOT_AVAILABLE/);
+job.availableAt=new Date(Date.now()-1000).toISOString();job.updatedAt=new Date(Date.now()+1).toISOString();
+await handler(request);
+assert.equal(charges,2,'explicit operator epoch reserves another execution');
+console.log('Budgeted worker passed: terminal/busy/future exclusion, persisted retry identity, conservative settlement and safe correlated telemetry.');

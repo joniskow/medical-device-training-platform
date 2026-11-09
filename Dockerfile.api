@@ -29,7 +29,6 @@ COPY fixtures/aurora-training ./fixtures/aurora-training
 COPY fixtures/nxstage-system-one ./fixtures/nxstage-system-one
 COPY fixtures/nxstage-system-one-interactive ./fixtures/nxstage-system-one-interactive
 COPY fixtures/nxstage-system-one-rear-outlet-depth-review ./fixtures/nxstage-system-one-rear-outlet-depth-review
-COPY output/reconstruction-capture/images ./output/reconstruction-capture/images
 RUN pnpm --filter @medical-device/contracts build && pnpm --filter @medical-device/api-client build && pnpm --filter @medical-device/simulation-schema build && pnpm --filter @medical-device/model-runtime build && pnpm --filter @medical-device/ai-gateway build && pnpm --filter @medical-device/db build && pnpm --filter @medical-device/storage build && pnpm --filter @medical-device/web build && pnpm --filter @medical-device/api build && pnpm developer:artifacts && pnpm deploy --legacy --filter @medical-device/api --prod /out
 
 FROM node:24-alpine AS runtime

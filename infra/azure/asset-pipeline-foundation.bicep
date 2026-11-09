@@ -51,11 +51,11 @@ resource storageBlobService 'Microsoft.Storage/storageAccounts/blobServices@2023
     isVersioningEnabled: true
     deleteRetentionPolicy: {
       enabled: true
-      days: 7
+      days: 30
     }
     containerDeleteRetentionPolicy: {
       enabled: true
-      days: 7
+      days: 30
     }
   }
 }

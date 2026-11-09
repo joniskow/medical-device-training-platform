@@ -1,0 +1,27 @@
+import {readFile, writeFile, mkdir} from 'node:fs/promises';
+import {resolve, dirname, join} from 'node:path';
+import {existsSync} from 'node:fs';
+import {renderLessonJob} from '../apps/worker/dist/lesson-render-job.js';
+import {createSpeechProvider} from '../apps/worker/dist/speech-provider.js';
+const options = Object.fromEntries(process.argv.slice(2).reduce((pairs, arg, index, args) => {if (arg.startsWith('--')) pairs.push([arg.slice(2), args[index + 1]]); return pairs;}, []));
+if (!options.draft || !options.lesson || !options.output || !['rough-cut', 'final'].includes(options.mode ?? 'rough-cut')) throw Error('Usage: node tools/render-video-lesson.mjs --draft course.json --lesson lesson-id --output directory --mode rough-cut|final [--assets assets.json] [--recordings recordings.json]');
+const draftPath = resolve(options.draft), draft = JSON.parse(await readFile(draftPath, 'utf8'));
+const content = draft.content ?? draft;
+const lesson = content.videoLessons?.find(item => item.lessonId === options.lesson);
+if (!lesson) throw Error('LESSON_NOT_FOUND');
+const readMap = async path => path ? JSON.parse(await readFile(resolve(path), 'utf8')) : {};
+const assets = await readMap(options.assets), recordings = await readMap(options.recordings), recordedNarration = {};
+for (const [id, recording] of Object.entries(recordings)) recordedNarration[id] = {bytes: new Uint8Array(await readFile(resolve(dirname(resolve(options.recordings)), recording.path))), transcript: recording.transcript, delivery: recording.delivery};
+for (const asset of Object.values(assets)) asset.path = resolve(dirname(resolve(options.assets)), asset.path);
+const binaries = resolve('output/OpenMontage/remotion-composer/node_modules/@remotion/compositor-win32-x64-msvc');
+const fullFfmpeg = join(process.env.APPDATA ?? '', 'Python/Python312/site-packages/imageio_ffmpeg/binaries/ffmpeg-win-x86_64-v7.1.exe');
+const ffmpeg = process.env.LESSON_FFMPEG ?? (existsSync(fullFfmpeg) ? fullFfmpeg : 'ffmpeg');
+const ffprobe = process.env.LESSON_FFPROBE ?? (existsSync(join(binaries, 'ffprobe.exe')) ? join(binaries, 'ffprobe.exe') : 'ffprobe');
+const manifest = await renderLessonJob({lesson, mode: options.mode ?? 'rough-cut', outputDirectory: options.output, assets, recordedNarration, speech: Object.keys(recordings).length ? undefined : createSpeechProvider({mode:'http'}), ffmpeg, ffprobe});
+lesson[manifest.mode === 'rough-cut' ? 'roughCut' : 'renderArtifact'] = manifest;
+delete lesson.finalReview;
+if (manifest.mode === 'rough-cut') delete lesson.previewAcceptance;
+// Export a separate editable draft; never overwrite the author's source without review.
+const outputDraft = join(resolve(options.output), 'rendered-draft.json');
+await mkdir(dirname(outputDraft), {recursive: true}); await writeFile(outputDraft, JSON.stringify(draft, null, 2));
+console.log(JSON.stringify({artifact: manifest.outputPath, manifest: manifest.outputPath.replace(/\.mp4$/, '.json'), captions: manifest.captionsPath, draft: outputDraft, mode: manifest.mode, placeholders: manifest.placeholders}, null, 2));

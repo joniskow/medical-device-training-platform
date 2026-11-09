@@ -4,6 +4,7 @@ import {createHash,randomUUID} from 'node:crypto';
 import type {TenantContext} from '@medical-device/contracts';
 import {withTenantTransaction} from './tenant-transaction.js';
 import {attestReconstructionPreparation} from './reconstruction-store.js';
+import {linkRetentionResourceToAsset} from './retention-resources.js';
 
 export function createModelImportStore(pool:Pool,options?:{writeManifest:(key:string,manifest:Record<string,unknown>)=>Promise<void>}){
  return {
@@ -11,7 +12,8 @@ export function createModelImportStore(pool:Pool,options?:{writeManifest:(key:st
  async configure(tenant:TenantContext,id:string,input:{expectedRevision:number;components:unknown}){
   if(!tenant.actorId||!Number.isSafeInteger(input.expectedRevision)||input.expectedRevision<0||!Array.isArray(input.components)||!options)throw Error('MODEL_CONFIGURATION_INVALID');
   return withTenantTransaction(pool,tenant,async client=>{
-   const row=(await client.query(`SELECT m.manifest,m.status,v.state,a.status AS parent_status FROM model_versions m JOIN asset_versions v ON v.asset_version_id=m.asset_version_id AND v.organization_id=m.organization_id JOIN assets a ON a.asset_id=v.asset_id AND a.organization_id=v.organization_id WHERE m.organization_id=$1 AND m.model_version_id=$2 FOR UPDATE OF m,v,a`,[tenant.organizationId,id])).rows[0];
+   await client.query("SELECT pg_advisory_xact_lock(hashtextextended('lifecycle:'||$1,0))",[tenant.organizationId]);
+   const row=(await client.query(`SELECT m.manifest,m.status,m.asset_version_id,v.state,a.status AS parent_status FROM model_versions m JOIN asset_versions v ON v.asset_version_id=m.asset_version_id AND v.organization_id=m.organization_id JOIN assets a ON a.asset_id=v.asset_id AND a.organization_id=v.organization_id WHERE m.organization_id=$1 AND m.model_version_id=$2 AND NOT public.lifecycle_asset_suppressed(v.asset_version_id) FOR UPDATE OF m,v,a`,[tenant.organizationId,id])).rows[0];
    if(!row||['QUARANTINED','REJECTED','RETIRED','SUSPENDED'].includes(row.parent_status))throw Error('MODEL_UNAVAILABLE');
    if(row.status!=='REVIEW_REQUIRED'||row.state!=='READY_FOR_REVIEW'||(row.manifest.interactionRevision??0)!==input.expectedRevision)throw Error('MODEL_REVIEW_CONFLICT');
    const edits=input.components as Array<Record<string,unknown>>,existing=row.manifest.components as Array<Record<string,unknown>>;
@@ -31,6 +33,7 @@ export function createModelImportStore(pool:Pool,options?:{writeManifest:(key:st
    try{validateBrowserModelManifest({...manifest,modelVersionId:id,releaseBindingId:"configuration:"+id});}catch{throw Error('MODEL_CONFIGURATION_INVALID');}
    const key=`${tenant.organizationId}/models/configured/${randomUUID()}.json`;
    await options.writeManifest(key,manifest);
+   await linkRetentionResourceToAsset(client,tenant,key,row.asset_version_id);
    await client.query('UPDATE model_versions SET manifest=$3::jsonb,manifest_blob_key=$4,updated_at=now() WHERE organization_id=$1 AND model_version_id=$2',[tenant.organizationId,id,JSON.stringify(manifest),key]);
    for(const component of components)await client.query('UPDATE model_components SET metadata=$4::jsonb,updated_at=now() WHERE organization_id=$1 AND model_version_id=$2 AND component_key=$3',[tenant.organizationId,id,component.componentId,JSON.stringify(component)]);
    await client.query(`INSERT INTO audit_events(audit_event_id,organization_id,actor_id,event_type,resource_type,resource_id,details,created_at) VALUES($1,$2,$3,'MODEL_INTERACTIONS_CONFIGURED','model_version',$4,$5::jsonb,now())`,['audit:'+randomUUID(),tenant.organizationId,tenant.actorId,id,JSON.stringify({revision:manifest.interactionRevision,components})]);
@@ -39,20 +42,21 @@ export function createModelImportStore(pool:Pool,options?:{writeManifest:(key:st
  },
  async list(tenant:TenantContext,after=''){
   return withTenantTransaction(pool,tenant,async client=>{
-   const rows=(await client.query(`SELECT m.model_version_id AS "modelVersionId",v.file_name AS "fileName",m.status FROM model_versions m JOIN asset_versions v ON v.asset_version_id=m.asset_version_id AND v.organization_id=m.organization_id WHERE m.organization_id=$1 AND m.model_version_id>$2 AND m.status IN ('REVIEW_REQUIRED','APPROVED') ORDER BY m.model_version_id LIMIT 21`,[tenant.organizationId,after])).rows;
+   const rows=(await client.query(`SELECT m.model_version_id AS "modelVersionId",v.file_name AS "fileName",m.status FROM model_versions m JOIN asset_versions v ON v.asset_version_id=m.asset_version_id AND v.organization_id=m.organization_id WHERE m.organization_id=$1 AND m.model_version_id>$2 AND NOT public.lifecycle_asset_suppressed(v.asset_version_id) AND m.status IN ('REVIEW_REQUIRED','APPROVED') ORDER BY m.model_version_id LIMIT 21`,[tenant.organizationId,after])).rows;
    return {items:rows.slice(0,20),...(rows.length>20?{nextCursor:rows[19].modelVersionId}:{})};
   });
  },
  async get(tenant:TenantContext,id:string){
   return withTenantTransaction(pool,tenant,async client=>{
-   const row=(await client.query(`SELECT m.model_version_id AS "modelVersionId",m.status,m.manifest,m.blob_key AS "blobKey",v.sha256,v.file_name AS "fileName" FROM model_versions m JOIN asset_versions v ON v.asset_version_id=m.asset_version_id AND v.organization_id=m.organization_id JOIN assets a ON a.asset_id=v.asset_id AND a.organization_id=v.organization_id WHERE m.organization_id=$1 AND m.model_version_id=$2 AND m.status IN ('REVIEW_REQUIRED','APPROVED') AND v.state IN ('READY_FOR_REVIEW','APPROVED') AND a.status NOT IN ('QUARANTINED','REJECTED','RETIRED','SUSPENDED')`,[tenant.organizationId,id])).rows[0];
+   const row=(await client.query(`SELECT m.model_version_id AS "modelVersionId",m.status,m.manifest,m.blob_key AS "blobKey",v.sha256,v.file_name AS "fileName" FROM model_versions m JOIN asset_versions v ON v.asset_version_id=m.asset_version_id AND v.organization_id=m.organization_id JOIN assets a ON a.asset_id=v.asset_id AND a.organization_id=v.organization_id WHERE m.organization_id=$1 AND m.model_version_id=$2 AND NOT public.lifecycle_asset_suppressed(v.asset_version_id) AND m.status IN ('REVIEW_REQUIRED','APPROVED') AND v.state IN ('READY_FOR_REVIEW','APPROVED') AND a.status NOT IN ('QUARANTINED','REJECTED','RETIRED','SUSPENDED')`,[tenant.organizationId,id])).rows[0];
    return row??null;
   });
  },
  async review(tenant:TenantContext,id:string,input:{sourceHash:string;expectedRevision:number;decision:'APPROVE'|'REJECT';rationale:string;idempotencyKey:string}){
   if(!Number.isSafeInteger(input.expectedRevision)||input.expectedRevision<0||!tenant.actorId||!/^[a-f0-9]{64}$/.test(input.sourceHash)||!['APPROVE','REJECT'].includes(input.decision)||!input.rationale.trim()||input.rationale.length>4000||!input.idempotencyKey||input.idempotencyKey.length>200)throw Error('MODEL_REVIEW_INVALID');
   return withTenantTransaction(pool,tenant,async client=>{
-   const row=(await client.query(`SELECT m.status,m.asset_version_id,m.manifest,m.created_by,v.sha256,v.state,a.status AS parent_status FROM model_versions m JOIN asset_versions v ON v.asset_version_id=m.asset_version_id AND v.organization_id=m.organization_id JOIN assets a ON a.asset_id=v.asset_id AND a.organization_id=v.organization_id WHERE m.organization_id=$1 AND m.model_version_id=$2 FOR UPDATE OF m,v,a`,[tenant.organizationId,id])).rows[0];
+   await client.query("SELECT pg_advisory_xact_lock(hashtextextended('lifecycle:'||$1,0))",[tenant.organizationId]);
+   const row=(await client.query(`SELECT m.status,m.asset_version_id,m.manifest,m.created_by,v.sha256,v.state,a.status AS parent_status FROM model_versions m JOIN asset_versions v ON v.asset_version_id=m.asset_version_id AND v.organization_id=m.organization_id JOIN assets a ON a.asset_id=v.asset_id AND a.organization_id=v.organization_id WHERE m.organization_id=$1 AND m.model_version_id=$2 AND NOT public.lifecycle_asset_suppressed(v.asset_version_id) FOR UPDATE OF m,v,a`,[tenant.organizationId,id])).rows[0];
    if(!row||['QUARANTINED','REJECTED','RETIRED','SUSPENDED'].includes(row.parent_status))throw Error('MODEL_UNAVAILABLE');
    const requestHash=createHash('sha256').update(JSON.stringify([tenant.actorId,id,input.sourceHash,input.expectedRevision,input.decision,input.rationale.trim()])).digest('hex');
    const prior=(await client.query(`SELECT details FROM audit_events WHERE organization_id=$1 AND resource_id=$2 AND event_type='MODEL_REVIEW_DECISION' AND details->>'idempotencyKey'=$3`,[tenant.organizationId,id,input.idempotencyKey])).rows[0];
@@ -74,9 +78,10 @@ export function createModelImportStore(pool:Pool,options?:{writeManifest:(key:st
  },
  async save(tenant:TenantContext,input:{assetVersionId:string;modelVersionId:string;blobKey:string;manifestBlobKey:string;manifest:Record<string,unknown>;components:Array<{componentId:string}>}){
   return withTenantTransaction(pool,tenant,async client=>{
+   await client.query("SELECT pg_advisory_xact_lock(hashtextextended('lifecycle:'||$1,0))",[tenant.organizationId]);
    const lineage=await attestReconstructionPreparation(client,tenant,input.manifest.preparation);
    if(lineage)input.manifest.reconstructionLineage=lineage;else delete input.manifest.reconstructionLineage;
-   const asset=await client.query(`SELECT sha256,state FROM asset_versions WHERE organization_id=$1 AND asset_version_id=$2 FOR UPDATE`,[tenant.organizationId,input.assetVersionId]);
+   const asset=await client.query(`SELECT sha256,state FROM asset_versions WHERE organization_id=$1 AND asset_version_id=$2 AND NOT public.lifecycle_asset_suppressed(asset_version_id) FOR UPDATE`,[tenant.organizationId,input.assetVersionId]);
    if(!asset.rows[0]||asset.rows[0].sha256!==input.manifest.sourceHash||!['PROCESSING','READY_FOR_REVIEW','APPROVED'].includes(asset.rows[0].state))throw Error('MODEL_IMPORT_SOURCE_INVALID');
    const existing=await client.query(`SELECT asset_version_id,manifest FROM model_versions WHERE organization_id=$1 AND model_version_id=$2`,[tenant.organizationId,input.modelVersionId]);
    if(existing.rows[0]){
@@ -84,6 +89,8 @@ export function createModelImportStore(pool:Pool,options?:{writeManifest:(key:st
     return;
    }
    await client.query(`INSERT INTO model_versions(model_version_id,organization_id,asset_version_id,blob_key,manifest_blob_key,manifest,status,created_by,created_at,updated_at) VALUES($1,$2,$3,$4,$5,$6::jsonb,'REVIEW_REQUIRED',$7,now(),now())`,[input.modelVersionId,tenant.organizationId,input.assetVersionId,input.blobKey,input.manifestBlobKey,JSON.stringify(input.manifest),tenant.actorId??'worker']);
+   await linkRetentionResourceToAsset(client,tenant,input.blobKey,input.assetVersionId);
+   await linkRetentionResourceToAsset(client,tenant,input.manifestBlobKey,input.assetVersionId);
    for(const component of input.components)await client.query(`INSERT INTO model_components(model_component_id,organization_id,model_version_id,component_key,metadata,created_at,updated_at) VALUES($1,$2,$3,$4,$5::jsonb,now(),now())`,[input.modelVersionId+':'+component.componentId,tenant.organizationId,input.modelVersionId,component.componentId,JSON.stringify(component)]);
   });
  }};

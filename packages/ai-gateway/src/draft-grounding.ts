@@ -35,6 +35,7 @@ export function validateDraftGrounding(result: AiGatewayResult, sources: Array<{
   }
   if (!validCitations(course.citations)) return reject("AI_CITATION_INVALID", "Course citations must exactly match supplied source passage locators.");
   const assessmentIds = new Set<string>();
+  const assessmentActivityIds = new Set<string>();
   const activityIds = new Set<string>();
   const simulationActivities: Record<string, unknown>[] = [];
   for (const module of course.modules) {
@@ -46,11 +47,13 @@ export function validateDraftGrounding(result: AiGatewayResult, sources: Array<{
         activityIds.add(activity.activityId);
       }
       if (!isSupportedCourseActivityType(activity.type)) return reject("AI_ACTIVITY_TYPE_INVALID", "Generated activity type is not in the supported course catalog.");
+      if (activity.type === 'rich_text' && (typeof activity.text !== 'string' || !activity.text.trim())) return reject('AI_DRAFT_STRUCTURE_INVALID', 'Generated reading activities must contain instructional text.');
       if (["multiple_choice", "multi_select", "ordered_step"].includes(activity.type)) {
         if (!validateAssessmentDefinition(activity.assessment).valid || !record(activity.assessment)) return reject("AI_ASSESSMENT_INVALID", "Generated assessment does not satisfy the assessment schema, answer or scoring rules.");
         const assessmentId = activity.assessment.assessmentId as string;
         if (assessmentIds.has(assessmentId)) return reject("AI_ASSESSMENT_INVALID", "Generated assessment identifiers must be unique across the course.");
         assessmentIds.add(assessmentId);
+        if (typeof activity.activityId === 'string') assessmentActivityIds.add(activity.activityId);
       } else if (activity.assessment !== undefined) {
         return reject("AI_ASSESSMENT_INVALID", "Assessment definitions must belong to an assessment activity.");
       }
@@ -72,14 +75,22 @@ export function validateDraftGrounding(result: AiGatewayResult, sources: Array<{
   if (course.videoLessons !== undefined) {
     if (!Array.isArray(course.videoLessons) || course.videoLessons.length > 8) return reject("AI_VIDEO_LESSON_INVALID", "Generated video lessons must be a bounded list.");
     const approvedMedia = new Set(mediaAssets.map(asset => asset.assetVersionId));
+    const lessonIds = new Set<string>();
     for (const lesson of course.videoLessons) {
       const report = validateVideoLesson(lesson);
       if (!report.valid) return reject("AI_VIDEO_LESSON_INVALID", report.findings[0]?.message ?? "Generated video lesson is invalid.");
+      const lessonId = (lesson as Record<string, unknown>).lessonId as string;
+      if (lessonIds.has(lessonId)) return reject('AI_VIDEO_LESSON_INVALID', 'Generated video lesson identifiers must be unique across the course.');
+      lessonIds.add(lessonId);
       const scenes = (lesson as Record<string, unknown>).scenes as Array<Record<string, unknown>>;
       for (const scene of scenes) {
         const visual = scene.visual as Record<string, unknown>;
         if (typeof visual.assetVersionId === "string" && !approvedMedia.has(visual.assetVersionId)) return reject("AI_VIDEO_LESSON_MEDIA_INVALID", "Video lesson visuals must bind selected approved media.");
-        if (scene.checkpointActivityId !== undefined && (typeof scene.checkpointActivityId !== "string" || !activityIds.has(scene.checkpointActivityId))) return reject("AI_VIDEO_LESSON_CHECKPOINT_INVALID", "Video lesson checkpoints must link to activities in the same course.");
+        if (visual.kind === 'model') {
+          const model = course.model;
+          if (!record(model) || !record(model.manifest) || !Array.isArray(model.manifest.components) || (visual.componentId !== undefined && (typeof visual.componentId !== 'string' || !model.manifest.components.some(component => record(component) && component.componentId === visual.componentId)))) return reject('AI_VIDEO_LESSON_MODEL_INVALID', 'Model scenes must use the approved course model and components present in its manifest.');
+        }
+        if (scene.checkpointActivityId !== undefined && (typeof scene.checkpointActivityId !== "string" || !assessmentActivityIds.has(scene.checkpointActivityId))) return reject("AI_VIDEO_LESSON_CHECKPOINT_INVALID", "Video lesson checkpoints must link to validated assessment activities in the same course.");
         if (!validCitations(scene.citations)) return reject("AI_CITATION_INVALID", "Every video scene must cite supplied source passage locators.");
       }
       if (!validCitations((lesson as Record<string, unknown>).citations)) return reject("AI_CITATION_INVALID", "Every video lesson must cite supplied source passage locators.");

@@ -10,7 +10,7 @@ BEGIN
   IF target_org IS NOT NULL THEN
    PERFORM set_config('app.organization_id',target_org,true);
    SELECT EXISTS(SELECT 1 FROM public.candidate_enrollment_consents c JOIN public.enrollments e ON e.organization_id=c.organization_id AND e.enrollment_id=c.enrollment_id AND e.learner_id=c.user_id JOIN public.release_manifests r ON r.organization_id=e.organization_id AND r.course_version_id=e.course_version_id AND r.release_id=c.release_id JOIN public.organizations o ON o.organization_id=e.organization_id
-    WHERE c.user_id=actor AND c.organization_id=target_org AND e.status='ACTIVE' AND r.status='PUBLISHED' AND o.status='ACTIVE'
+    WHERE c.user_id=actor AND c.organization_id=target_org AND e.status IN ('ACTIVE','COMPLETED') AND r.status='PUBLISHED' AND public.lifecycle_release_available(r.release_id) AND o.status='ACTIVE'
     AND NOT EXISTS(SELECT 1 FROM public.organization_memberships WHERE organization_id=target_org AND subject=actor AND status<>'ACTIVE')) INTO permitted;
   ELSE
    FOR route IN SELECT DISTINCT c.enrollment_id,c.organization_id,c.release_id FROM public.candidate_enrollment_consents c WHERE c.user_id=actor AND (after_id IS NULL OR c.enrollment_id>after_id) ORDER BY c.enrollment_id LIMIT 51 LOOP
@@ -18,7 +18,7 @@ BEGIN
     scanned:=scanned+1;last_id:=route.enrollment_id;PERFORM set_config('app.organization_id',route.organization_id,true);
     SELECT jsonb_build_object('enrollmentId',e.enrollment_id,'organizationId',e.organization_id,'releaseId',r.release_id,'title',r.manifest->'content'->>'title','issuerName',o.name,'status',e.status) INTO item
     FROM public.enrollments e JOIN public.release_manifests r ON r.organization_id=e.organization_id AND r.course_version_id=e.course_version_id AND r.release_id=route.release_id JOIN public.organizations o ON o.organization_id=e.organization_id
-    WHERE e.enrollment_id=route.enrollment_id AND e.organization_id=route.organization_id AND e.learner_id=actor AND e.status='ACTIVE' AND r.status='PUBLISHED' AND o.status='ACTIVE'
+    WHERE e.enrollment_id=route.enrollment_id AND e.organization_id=route.organization_id AND e.learner_id=actor AND e.status IN ('ACTIVE','COMPLETED') AND r.status='PUBLISHED' AND public.lifecycle_release_available(r.release_id) AND o.status='ACTIVE'
     AND NOT EXISTS(SELECT 1 FROM public.organization_memberships WHERE organization_id=route.organization_id AND subject=actor AND status<>'ACTIVE');
     IF item IS NOT NULL THEN items:=items||jsonb_build_array(item);END IF;
    END LOOP;

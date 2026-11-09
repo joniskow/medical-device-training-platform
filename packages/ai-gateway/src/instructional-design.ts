@@ -1,0 +1,47 @@
+import type { AiGatewayResult, Warning } from '@medical-device/contracts';
+
+export const moduleTeachingInstructions = `Instructional design: organize modules around observable job tasks and the saved audience's prior knowledge. Teach each objective before assessing it. Start with a concrete problem and success criteria; provide a source-grounded worked example, guided practice, an independent decision, and a concise recap with transfer back to the task. Explain prerequisites, equipment identification, preparation, ordered actions, visible verification cues, completion and source-supported stop/escalation conditions when relevant. Cover normal operation and documented exceptions; do not invent missing evidence to fill a teaching template. Distinguish an illustrative scenario's fictional setting from clinical facts. Use realistic observable cues, exact device labels and the bound revision; do not invent patient values, alarms, thresholds, consequences, controls or capabilities. When evidence is insufficient, narrow the lesson and state the missing evidence in cited rich_text for author follow-up. Do not claim exhaustive coverage from retrieved excerpts.
+Assessment design: include a short formative check after each major concept or demonstration and a distinct final application check in each module. Prefer a few meaningful questions over repetitive recall. Use scenario-based multiple_choice for next-action or verification decisions, multi_select only for genuinely independent required checks, and ordered_step only for a source-prescribed sequence. Match questions and competencyIds to taught objectives. Use plausible distractors based on confusable steps or cues in the sources; exactly one best answer for multiple_choice. Avoid trick wording, answer-length clues, all/none-of-the-above and arbitrary trivia. Keep unsafe alternatives clearly hypothetical. In each rationale explain the correct cue/action, why each distractor is unsuitable, and what to review or retry, with exact supporting citations. Never score an untaught or unsupported claim. Use formative scoring as author-reviewable draft settings, never as a manufacturer pass criterion or certification policy.`;
+
+export const videoTeachingInstructions = `Also include videoLessons with 1-8 video-lesson.v1 objects as the evidence and output budget permit. Each focused lesson is 30-300 seconds with 1-8 measurable learningObjectives, lessonId, title, durationSeconds, safetyBoundary, contiguous scenes (1-12), and citations. Prefer one well-taught task per lesson; split complex tasks at logical boundaries rather than rushing or omitting critical steps. Never promise a complete course if the available output budget only supports a focused lesson. Preserve a complete valid JSON draft within the supplied budget.
+Each scene has sceneId, startSeconds, endSeconds, narration, onScreenText, visual with kind source_video/source_image/model/cinematic_background and label, citations, and checkpointActivityId when checking learning. Link checkpoints to actual assessment activities in modules, using unique activityIds. Include at least one decision checkpoint after instruction and a distinct final application check; plan a pause for the learner to answer before continuing. Do not reveal the answer in the question's preceding on-screen text. A checkpoint reference does not itself prove an interactive pause exists in an exported video; include a spoken invitation to pause and keep questions available as course activities.
+Use an opening task/problem and observable outcome, orientation and prerequisites, a worked example with visible actions and results, guided decisions, and a brief recap and transfer scenario. Follow the saved teaching format: orientation identifies parts and limits, procedure demonstrates the supported sequence, troubleshooting follows documented cues and decisions, refresher retrieves and reinforces critical checks. Narration should sound like a skilled instructor speaking to one learner, at approximately 110-150 spoken words per minute with extra time for new terms, action observation and result holds. Budget scene time for narration, configured pauses and at least one second of visible result; do not speed speech to hide an overfilled script.
+Use only selected approved media IDs for source_video/source_image/cinematic_background and a bound approved model for model visuals. Use operator views to establish location, detail views to show exact contact points and labels, and result views to verify the changed state. Keep device identity, handedness, connectors, tubing paths, controls and setting consistent. Show a single instructional action per beat; never use decorative footage to imply an unobserved clinical action. Photos support identification, not invented motion. Backgrounds are context only. Use short callouts (aim for at most 25 total words on screen), readable captions and a narration transcript in a cited rich_text companion activity; do not depend on color or audio alone to convey essential cues. Keep warnings and labels unobscured. Explain only source-supported mechanisms and preserve the safety boundary. Every lesson needs source-linked shot direction.`;
+
+const record = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value);
+const records = (value: unknown): Record<string, unknown>[] => Array.isArray(value) ? value.filter(record) : [];
+const wordCount = (value: string): number => value.trim().split(/\s+/u).filter(Boolean).length;
+
+/** Structural author feedback only; these checks cannot judge clinical or teaching effectiveness. */
+export function reviewInstructionalQuality(result: AiGatewayResult): AiGatewayResult {
+  if (result.status !== 'DRAFT' || !record(result.output)) return result;
+  const findings: Warning[] = [];
+  const warn = (code: string, message: string) => findings.push({ code, severity: 'warning', message });
+  const assessmentIds = new Set<string>();
+  for (const [index, module] of records(result.output.modules).entries()) {
+    const assessments = records(module.activities).filter(activity => ['multiple_choice', 'multi_select', 'ordered_step'].includes(String(activity.type)) && record(activity.assessment) && records(activity.assessment.questions).length > 0);
+    for (const activity of assessments) if (typeof activity.activityId === 'string') assessmentIds.add(activity.activityId);
+    if (!assessments.length) warn('LEARNING_MODULE_ASSESSMENT_MISSING', `Module ${index + 1}: add source-supported questions with explanations after teaching the task. If evidence is insufficient, request it before expanding the lesson.`);
+  }
+  for (const [index, lesson] of records(result.output.videoLessons).entries()) {
+    const name = `Lesson ${index + 1}`;
+    const scenes = records(lesson.scenes);
+    const checkpoints = new Set(scenes.map(scene => scene.checkpointActivityId).filter((id): id is string => typeof id === 'string' && assessmentIds.has(id)));
+    if (!checkpoints.size) warn('LEARNING_CHECKPOINT_MISSING', `${name}: add a source-supported decision checkpoint linked to an assessment activity.`);
+    const finalCheckpoint = scenes.at(-1)?.checkpointActivityId;
+    if (checkpoints.size < 2 || typeof finalCheckpoint !== 'string' || !assessmentIds.has(finalCheckpoint) || scenes.slice(0, -1).some(scene => scene.checkpointActivityId === finalCheckpoint)) warn('LEARNING_FINAL_CHECK_MISSING', `${name}: finish with a distinct application check after formative practice, using a validated assessment activity.`);
+    for (const [sceneIndex, scene] of scenes.entries()) {
+      const duration = Number(scene.endSeconds) - Number(scene.startSeconds);
+      const beat = records(record(lesson.direction) ? lesson.direction.beats : []).find(item => item.sceneId === scene.sceneId);
+      const delivery = record(scene.narrationDelivery) ? scene.narrationDelivery : {};
+      const pauses = records(delivery.pauses).reduce((sum, pause) => sum + (typeof pause.milliseconds === 'number' && Number.isFinite(pause.milliseconds) && pause.milliseconds >= 0 ? pause.milliseconds / 1000 : 0), 0);
+      const hold = typeof beat?.observationHoldSeconds === 'number' && Number.isFinite(beat.observationHoldSeconds) ? Math.max(1, beat.observationHoldSeconds) : 1;
+      const speechSeconds = duration - hold - pauses;
+      // Faster delivery must not mask an overfilled script; slower delivery needs more time.
+      const rate = typeof delivery.rate === 'number' && delivery.rate > 0 && Number.isFinite(delivery.rate) ? Math.min(1, delivery.rate) : 1;
+      if (typeof scene.narration === 'string' && Number.isFinite(duration) && duration > 0 && (speechSeconds <= 0 || wordCount(scene.narration) * 60 / (speechSeconds * rate) > 150)) warn('LEARNING_NARRATION_TOO_FAST', `${name}, scene ${sceneIndex + 1}: allow more time or shorten narration to preserve clear speech, pauses and visible results. Confirm timing with rendered audio.`);
+      if (Array.isArray(scene.onScreenText) && wordCount(scene.onScreenText.filter((item): item is string => typeof item === 'string').join(' ')) > 25) warn('LEARNING_ONSCREEN_TEXT_DENSE', `${name}, scene ${sceneIndex + 1}: shorten on-screen callouts; keep essential labels and warnings intact and put explanation in narration or the companion text.`);
+    }
+  }
+  return { ...result, warnings: [...result.warnings, ...findings] };
+}

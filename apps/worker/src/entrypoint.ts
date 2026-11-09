@@ -1,5 +1,7 @@
+import { assertProductionConfiguration } from '@medical-device/contracts';
+import {readWebhookKeys} from '@medical-device/db';
 import { createAzureBackgroundProcessingRuntime } from "./azure-runtime.js";
-import {readReconstructionEngine} from './reconstruction-engine-configuration.js';
+import {initializeReconstructionEngine} from './reconstruction-engine-configuration.js';
 import type { AssetProcessorPort } from "@medical-device/contracts";
 import { bootstrapPostgres } from "./postgres-bootstrap.js";
 import {DefaultAzureCredential} from '@azure/identity';
@@ -13,20 +15,10 @@ function required(name: string): string {
 }
 
 function describeRuntimeError(value: unknown): string {
-  if (value instanceof Error) return `${value.name}:${value.message}`;
-  if (value && typeof value === "object") {
-    const candidate = value as { error?: unknown; code?: unknown; condition?: unknown; entityPath?: unknown };
-    const nested = candidate.error instanceof Error
-      ? `${candidate.error.name}:${candidate.error.message}`
-      : candidate.error === undefined ? undefined : String(candidate.error);
-    return JSON.stringify({
-      error: nested,
-      code: candidate.code,
-      condition: candidate.condition,
-      entityPath: candidate.entityPath
-    });
-  }
-  return String(value);
+  const candidate=value&&typeof value==='object'?value as {name?:unknown;code?:unknown}:{};
+  const safe=(item:unknown)=>typeof item==='string'&&/^[A-Za-z][A-Za-z0-9_]{0,79}$/.test(item)?item:undefined;
+  // Provider exception messages may include source text, private URLs or tokens.
+  return JSON.stringify({name:safe(candidate.name)??'WorkerError',code:safe(candidate.code)??'WORKER_RUNTIME_ERROR'});
 }
 
 async function loadProcessor(): Promise<AssetProcessorPort> {
@@ -41,6 +33,7 @@ async function loadProcessor(): Promise<AssetProcessorPort> {
   return processor as AssetProcessorPort;
 }
 
+assertProductionConfiguration('worker', process.env);
 const processor = await loadProcessor();
 const workerId = process.env.WORKER_ID?.trim() || `worker-${process.pid}`;
 const runtimeDatabaseUrl = process.env.DATABASE_URL?.trim() || (() => {
@@ -48,13 +41,6 @@ const runtimeDatabaseUrl = process.env.DATABASE_URL?.trim() || (() => {
   const database = process.env.POSTGRES_DATABASE?.trim() || "medical_device";
   const login = process.env.POSTGRES_RUNTIME_LOGIN?.trim() || "medical_device_runtime";
   const password = encodeURIComponent(required("POSTGRES_RUNTIME_PASSWORD"));
-  return `postgresql://${encodeURIComponent(login)}:${password}@${host}:5432/${database}?sslmode=require`;
-})();
-const adminDatabaseUrl = process.env.ADMIN_DATABASE_URL?.trim() || (() => {
-  const host = required("POSTGRES_HOST");
-  const database = process.env.POSTGRES_DATABASE?.trim() || "medical_device";
-  const login = process.env.POSTGRES_ADMIN_LOGIN?.trim() || "mdtadmin";
-  const password = encodeURIComponent(required("POSTGRES_ADMIN_PASSWORD"));
   return `postgresql://${encodeURIComponent(login)}:${password}@${host}:5432/${database}?sslmode=require`;
 })();
 const outboxDatabaseUrl = process.env.DATABASE_OUTBOX_URL?.trim() || (() => {
@@ -65,6 +51,13 @@ const outboxDatabaseUrl = process.env.DATABASE_OUTBOX_URL?.trim() || (() => {
   return `postgresql://${encodeURIComponent(login)}:${password}@${host}:5432/${database}?sslmode=require`;
 })();
 if (process.env.RUN_DATABASE_MIGRATIONS === "true") {
+  const adminDatabaseUrl = process.env.ADMIN_DATABASE_URL?.trim() || (() => {
+    const host = required("POSTGRES_HOST");
+    const database = process.env.POSTGRES_DATABASE?.trim() || "medical_device";
+    const login = process.env.POSTGRES_ADMIN_LOGIN?.trim() || "mdtadmin";
+    const password = encodeURIComponent(required("POSTGRES_ADMIN_PASSWORD"));
+    return `postgresql://${encodeURIComponent(login)}:${password}@${host}:5432/${database}?sslmode=require`;
+  })();
   await bootstrapPostgres({
     adminDatabaseUrl,
     runtimeDatabaseUrl,
@@ -89,7 +82,9 @@ const worker = createAzureBackgroundProcessingRuntime({
   signingSecret: required("SERVICE_BUS_SIGNING_SECRET"),
   workerId,
   processor,
-  reconstructionEngine:readReconstructionEngine(process.env),
+  operationalSecret:process.env.OPERATIONAL_KEY_SECRET?.trim(),
+  webhookKeys:readWebhookKeys(process.env.WEBHOOK_KEYS_JSON),
+  reconstructionEngine:await initializeReconstructionEngine(process.env),
   maxConcurrentCalls: Number(process.env.WORKER_MAX_CONCURRENT_CALLS ?? 2),
   publishIntervalMs: Number(process.env.OUTBOX_PUBLISH_INTERVAL_MS ?? 1_000),
   onError: async (error) => {

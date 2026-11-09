@@ -1,0 +1,25 @@
+import assert from 'node:assert/strict';
+import {createMeteredSpeechProvider,createMeteredVideoProvider,createMeteredReconstructionEngine,withProviderUsageContext} from '../apps/worker/dist/provider-usage.js';
+import {readSourceUsageRates} from '../packages/db/dist/source-usage-metering.js';
+const receipts=[];const record=async(tenant,receipt)=>receipts.push({tenant,receipt});
+const tenant={organizationId:'source-org',correlationId:'source-correlation'};
+const speech=createMeteredSpeechProvider({async synthesize(){return {audio:{bytes:new Uint8Array(4),durationSeconds:1.25}};}},record);
+const video=createMeteredVideoProvider({async generate(){return {video:{bytes:new Uint8Array(8),durationSeconds:2.5}};}},record);
+const reconstruction=createMeteredReconstructionEngine({modes:['video'],async generate(){return {artifacts:[]};}},record);
+await assert.rejects(()=>speech.synthesize({text:'private speech'}),/CONTEXT_REQUIRED/);
+await withProviderUsageContext(tenant,async()=>{
+  await speech.synthesize({text:'private speech'});
+  await video.generate({durationSeconds:2.5});
+  await reconstruction.generate({});
+});
+assert.equal(receipts.length,6);
+assert.equal(receipts.find(item=>item.receipt.operation==='provider.speech'&&item.receipt.phase==='SUCCEEDED').receipt.metrics.audio_ms,1250);
+assert.equal(receipts.find(item=>item.receipt.operation==='provider.video'&&item.receipt.phase==='SUCCEEDED').receipt.metrics.output_bytes,8);
+assert.ok(!JSON.stringify(receipts).includes('private speech'));
+const failing=createMeteredVideoProvider({async generate(){throw Error('provider secret should not log');}},record);
+await assert.rejects(()=>withProviderUsageContext(tenant,()=>failing.generate({durationSeconds:1})),/provider secret/);
+assert.equal(receipts.at(-1).receipt.phase,'FAILED');assert.ok(!JSON.stringify(receipts).includes('provider secret'));
+assert.deepEqual(readSourceUsageRates(undefined),[]);
+assert.throws(()=>readSourceUsageRates('{secret}'),/RATES_INVALID/);
+assert.throws(()=>readSourceUsageRates(JSON.stringify([{operation:'provider.speech',provider:'azure-speech',unit:'input_characters',rateId:'bad',microUsdPerMillionUnits:-1}])),/RATES_INVALID/);
+console.log('Provider usage passed: required trusted context, phased speech/video/reconstruction source metrics, failed-call receipts, safe dimensions and explicit optional rate validation.');

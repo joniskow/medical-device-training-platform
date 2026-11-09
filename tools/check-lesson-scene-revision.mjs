@@ -1,0 +1,51 @@
+import assert from 'node:assert/strict';
+import { mkdtemp, readFile, writeFile, rm } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
+import { execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
+import { addSceneTake, reserveSceneTake, sceneTakeBinding, sceneTakeState, selectedSceneTake, selectSceneTake, validateSceneTakeState } from '../packages/simulation-schema/dist/index.js';
+import { generateControlledSceneTake, generateSceneTake } from '../apps/worker/dist/lesson-scene-takes.js';
+
+const compositor = resolve('output/OpenMontage/remotion-composer/node_modules/@remotion/compositor-win32-x64-msvc');
+const fullFfmpeg = join(process.env.APPDATA ?? '', 'Python/Python312/site-packages/imageio_ffmpeg/binaries/ffmpeg-win-x86_64-v7.1.exe');
+const ffmpeg = process.env.LESSON_FFMPEG ?? (existsSync(fullFfmpeg) ? fullFfmpeg : 'ffmpeg');
+const ffprobe = process.env.LESSON_FFPROBE ?? (existsSync(join(compositor, 'ffprobe.exe')) ? join(compositor, 'ffprobe.exe') : 'ffprobe');
+const directory = await mkdtemp(join(tmpdir(), 'scene-takes-check-'));
+const contractsOnly = process.argv.includes('--contracts-only');
+try {
+  const source = join(directory, 'approved-view.png');
+  if (!contractsOnly) execFileSync(ffmpeg, ['-nostdin','-y','-v','error','-f','lavfi','-i','color=c=blue:s=320x180','-frames:v','1',source], { windowsHide:true });
+  const lesson = { lessonId:'lesson:test', scenes:[{ sceneId:'one', startSeconds:0, endSeconds:2, narration:'Observe Ready.', visual:{kind:'source_image', assetVersionId:'asset:one'}, citations:[{assetVersionId:'manual:1'}] },{ sceneId:'two',startSeconds:2,endSeconds:4,narration:'Verify Flowing.',visual:{kind:'source_image',assetVersionId:'asset:two'}, citations:[{assetVersionId:'manual:1'}]}], direction:{beats:[{sceneId:'one',startingCondition:'Ready',result:'Flowing'},{sceneId:'two',startingCondition:'Flowing',result:'Complete'}]}, citations:[{assetVersionId:'manual:1'}], brief:{deviceRevision:'A'} };
+  const untouched = JSON.stringify(lesson.scenes[1]);
+  const correction = { atSeconds:0.5, defect:'Label too small', requestedCorrection:'Increase detail framing without changing labels.' };
+  await assert.rejects(()=>generateControlledSceneTake({lesson:structuredClone(lesson),sceneId:'one',correction,assets:{'asset:one':{path:source,approved:'false'}},framing:'fit',outputDirectory:directory,persist:async()=>{},ffmpeg,ffprobe}),/APPROVED_VISUAL_REQUIRED/,'A truthy string must never count as asset approval.');
+  let saves = 0;
+  let take;
+  if (contractsOnly) {
+    const binding = reserveSceneTake(lesson,'one','take:contract-fixture'), path=join(directory,'contract-fixture.txt');await writeFile(path,'contract fixture, not video');
+    take={takeId:'take:contract-fixture',sceneId:'one',binding,correction,provenance:{provider:'application-controlled-ffmpeg',model:'contract-fixture',configuration:{}},artifact:{path,sha256:createHash('sha256').update(await readFile(path)).digest('hex'),mimeType:'video/mp4',durationSeconds:2},startingState:'Ready',endingState:'Flowing'};addSceneTake(lesson,take);saves=2;
+  } else take = await generateControlledSceneTake({lesson,sceneId:'one',correction,assets:{'asset:one':{path:source,approved:true}},framing:'detail',outputDirectory:directory,persist:async()=>{saves++;},ffmpeg,ffprobe});
+  assert.equal(saves,2); assert.equal(lesson.sceneTakes.attempts.length,1); assert.equal(take.provenance.provider,'application-controlled-ffmpeg');
+  assert.equal(take.artifact.sha256,createHash('sha256').update(await readFile(take.artifact.path)).digest('hex'));
+  assert.equal(JSON.stringify(lesson.scenes[1]),untouched,'unselected scene inputs remain unchanged');
+  lesson.renderArtifact={sha256:'previous'};lesson.finalReview={approved:true};lesson.previewAcceptance={approved:true};
+  selectSceneTake(lesson,'one',take.takeId,sceneTakeBinding(lesson,'one'));
+  assert.equal(selectedSceneTake(lesson,'one').takeId,take.takeId); assert.equal(selectedSceneTake(lesson,'two'),undefined);
+  assert.equal(lesson.renderArtifact,undefined); assert.equal(lesson.finalReview,undefined); assert.equal(lesson.previewAcceptance,undefined);
+  assert.equal(validateSceneTakeState(lesson).valid,true);
+  const stale=structuredClone(lesson);stale.brief.deviceRevision='B';assert.throws(()=>selectSceneTake(stale,'one',take.takeId,take.binding),/STALE/);assert.equal(validateSceneTakeState(stale).valid,false);
+  const changed=structuredClone(lesson);changed.scenes[0].narration='New narration';assert.throws(()=>selectedSceneTake(changed,'one'),/STALE/);
+  const adjacent=structuredClone(lesson);adjacent.direction.beats[1].startingCondition='Not flowing';assert.throws(()=>selectSceneTake(adjacent,'one',take.takeId,take.binding),/ADJACENT/);assert.equal(validateSceneTakeState(adjacent).valid,false);
+  const bounded=structuredClone(lesson);bounded.sceneTakes.maxPerScene=1;assert.throws(()=>reserveSceneTake(bounded,'one','new'),/BUDGET/);
+  const overall=structuredClone(lesson);overall.sceneTakes.budget=1;assert.throws(()=>reserveSceneTake(overall,'two','new'),/BUDGET/);
+  const invalid=structuredClone(lesson);invalid.sceneTakes.takes[0].artifact.durationSeconds=9;assert.equal(validateSceneTakeState(invalid).valid,false);
+  const malformed=structuredClone(lesson);malformed.sceneTakes.attempts=[null];assert.equal(validateSceneTakeState(malformed).valid,false);
+  const failed=structuredClone(lesson);delete failed.sceneTakes;let calls=0;
+  await assert.rejects(()=>generateSceneTake({lesson:failed,sceneId:'one',correction,provenance:take.provenance,persist:async()=>{},generate:async()=>{calls++;throw Error('provider failed');}}),/provider failed/);
+  assert.equal(calls,1);assert.equal(failed.sceneTakes.attempts.length,1,'failed generation remains charged');
+  const forged={...structuredClone(take),takeId:'unreserved'};assert.throws(()=>addSceneTake(lesson,forged),/UNRESERVED/);
+  const beforeReuse=take.artifact.sha256; assert.equal(selectedSceneTake(lesson,'one').artifact.sha256,beforeReuse,'selected scene output is reusable by final assembly');
+  console.log(`Scene revision ${contractsOnly ? 'contract-only checks passed; real FFmpeg generation remains UNVERIFIED' : 'checks passed including actual approved-view FFmpeg generation'}: provenance/hash/duration, timestamp correction, saved charged attempts, per-scene and total budgets, stale source/shot rejection, explicit selection, adjacent continuity, final/review invalidation and selected-output reuse. Full unchanged-scene rendering reuse is checked by the renderer suite.`);
+} finally { await rm(directory,{recursive:true,force:true}); }

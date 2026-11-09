@@ -5,7 +5,7 @@ import { withTenantTransaction } from '@medical-device/db';
 import { enrollmentEligibility } from './certification-eligibility.js';
 
 const joined=`SELECT e.enrollment_id,e.learner_id,r.release_id,r.release_hash,r.manifest FROM enrollments e JOIN release_manifests r ON r.organization_id=e.organization_id AND r.course_version_id=e.course_version_id
- WHERE e.organization_id=$1 AND e.status='ACTIVE' AND r.status='PUBLISHED'`;
+ WHERE e.organization_id=$1 AND e.status IN ('ACTIVE','COMPLETED') AND r.status='PUBLISHED'`;
 export function createAttemptReviewService(pool:Pool){return {
   async list(tenant:TenantContext,learnerId:string,after?:string,mode:'review'|'reset'='review'){
     if(!learnerId || learnerId.length>256 || (after!==undefined && !/^[A-Za-z0-9._:-]{1,128}$/.test(after)))throw Error('REVIEW_REQUEST_INVALID');

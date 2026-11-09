@@ -20,17 +20,19 @@ COPY packages/simulation-schema/package.json packages/simulation-schema/tsconfig
 COPY packages/contracts/package.json packages/contracts/tsconfig.json ./packages/contracts/
 COPY packages/db/package.json packages/db/tsconfig.json ./packages/db/
 COPY packages/model-runtime/package.json packages/model-runtime/tsconfig.json ./packages/model-runtime/
+COPY packages/ai-gateway/package.json packages/ai-gateway/tsconfig.json ./packages/ai-gateway/
 COPY packages/storage/package.json packages/storage/tsconfig.json ./packages/storage/
 COPY apps/worker ./apps/worker
 COPY packages/simulation-schema ./packages/simulation-schema
 COPY packages/contracts ./packages/contracts
 COPY packages/db ./packages/db
 COPY packages/model-runtime ./packages/model-runtime
+COPY packages/ai-gateway ./packages/ai-gateway
 COPY packages/storage ./packages/storage
 COPY tools/reconstruction ./tools/reconstruction
 COPY fixtures/nxstage-system-one ./fixtures/nxstage-system-one
 RUN pnpm install --frozen-lockfile
-RUN pnpm --filter @medical-device/contracts build && pnpm --filter @medical-device/simulation-schema build && pnpm --filter @medical-device/model-runtime build && pnpm --filter @medical-device/db build && pnpm --filter @medical-device/storage build && pnpm --filter @medical-device/worker build && pnpm deploy --legacy --filter @medical-device/worker --prod /out
+RUN pnpm --filter @medical-device/contracts build && pnpm --filter @medical-device/simulation-schema build && pnpm --filter @medical-device/model-runtime build && pnpm --filter @medical-device/ai-gateway build && pnpm --filter @medical-device/db build && pnpm --filter @medical-device/storage build && pnpm --filter @medical-device/worker build && pnpm deploy --legacy --filter @medical-device/worker --prod /out
 
 FROM node:24-trixie-slim AS runtime
 WORKDIR /app
@@ -57,9 +59,57 @@ ENV BLENDER_SCRIPT=/opt/reconstruction-scripts/blender_postprocess.py
 ENV BLENDER_USER_CONFIG=/tmp/blender-config
 RUN groupadd --system app && useradd --system --gid app app
 COPY --from=build /out ./
+COPY tools/migrate-database.mjs ./tools/migrate-database.mjs
 COPY --from=build /workspace/tools/reconstruction /opt/reconstruction-scripts
 COPY --from=build /workspace/fixtures/nxstage-system-one ./fixtures/nxstage-system-one
 COPY --from=openmvs /opt/openmvs /opt/openmvs
 RUN mkdir -p /tmp/reconstruction /tmp/blender-config && chown -R app:app /tmp/reconstruction /tmp/blender-config
 USER app
 CMD ["node", "dist/entrypoint.js"]
+
+# Optional, separately isolated Python 3.11 stack. NumPy/torch requirements are
+# deliberately incompatible with the photo/video PyCOLMAP environment above.
+FROM python:3.11.11-slim-bookworm AS single-image-build
+ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 OMP_NUM_THREADS=4 OPENBLAS_NUM_THREADS=4 MAX_JOBS=2
+RUN apt-get update && apt-get install -y --no-install-recommends git g++ libgomp1 && rm -rf /var/lib/apt/lists/* \
+ && python3.11 -m venv --copies /opt/single-image/runtime
+COPY tools/reconstruction/requirements-single-image.txt /tmp/single-image-requirements.txt
+RUN /opt/single-image/runtime/bin/pip install --no-cache-dir torch==2.6.0 --index-url https://download.pytorch.org/whl/cpu \
+ && /opt/single-image/runtime/bin/pip install --no-cache-dir -r /tmp/single-image-requirements.txt \
+ && git clone https://github.com/VAST-AI-Research/TripoSR.git /opt/TripoSR \
+ && git -C /opt/TripoSR checkout 107cefdc244c39106fa830359024f6a2f1c78871 \
+ && test "$(git -C /opt/TripoSR rev-parse HEAD)" = 107cefdc244c39106fa830359024f6a2f1c78871 \
+ && git clone https://github.com/tatsy/torchmcubes.git /opt/torchmcubes \
+ && git -C /opt/torchmcubes checkout bc36b08c62c5931e1dfc666581b3a8589278647f \
+ && test "$(git -C /opt/torchmcubes rev-parse HEAD)" = bc36b08c62c5931e1dfc666581b3a8589278647f \
+ && /opt/single-image/runtime/bin/pip install --no-cache-dir --no-build-isolation /opt/torchmcubes \
+ && /opt/single-image/runtime/bin/pip check
+ENV PYTHONPATH=/opt/TripoSR HF_HUB_DISABLE_TELEMETRY=1 DO_NOT_TRACK=1
+COPY tools/reconstruction/single_image_assets.py tools/reconstruction/single_image_preflight.py /opt/reconstruction-scripts/
+RUN /opt/single-image/runtime/bin/python /opt/reconstruction-scripts/single_image_assets.py --assets /opt/single-image/assets \
+ && HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 /opt/single-image/runtime/bin/python /opt/reconstruction-scripts/single_image_preflight.py \
+      --assets /opt/single-image/assets --code /opt/TripoSR --manifest /opt/single-image/runtime-manifest.json --write-manifest \
+ && rm -rf /opt/TripoSR/.git
+
+# Select explicitly with --target worker-single-image. The final default target
+# below continues to provide the original photo/video worker.
+FROM runtime AS worker-single-image
+USER root
+COPY --from=single-image-build /usr/local/bin/python3.11 /usr/local/bin/python3.11
+COPY --from=single-image-build /usr/local/lib/libpython3.11.so.1.0 /usr/local/lib/libpython3.11.so.1.0
+COPY --from=single-image-build /usr/local/lib/python3.11 /usr/local/lib/python3.11
+COPY --from=single-image-build /opt/single-image /opt/single-image
+COPY --from=single-image-build /opt/TripoSR /opt/TripoSR
+ENV RECONSTRUCTION_PYTHON=/opt/single-image/runtime/bin/python
+ENV RECONSTRUCTION_SINGLE_IMAGE_ENABLED=true
+ENV RECONSTRUCTION_ASSETS_DIR=/opt/single-image/assets
+ENV RECONSTRUCTION_SINGLE_IMAGE_CODE_DIR=/opt/TripoSR
+ENV RECONSTRUCTION_SINGLE_IMAGE_MANIFEST=/opt/single-image/runtime-manifest.json
+ENV PYTHONPATH=/opt/TripoSR HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 HF_HUB_DISABLE_TELEMETRY=1 DO_NOT_TRACK=1
+RUN ldconfig \
+ && /opt/single-image/runtime/bin/python /opt/reconstruction-scripts/single_image_preflight.py \
+      --assets /opt/single-image/assets --code /opt/TripoSR --manifest /opt/single-image/runtime-manifest.json \
+ && chmod -R a-w /opt/single-image /opt/TripoSR /usr/local/lib/python3.11
+USER app
+
+FROM runtime AS worker

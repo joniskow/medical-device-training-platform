@@ -1,4 +1,4 @@
-import { createHmac, timingSafeEqual } from "node:crypto";
+import { createHmac, timingSafeEqual, randomUUID } from "node:crypto";
 import type {
   AssetProcessorPort,
   AssetLifecyclePort,
@@ -15,7 +15,7 @@ import type {
   ServiceBusReceivedMessage,
   ServiceBusReceiver
 } from "@azure/service-bus";
-import { canonicalJobMessage } from "./azure-service-bus-dispatcher.js";
+import { canonicalJobMessage, scheduledJobMessageId } from "./azure-service-bus-dispatcher.js";
 import { processAssetJob } from "../job-runner.js";
 
 interface ScheduledJobDispatcher {
@@ -54,7 +54,7 @@ export function verifyAzureServiceBusJobMessage(message: Pick<ServiceBusReceived
   if (!equalSignature(expected, body.integrity.signature)) throw new Error("INVALID_JOB_MESSAGE_SIGNATURE");
   const expectedMessageIds = new Set([
     body.envelope.jobId,
-    `${body.envelope.jobId}:retry:${body.envelope.attempt}`
+    scheduledJobMessageId(body.envelope)
   ]);
   const messageId = typeof message.messageId === "string" ? message.messageId : "";
   if (!expectedMessageIds.has(messageId)) throw new Error("INVALID_JOB_MESSAGE_ID");
@@ -79,6 +79,8 @@ export async function handleAzureServiceBusJobMessage(input: {
   workerId: string;
   processReconstruction?:ReconstructionHandler;
   processOpenMontageGeneration?:OpenMontageGenerationHandler;
+  processLessonRender?:OpenMontageGenerationHandler;
+  processAsset?:OpenMontageGenerationHandler;
   settle: {
     complete(): Promise<void>;
     abandon(): Promise<void>;
@@ -97,7 +99,8 @@ export async function handleAzureServiceBusJobMessage(input: {
     const stored=await input.jobStore.get(envelope.tenant,envelope.jobId);
     if(stored?.jobType==='reconstruction.generate'&&!input.processReconstruction){await input.settle.deadLetter('RECONSTRUCTION_ENGINE_UNAVAILABLE');return 'DEAD_LETTERED';}
     if(stored?.jobType==='openmontage.generate'&&!input.processOpenMontageGeneration){await input.settle.deadLetter('OPENMONTAGE_GENERATION_UNAVAILABLE');return 'DEAD_LETTERED';}
-    const result = stored?.jobType==='reconstruction.generate'?await input.processReconstruction!({tenant:envelope.tenant,jobId:envelope.jobId,workerId:input.workerId}):stored?.jobType==='openmontage.generate'?await input.processOpenMontageGeneration!({tenant:envelope.tenant,jobId:envelope.jobId,workerId:input.workerId}):await processAssetJob({
+    if(stored?.jobType==='lesson.render'&&!input.processLessonRender){await input.settle.deadLetter('LESSON_RENDER_UNAVAILABLE');return 'DEAD_LETTERED';}
+    const result = stored?.jobType==='lesson.render'?await input.processLessonRender!({tenant:envelope.tenant,jobId:envelope.jobId,workerId:input.workerId}):stored?.jobType==='reconstruction.generate'?await input.processReconstruction!({tenant:envelope.tenant,jobId:envelope.jobId,workerId:input.workerId}):stored?.jobType==='openmontage.generate'?await input.processOpenMontageGeneration!({tenant:envelope.tenant,jobId:envelope.jobId,workerId:input.workerId}):input.processAsset?await input.processAsset({tenant:envelope.tenant,jobId:envelope.jobId,workerId:input.workerId}):await processAssetJob({
       jobStore: input.jobStore,
       storage: input.storage,
       processor: input.processor,
@@ -109,7 +112,8 @@ export async function handleAzureServiceBusJobMessage(input: {
     });
     if (result?.state === "RETRY_SCHEDULED") {
       if (input.dispatcher?.enqueueAt) {
-        await input.dispatcher.enqueueAt(envelope, result.availableAt);
+        const metadata={...envelope.operatorMetadata};delete metadata.admissionDeferral;
+        await input.dispatcher.enqueueAt({...envelope,attempt:result.attempt,operatorMetadata:metadata}, result.availableAt);
         await input.settle.complete();
         return "COMPLETED";
       }
@@ -118,7 +122,13 @@ export async function handleAzureServiceBusJobMessage(input: {
     }
     await input.settle.complete();
     return "COMPLETED";
-  } catch {
+  } catch(error) {
+    if(error instanceof Error&&/^ADMISSION_(CAPACITY|PAUSED|BUDGET|BUSY|EXPIRED|NOT_AVAILABLE)$/.test(error.message)&&input.dispatcher?.enqueueAt){
+      const delay=error.message==='ADMISSION_BUDGET'||error.message==='ADMISSION_PAUSED'?300_000:30_000;
+      await input.dispatcher.enqueueAt({...envelope,operatorMetadata:{...envelope.operatorMetadata,admissionDeferral:randomUUID()}},new Date(Date.now()+delay).toISOString());
+      await input.settle.complete();
+      return 'COMPLETED';
+    }
     await input.settle.abandon();
     return "ABANDONED";
   }
@@ -137,6 +147,8 @@ export interface AzureServiceBusWorkerOptions {
   workerId: string;
   processReconstruction?:ReconstructionHandler;
   processOpenMontageGeneration?:OpenMontageGenerationHandler;
+  processLessonRender?:OpenMontageGenerationHandler;
+  processAsset?:OpenMontageGenerationHandler;
   maxConcurrentCalls?: number;
   onError?: (error: ProcessErrorArgs) => Promise<void>;
 }
@@ -144,7 +156,7 @@ export interface AzureServiceBusWorkerOptions {
 export function createAzureServiceBusWorker(options: AzureServiceBusWorkerOptions): { close(): Promise<void> } {
   // Reconstruction may exceed the SDK's five-minute renewal default.
   // https://learn.microsoft.com/en-us/javascript/api/@azure/service-bus/servicebusreceiveroptions#maxautolockrenewaldurationinms
-  const receiver: ServiceBusReceiver = options.client.createReceiver(options.queueName, { receiveMode: "peekLock",maxAutoLockRenewalDurationInMs:options.processReconstruction||options.processOpenMontageGeneration?3_600_000:300_000 });
+  const receiver: ServiceBusReceiver = options.client.createReceiver(options.queueName, { receiveMode: "peekLock",maxAutoLockRenewalDurationInMs:options.processReconstruction||options.processOpenMontageGeneration||options.processLessonRender?3_600_000:300_000 });
   const subscription = receiver.subscribe({
     processMessage: async (message) => {
       await handleAzureServiceBusJobMessage({
@@ -159,6 +171,8 @@ export function createAzureServiceBusWorker(options: AzureServiceBusWorkerOption
         workerId: options.workerId,
         processReconstruction:options.processReconstruction,
         processOpenMontageGeneration:options.processOpenMontageGeneration,
+        processLessonRender:options.processLessonRender,
+        processAsset:options.processAsset,
         settle: {
           complete: () => receiver.completeMessage(message),
           abandon: () => receiver.abandonMessage(message),

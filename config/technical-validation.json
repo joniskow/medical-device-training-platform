@@ -1,0 +1,570 @@
+{
+  "schemaVersion": 1,
+  "profiles": {
+    "pure": [
+      {
+        "id": "source-lint",
+        "script": "tools/check-source-lint.mjs",
+        "timeoutMs": 60000
+      },
+      {
+        "id": "local-test-environment",
+        "script": "tools/check-local-test-environment.mjs",
+        "timeoutMs": 60000
+      },
+      {
+        "id": "deployment-policy",
+        "script": "tools/check-deployment-policy.mjs",
+        "timeoutMs": 60000
+      },
+      {
+        "id": "technical-validation",
+        "script": "tools/check-technical-validation.mjs",
+        "timeoutMs": 60000
+      },
+      {
+        "id": "architecture-boundaries",
+        "script": "tools/check-architecture-boundaries.mjs",
+        "timeoutMs": 60000
+      },
+      {
+        "id": "simulation-schema",
+        "script": "tools/check-simulation-schema.mjs",
+        "timeoutMs": 60000
+      },
+      {
+        "id": "assessment",
+        "script": "tools/check-assessment.mjs",
+        "timeoutMs": 60000
+      },
+      {
+        "id": "certification-policy",
+        "script": "tools/check-certification-policy.mjs",
+        "timeoutMs": 60000
+      },
+      {
+        "id": "course-story",
+        "script": "tools/check-course-story.mjs",
+        "timeoutMs": 60000
+      },
+      {
+        "id": "story-fault-facts",
+        "script": "tools/check-story-fault-facts.mjs",
+        "timeoutMs": 60000
+      },
+      {
+        "id": "story-paths",
+        "script": "tools/check-story-paths.mjs",
+        "timeoutMs": 60000
+      },
+      {
+        "id": "simulation-branches",
+        "script": "tools/check-simulation-branches.mjs",
+        "timeoutMs": 60000
+      },
+      {
+        "id": "simulation-model-actions",
+        "script": "tools/check-simulation-model-actions.mjs",
+        "timeoutMs": 60000
+      },
+      {
+        "id": "model-manifest-contract",
+        "script": "tools/check-model-manifest-contract.mjs",
+        "timeoutMs": 60000
+      },
+      {
+        "id": "ai-gateway",
+        "script": "tools/check-ai-gateway.mjs",
+        "timeoutMs": 60000
+      },
+      {
+        "id": "draft-grounding",
+        "script": "tools/check-draft-grounding.mjs",
+        "timeoutMs": 60000
+      },
+      {
+        "id": "draft-generation-race",
+        "script": "tools/check-draft-generation-race.mjs",
+        "timeoutMs": 60000
+      },
+      {
+        "id": "video-lesson",
+        "script": "tools/check-video-lesson.mjs",
+        "timeoutMs": 60000
+      },
+      {
+        "id": "instructional-quality",
+        "script": "tools/check-instructional-quality.mjs",
+        "timeoutMs": 60000
+      },
+      {
+        "id": "staged-learning",
+        "script": "tools/check-staged-learning.mjs",
+        "timeoutMs": 60000
+      },
+      {
+        "id": "lesson-speech-cache",
+        "script": "tools/check-lesson-speech-cache.mjs",
+        "timeoutMs": 60000
+      },
+      {
+        "id": "lesson-speech-retention",
+        "script": "tools/check-lesson-speech-retention.mjs",
+        "timeoutMs": 60000
+      },
+      {
+        "id": "hosted-lesson-efficiency",
+        "script": "tools/check-hosted-lesson-efficiency.mjs",
+        "timeoutMs": 60000
+      },
+      {
+        "id": "ai-input-evidence",
+        "script": "tools/check-ai-input-evidence.mjs",
+        "timeoutMs": 60000
+      },
+      {
+        "id": "worker-runtime",
+        "script": "tools/check-worker-runtime.mjs",
+        "timeoutMs": 60000
+      },
+      {
+        "id": "worker-recovery",
+        "script": "tools/check-worker-recovery.mjs",
+        "timeoutMs": 60000
+      },
+      {
+        "id": "asset-scanner",
+        "script": "tools/check-asset-scanner.mjs",
+        "timeoutMs": 60000
+      },
+      {
+        "id": "service-bus-dispatcher",
+        "script": "tools/check-service-bus-dispatcher.mjs",
+        "timeoutMs": 60000
+      },
+      {
+        "id": "service-bus-worker",
+        "script": "tools/check-service-bus-worker.mjs",
+        "timeoutMs": 60000
+      },
+      {
+        "id": "reconstruction-routing",
+        "script": "tools/check-reconstruction-routing.mjs",
+        "timeoutMs": 60000
+      },
+      {
+        "id": "photogrammetry-adapter",
+        "script": "tools/check-photogrammetry-adapter.mjs",
+        "timeoutMs": 60000
+      },
+      {
+        "id": "candidate-preparation",
+        "script": "tools/check-candidate-preparation.mjs",
+        "timeoutMs": 60000
+      },
+      {
+        "id": "course-review-http",
+        "script": "tools/check-course-review-http.mjs",
+        "timeoutMs": 60000
+      },
+      {
+        "id": "job-status-http",
+        "script": "tools/check-job-status-http.mjs",
+        "timeoutMs": 60000
+      },
+      {
+        "id": "job-failure-privacy",
+        "script": "tools/check-job-failure-privacy.mjs",
+        "timeoutMs": 60000
+      },
+      {
+        "id": "lesson-brief",
+        "script": "tools/check-lesson-brief.mjs",
+        "timeoutMs": 60000
+      },
+      {
+        "id": "lesson-direction",
+        "script": "tools/check-lesson-direction.mjs",
+        "timeoutMs": 60000
+      },
+      {
+        "id": "lesson-variants",
+        "script": "tools/check-lesson-variants.mjs",
+        "timeoutMs": 60000
+      },
+      {
+        "id": "lesson-final-review",
+        "script": "tools/check-lesson-final-review.mjs",
+        "timeoutMs": 60000
+      },
+      {
+        "id": "lesson-review-authors",
+        "script": "tools/check-lesson-review-authors.mjs",
+        "timeoutMs": 60000
+      },
+      {
+        "id": "migration-command",
+        "script": "tools/check-migration-command.mjs",
+        "timeoutMs": 120000
+      },
+      {
+        "id": "budgeted-job",
+        "script": "tools/check-budgeted-job.mjs",
+        "timeoutMs": 120000
+      },
+      {
+        "id": "admission-queue",
+        "script": "tools/check-admission-queue.mjs",
+        "timeoutMs": 120000
+      },
+      {
+        "id": "hosted-lesson-render",
+        "script": "tools/check-hosted-lesson-render.mjs",
+        "timeoutMs": 120000
+      },
+      {
+        "id": "lesson-media-input",
+        "script": "tools/check-lesson-media-input.mjs",
+        "timeoutMs": 120000
+      },
+      {
+        "id": "prepared-certification-acceptance",
+        "script": "tools/check-prepared-certification-acceptance.mjs",
+        "timeoutMs": 120000
+      },
+      {
+        "id": "technical-acceptance",
+        "script": "tools/check-technical-acceptance.mjs",
+        "timeoutMs": 120000
+      },
+      {
+        "id": "technical-acceptance-contracts",
+        "script": "tools/check-technical-acceptance-contracts.mjs",
+        "timeoutMs": 120000
+      },
+      {
+        "id": "single-image-runtime-configuration",
+        "script": "tools/check-single-image-runtime-configuration.mjs",
+        "timeoutMs": 120000
+      },
+      {
+        "id": "single-image-packaging",
+        "script": "tools/check-single-image-packaging.mjs",
+        "timeoutMs": 120000
+      },
+      {
+        "id": "provider-usage",
+        "script": "tools/check-provider-usage.mjs",
+        "timeoutMs": 120000
+      },
+      {
+        "id": "operational-signals",
+        "script": "tools/check-operational-signals.mjs",
+        "timeoutMs": 120000
+      }
+    ],
+    "auth": [
+      {
+        "id": "entra-authenticator",
+        "script": "tools/check-entra-authenticator.mjs",
+        "timeoutMs": 60000
+      },
+      {
+        "id": "browser-auth-config",
+        "script": "tools/check-browser-auth-config.mjs",
+        "timeoutMs": 60000
+      },
+      {
+        "id": "managed-auth",
+        "script": "tools/check-managed-auth.mjs",
+        "timeoutMs": 60000
+      },
+      {
+        "id": "production-asset-scanner",
+        "script": "tools/check-production-asset-scanner.mjs",
+        "timeoutMs": 120000
+      },
+      {
+        "id": "provider-egress",
+        "script": "tools/check-provider-egress.mjs",
+        "timeoutMs": 120000
+      },
+      {
+        "id": "provider-egress-transport",
+        "script": "tools/check-provider-egress-transport.mjs",
+        "timeoutMs": 120000
+      },
+      {
+        "id": "openmontage-egress",
+        "script": "tools/check-openmontage-egress.mjs",
+        "timeoutMs": 120000
+      },
+      {
+        "id": "verification-email-sender",
+        "script": "tools/check-verification-email-sender.mjs",
+        "timeoutMs": 120000
+      },
+      {
+        "id": "operational-http",
+        "script": "tools/check-operational-http.mjs",
+        "timeoutMs": 120000
+      },
+      {
+        "id": "certification-api-client",
+        "script": "tools/check-certification-api-client.mjs",
+        "timeoutMs": 120000
+      },
+      {
+        "id": "hosted-lesson-http-routing",
+        "script": "tools/check-hosted-lesson-http-routing.mjs",
+        "timeoutMs": 120000
+      },
+      {
+        "id": "azure-embeddings",
+        "script": "tools/check-azure-embeddings.mjs",
+        "timeoutMs": 120000
+      }
+    ],
+    "database": [
+      {
+        "id": "postgres-job-store",
+        "script": "tools/check-postgres-job-store.mjs",
+        "timeoutMs": 120000
+      },
+      {
+        "id": "asset-job-fencing",
+        "script": "tools/check-asset-job-fencing.mjs",
+        "timeoutMs": 120000
+      },
+      {
+        "id": "tenant-domain-rls",
+        "script": "tools/check-tenant-domain-rls.mjs",
+        "timeoutMs": 120000
+      },
+      {
+        "id": "organization-creation",
+        "script": "tools/check-organization-creation.mjs",
+        "timeoutMs": 120000
+      },
+      {
+        "id": "organization-lifecycle",
+        "script": "tools/check-organization-lifecycle.mjs",
+        "timeoutMs": 120000
+      },
+      {
+        "id": "organization-membership-store",
+        "script": "tools/check-organization-membership-store.mjs",
+        "timeoutMs": 120000
+      },
+      {
+        "id": "personal-account",
+        "script": "tools/check-personal-account.mjs",
+        "timeoutMs": 120000
+      },
+      {
+        "id": "account-security",
+        "script": "tools/check-account-security.mjs",
+        "timeoutMs": 120000
+      },
+      {
+        "id": "invitations",
+        "script": "tools/check-invitations.mjs",
+        "timeoutMs": 120000
+      },
+      {
+        "id": "member-administration",
+        "script": "tools/check-member-administration.mjs",
+        "timeoutMs": 120000
+      },
+      {
+        "id": "upload-session",
+        "script": "tools/check-upload-session.mjs",
+        "timeoutMs": 120000
+      },
+      {
+        "id": "source-grounded-draft",
+        "script": "tools/check-source-grounded-draft.mjs",
+        "timeoutMs": 120000
+      },
+      {
+        "id": "source-review",
+        "script": "tools/check-source-review.mjs",
+        "timeoutMs": 120000
+      },
+      {
+        "id": "course-review-release",
+        "script": "tools/check-course-review-release.mjs",
+        "timeoutMs": 120000
+      },
+      {
+        "id": "assessment-sessions",
+        "script": "tools/check-assessment-sessions.mjs",
+        "timeoutMs": 120000
+      },
+      {
+        "id": "enrollments",
+        "script": "tools/check-enrollments.mjs",
+        "timeoutMs": 120000
+      },
+      {
+        "id": "credentials",
+        "script": "tools/check-credentials.mjs",
+        "timeoutMs": 120000
+      },
+      {
+        "id": "requalification-credentials",
+        "script": "tools/check-requalification-credentials.mjs",
+        "timeoutMs": 120000
+      },
+      {
+        "id": "job-outbox",
+        "script": "tools/check-job-outbox.mjs",
+        "timeoutMs": 120000
+      },
+      {
+        "id": "lesson-publication-postgres",
+        "script": "tools/check-lesson-publication-postgres.mjs",
+        "timeoutMs": 120000
+      },
+      {
+        "id": "reconstruction-workflow",
+        "script": "tools/check-reconstruction-workflow.mjs",
+        "timeoutMs": 120000
+      },
+      {
+        "id": "email-verification-challenge",
+        "script": "tools/check-email-verification-challenge.mjs",
+        "timeoutMs": 120000
+      },
+      {
+        "id": "email-verification-service",
+        "script": "tools/check-email-verification-service.mjs",
+        "timeoutMs": 120000
+      },
+      {
+        "id": "email-verification-http",
+        "script": "tools/check-email-verification-http.mjs",
+        "timeoutMs": 120000
+      },
+      {
+        "id": "operations-store",
+        "script": "tools/check-operations-store.mjs",
+        "timeoutMs": 120000
+      },
+      {
+        "id": "lifecycle-integrations",
+        "script": "tools/check-lifecycle-integrations.mjs",
+        "timeoutMs": 120000
+      },
+      {
+        "id": "hosted-lesson-render-postgres",
+        "script": "tools/check-hosted-lesson-render-postgres.mjs",
+        "timeoutMs": 120000
+      },
+      {
+        "id": "independent-runtime-boundaries",
+        "script": "tools/check-independent-runtime-boundaries.mjs",
+        "timeoutMs": 120000
+      },
+      {
+        "id": "migration-postgres",
+        "script": "tools/check-migration-postgres.mjs",
+        "timeoutMs": 120000
+      },
+      {
+        "id": "independent-lifecycle-http",
+        "script": "tools/check-independent-lifecycle-http.mjs",
+        "timeoutMs": 120000
+      },
+      {
+        "id": "retention-resources",
+        "script": "tools/check-retention-resources.mjs",
+        "timeoutMs": 120000
+      },
+      {
+        "id": "independent-retention-fairness",
+        "script": "tools/check-independent-retention-fairness.mjs",
+        "timeoutMs": 120000
+      },
+      {
+        "id": "source-usage",
+        "script": "tools/check-source-usage.mjs",
+        "timeoutMs": 120000
+      },
+      {
+        "id": "model-session-runtime",
+        "script": "tools/check-model-session-runtime.mjs",
+        "timeoutMs": 120000
+      },
+      {
+        "id": "machine-integrations",
+        "script": "tools/check-machine-integrations.mjs",
+        "timeoutMs": 120000
+      },
+      {
+        "id": "maintenance-routing",
+        "script": "tools/check-maintenance-routing.mjs",
+        "timeoutMs": 120000
+      },
+      {
+        "id": "independent-maintenance-owner",
+        "script": "tools/check-independent-maintenance-owner.mjs",
+        "timeoutMs": 120000
+      },
+      {
+        "id": "queue-telemetry-postgres",
+        "script": "tools/check-queue-telemetry-postgres.mjs",
+        "timeoutMs": 120000
+      }
+    ],
+    "integration": [
+      {
+        "id": "openmontage-service",
+        "script": "tools/check-openmontage-service.mjs",
+        "timeoutMs": 60000
+      },
+      {
+        "id": "azurite-storage",
+        "script": "tools/check-azurite-storage.mjs",
+        "timeoutMs": 60000
+      },
+      {
+        "id": "private-upload",
+        "script": "tools/check-private-upload.mjs",
+        "timeoutMs": 60000
+      },
+      {
+        "id": "lesson-scene-revision",
+        "script": "tools/check-lesson-scene-revision.mjs",
+        "timeoutMs": 120000
+      },
+      {
+        "id": "independent-headless-pipeline",
+        "script": "tools/check-independent-headless-pipeline.mjs",
+        "timeoutMs": 300000
+      },
+      {
+        "id": "hosted-lesson-media",
+        "script": "tools/check-hosted-lesson-media.mjs",
+        "timeoutMs": 300000
+      },
+      {
+        "id": "hybrid-retrieval",
+        "script": "tools/check-hybrid-retrieval.mjs",
+        "timeoutMs": 120000
+      },
+      {
+        "id": "independent-metered-retention",
+        "script": "tools/check-independent-metered-retention.mjs",
+        "timeoutMs": 120000
+      }
+    ],
+    "infrastructure": [
+      {
+        "id": "infrastructure",
+        "script": "tools/check-infrastructure.mjs",
+        "timeoutMs": 600000
+      }
+    ]
+  }
+}

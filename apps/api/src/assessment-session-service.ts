@@ -21,8 +21,8 @@ async function binding(client: PoolClient, tenant: TenantContext, enrollmentId: 
   const result = await client.query(
     `SELECT r.manifest, r.release_hash FROM enrollments e JOIN release_manifests r
      ON r.organization_id=e.organization_id AND r.course_version_id=e.course_version_id
-     WHERE e.organization_id=$1 AND e.enrollment_id=$2 AND e.learner_id=$3 AND e.status='ACTIVE'
-       AND r.release_id=$4 AND r.status='PUBLISHED' FOR UPDATE OF e FOR SHARE OF r`,
+     WHERE e.organization_id=$1 AND e.enrollment_id=$2 AND e.learner_id=$3 AND e.status IN ('ACTIVE','COMPLETED')
+       AND r.release_id=$4 AND r.status='PUBLISHED' AND public.lifecycle_release_available(r.release_id) FOR UPDATE OF e FOR SHARE OF r`,
     [tenant.organizationId, enrollmentId, tenant.actorId, releaseId]
   );
   if (!result.rows[0]) throw new Error("ASSESSMENT_ACCESS_DENIED");

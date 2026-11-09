@@ -1,4 +1,7 @@
 **/node_modules
+.pnpm-store
+*.tgz
+*.zip
 **/.git
 **/.env
 **/.env.*

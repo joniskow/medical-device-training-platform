@@ -15,7 +15,7 @@ export async function resolvePublishedMediaAsset(client:PoolClient,tenant:Tenant
    const snapshots=(Array.isArray(manifest.sourceArtifacts)?manifest.sourceArtifacts:[]).filter((a:any)=>a?.assetVersionId===assetVersionId);
    if(snapshots.length!==1||!/^([a-f0-9]{64})$/.test(snapshots[0].sha256))throw Error('MEDIA_NOT_FOUND');
    const result=await client.query(`SELECT asset_version_id,source_type,content_type,blob_key,sha256 FROM asset_versions
-    WHERE organization_id=$1 AND asset_version_id=$2 AND state='APPROVED' FOR SHARE`,[tenant.organizationId,assetVersionId]);
+    WHERE organization_id=$1 AND asset_version_id=$2 AND state='APPROVED' AND NOT public.lifecycle_asset_suppressed(asset_version_id) FOR SHARE`,[tenant.organizationId,assetVersionId]);
    const asset=result.rows[0];
    if(!asset||asset.sha256!==snapshots[0].sha256||typeof asset.blob_key!=='string'||!asset.blob_key.startsWith(tenant.organizationId+'/')||asset.blob_key.length>1024||/[\u0000-\u001f]/.test(asset.blob_key))throw Error('MEDIA_NOT_FOUND');
    if(!validateMediaActivity(activity,[{assetVersionId,sourceType:asset.source_type,contentType:asset.content_type}]).valid)throw Error('MEDIA_NOT_FOUND');
@@ -28,7 +28,7 @@ export function createMediaAssetService(pool:Pool,storage:Pick<PrivateObjectStor
   if(!tenant.actorId||(after!==undefined&&!id(after)))throw Error('MEDIA_REQUEST_INVALID');
   return withTenantTransaction(pool,tenant,async client=>{
    const rows=(await client.query(`SELECT asset_version_id,file_name,source_type,content_type FROM asset_versions
-    WHERE organization_id=$1 AND state='APPROVED' AND ($2::text IS NULL OR asset_version_id>$2)
+    WHERE organization_id=$1 AND state='APPROVED' AND NOT public.lifecycle_asset_suppressed(asset_version_id) AND ($2::text IS NULL OR asset_version_id>$2)
     AND ((source_type='image' AND content_type IN ('image/png','image/jpeg','image/webp')) OR (source_type='video' AND content_type IN ('video/mp4','video/webm')))
     ORDER BY asset_version_id LIMIT 51`,[tenant.organizationId,after??null])).rows;
    const items=rows.slice(0,50).map(r=>({assetVersionId:r.asset_version_id,fileName:r.file_name,type:r.source_type as 'image'|'video',contentType:r.content_type}));
@@ -40,7 +40,7 @@ export function createMediaAssetService(pool:Pool,storage:Pick<PrivateObjectStor
   return withTenantTransaction(pool,tenant,async client=>{
    const rows=await client.query(`SELECT r.release_id,r.manifest FROM enrollments e
     JOIN release_manifests r ON r.organization_id=e.organization_id AND r.course_version_id=e.course_version_id
-    WHERE e.organization_id=$1 AND e.enrollment_id=$2 AND e.learner_id=$3 AND e.status='ACTIVE' AND r.status='PUBLISHED'
+    WHERE e.organization_id=$1 AND e.enrollment_id=$2 AND e.learner_id=$3 AND e.status IN ('ACTIVE','COMPLETED') AND r.status='PUBLISHED' AND public.lifecycle_release_available(r.release_id)
     FOR SHARE OF e,r`,[tenant.organizationId,enrollmentId,tenant.actorId]);
    if(rows.rows.length!==1)throw Error('MEDIA_NOT_FOUND');
    const release=rows.rows[0],content=release.manifest?.content;

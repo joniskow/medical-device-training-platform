@@ -1,6 +1,6 @@
 {
   "schemaVersion": "observability-contract.v1",
-  "status": "contract-pending-telemetry-wiring",
+  "status": "implementation-present-hosted-acceptance-pending",
   "correlation": {
     "requestHeader": "x-correlation-id",
     "responseHeader": "x-correlation-id",
@@ -11,7 +11,9 @@
       "JobEnvelope.tenant.correlationId",
       "ServiceBus.correlationId",
       "ServiceBus.applicationProperties.correlationId"
-    ]
+    ],
+    "logField": "correlationHash",
+    "logProtection": "HMAC-SHA256 using matching API/worker operational secret; headers and internal context retain the original correlation value"
   },
   "safeDimensions": [
     "environment",
@@ -22,8 +24,13 @@
     "jobState",
     "failureClass",
     "errorCode",
-    "organizationHash",
-    "correlationId"
+    "correlationHash",
+    "routeGroup",
+    "operation",
+    "provider",
+    "phase",
+    "domain",
+    "provenance"
   ],
   "forbiddenDimensions": [
     "sourceText",
@@ -35,10 +42,46 @@
     "phi"
   ],
   "dashboards": [
-    { "id": "api-health", "panels": ["request-rate", "5xx-rate", "p95-latency", "auth-denials", "correlation-drilldown"] },
-    { "id": "queue-recovery", "panels": ["active-age", "retry-rate", "dead-letter-count", "terminal-failures", "oldest-correlation-id"] },
-    { "id": "provider-cost", "panels": ["provider-latency", "provider-errors", "tokens", "estimated-cost", "quota-denials"] },
-    { "id": "content-delivery", "panels": ["asset-success-by-type", "reconstruction-failures", "publication-failures", "webhook-email-failures", "credential-anomalies"] }
+    {
+      "id": "api-health",
+      "panels": [
+        "request-rate",
+        "5xx-rate",
+        "p95-latency",
+        "auth-denials",
+        "correlation-drilldown"
+      ]
+    },
+    {
+      "id": "queue-recovery",
+      "panels": [
+        "active-age",
+        "retry-rate",
+        "dead-letter-count",
+        "terminal-failures",
+        "oldest-correlation-id"
+      ]
+    },
+    {
+      "id": "provider-cost",
+      "panels": [
+        "provider-latency",
+        "provider-errors",
+        "tokens",
+        "estimated-cost",
+        "quota-denials"
+      ]
+    },
+    {
+      "id": "content-delivery",
+      "panels": [
+        "asset-success-by-type",
+        "reconstruction-failures",
+        "publication-failures",
+        "webhook-email-failures",
+        "credential-anomalies"
+      ]
+    }
   ],
   "alerts": [
     "api-availability",
@@ -51,5 +94,84 @@
     "credential-issuance-failure",
     "login-or-inquiry-abuse",
     "budget-threshold"
-  ]
+  ],
+  "implementation": {
+    "workbooks": "infra/azure/operational-panels.json",
+    "infrastructure": "infra/azure/monitoring.bicep",
+    "signals": [
+      "api_request",
+      "api_admission_denied",
+      "readiness_failed",
+      "api_probe",
+      "job_finished",
+      "job_failed",
+      "job_admission_denied",
+      "queue_snapshot",
+      "broker_age_snapshot",
+      "db_pool_snapshot",
+      "operational_snapshot_failed",
+      "source_usage",
+      "ai_run_metrics",
+      "cost_recorded",
+      "domain_processing_result",
+      "credential_integrity_violation"
+    ],
+    "nativeMetrics": [
+      "Microsoft.DBforPostgreSQL/flexibleServers:connections_failed",
+      "Microsoft.DBforPostgreSQL/flexibleServers:active_connections",
+      "Microsoft.DBforPostgreSQL/flexibleServers:storage_percent",
+      "Microsoft.ServiceBus/namespaces:DeadletteredMessages",
+      "Microsoft.ServiceBus/namespaces:ActiveMessages"
+    ],
+    "semantics": [
+      "Queue age is the oldest eligible active message observed in a bounded 32-message peek, not a guaranteed global oldest or proof of empty queue.",
+      "Outbox quantities are explicitly bounded routing samples; truncation is exposed.",
+      "Credential uniqueness violations and qualification processing failures are separate from credential/publication HTTP symptoms.",
+      "Estimated and provider-billed money are separate committed receipt series; unknown cost is not fabricated.",
+      "Source units omit content, raw identities, source paths, SAS URLs and provider exception messages.",
+      "Committed domain/source transactions survive a failing best-effort telemetry sink."
+    ],
+    "hostedAcceptance": "PENDING: provision isolated workspace and diagnostic metric export, deploy matching HMAC keys, validate KQL/native metrics, deliberately trigger each alert and record named responder receipt."
+  },
+  "alertResources": {
+    "api-availability": [
+      "api-availability",
+      "api-probe-heartbeat",
+      "readiness-failed"
+    ],
+    "api-error-rate": [
+      "api-errors"
+    ],
+    "database-exhaustion": [
+      "database-pool-wait",
+      "database-connection-failures",
+      "database-connection-capacity",
+      "database-storage-pressure"
+    ],
+    "queue-age": [
+      "queue-age",
+      "sampler-heartbeat",
+      "telemetry-sampler-failure"
+    ],
+    "dead-letter-growth": [
+      "deadletters"
+    ],
+    "provider-failure-or-quota": [
+      "provider-failure-or-quota"
+    ],
+    "authorization-denial-spike": [
+      "authorization-denial-spike"
+    ],
+    "credential-issuance-failure": [
+      "credential-issuance-failure",
+      "credential-integrity"
+    ],
+    "login-or-inquiry-abuse": [
+      "abuse-spike"
+    ],
+    "budget-threshold": [
+      "budget-threshold",
+      "pilot"
+    ]
+  }
 }

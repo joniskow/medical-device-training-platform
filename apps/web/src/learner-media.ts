@@ -1,11 +1,12 @@
 import {authenticatedFetch,getOrganizationHeaders} from './auth-session.js';
 type MediaResponse={url:string;contentType:string;altText?:string;transcript?:string};
 /** Private URLs stay in this disposable view; loading media never records completion. */
-export function renderLearnerMedia(host:HTMLElement,type:'image'|'video',acknowledged:boolean,options:{active:()=>boolean;load:()=>Promise<MediaResponse>;acknowledge:()=>Promise<void>}){
+export function renderLearnerMedia(host:HTMLElement,type:'image'|'video',acknowledged:boolean,options:{active:()=>boolean;load:()=>Promise<MediaResponse>;acknowledge:()=>Promise<void>;startSeconds?:number;supplemental?:boolean}){
  const status=document.createElement('p');status.setAttribute('role','status');
  const content=document.createElement('div');
  const refresh=document.createElement('button');refresh.type='button';refresh.textContent='Load media';
  const review=document.createElement('button');review.type='button';review.textContent='Mark as reviewed';review.disabled=true;review.hidden=acknowledged;
+ if(options.supplemental)review.hidden=true;
  host.append(status,refresh,content,review);
  if(acknowledged){const p=document.createElement('p');p.textContent='You marked this media activity as reviewed.';host.append(p);}
  let disposed=false,request=0,objectUrl:string|undefined,abort:AbortController|undefined;
@@ -22,12 +23,14 @@ export function renderLearnerMedia(host:HTMLElement,type:'image'|'video',acknowl
    if(!formats.includes(result.contentType)||typeof equivalent!=='string'||!equivalent.trim())throw Error('The media description is unavailable.');
    const media=document.createElement(type==='image'?'img':'video');media.style.maxWidth='100%';
    if(media instanceof HTMLImageElement){media.alt=equivalent;media.loading='lazy';media.referrerPolicy='no-referrer';}
-   else{media.controls=true;media.preload='metadata';media.playsInline=true;}
+   else{media.controls=true;media.preload='metadata';media.playsInline=true;
+     if(typeof options.startSeconds==='number'&&Number.isFinite(options.startSeconds)&&options.startSeconds>=0)media.addEventListener('loadedmetadata',()=>{if(active()&&options.startSeconds!<media.duration)media.currentTime=options.startSeconds!;},{once:true});
+   }
    media.onerror=()=>{if(active()&&current===request)status.textContent='Media could not play or load. Refresh the media link, or review the description below.';};
    media.src=mediaUrl;content.append(media);
    const label=document.createElement('h5');label.textContent=type==='image'?'Image description':'Video transcript';
    const text=document.createElement('p');text.style.whiteSpace='pre-wrap';text.textContent=equivalent;content.append(label,text);
-   refresh.textContent='Refresh media link';status.textContent='Review the media or its description, then mark this activity as reviewed.';review.disabled=false;
+   refresh.textContent='Refresh media link';status.textContent=options.supplemental?'Review the explanation or transcript, then return to the original activity. Playback does not change your result.':'Review the media or its description, then mark this activity as reviewed.';review.disabled=false;
   }catch(error){if(active()&&current===request){clear();status.textContent=error instanceof Error?error.message:'Media is unavailable. Retry loading it.';}}
   finally{if(active()&&current===request)refresh.disabled=false;}
  };

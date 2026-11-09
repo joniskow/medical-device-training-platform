@@ -26,18 +26,26 @@ function summary(row: Row) {
 }
 // Explicit projection: release manifests contain private assessment keys and simulation rules.
 function learnerContent(content: Row) {
+  const lessons=Array.isArray(content.videoLessons)?content.videoLessons:[];
+  const activities=(Array.isArray(content.modules)?content.modules:[]).flatMap((m:Row)=>Array.isArray(m.activities)?m.activities:[]);
+  const remediation=(activity:Row)=>{
+    const r=activity.remediation,lesson=r&&lessons.find((l:Row)=>l.lessonId===r.lessonId&&l.variantIdentity?.kind==='remediation');
+    const scene=lesson?.scenes?.find((s:Row)=>s.sceneId===r.sceneId),video=lesson&&activities.find((a:Row)=>a.type==='video'&&a.videoLessonId===lesson.lessonId&&a.media?.assetVersionId===lesson.finalReview?.assetVersionId);
+    return scene&&video?{remediation:{activityId:video.activityId,sceneId:scene.sceneId,objective:r.objective,startSeconds:scene.startSeconds,endSeconds:scene.endSeconds}}:{};
+  };
   return { title: text(content.title), hasStory: content.story!==undefined, modules: (Array.isArray(content.modules) ? content.modules : []).map((module: Row) => ({
     moduleId: text(module.moduleId), title: text(module.title),
     activities: (Array.isArray(module.activities) ? module.activities : []).map((activity: Row) => ({
       activityId: text(activity.activityId), type: text(activity.type), title: text(activity.title),
       instructions: text(activity.instructions),
+      ...remediation(activity),
       ...(["text", "rich_text"].includes(activity.type) ? { text: text(activity.text) } : {})
     }))
   })) };
 }
 const joined = `SELECT e.enrollment_id,e.course_version_id,e.status,r.release_id,r.release_hash,r.manifest
   FROM enrollments e JOIN release_manifests r ON r.organization_id=e.organization_id AND r.course_version_id=e.course_version_id
-  WHERE e.organization_id=$1 AND e.learner_id=$2 AND e.status='ACTIVE' AND r.status='PUBLISHED'`;
+  WHERE e.organization_id=$1 AND e.learner_id=$2 AND e.status IN ('ACTIVE','COMPLETED') AND r.status='PUBLISHED' AND public.lifecycle_release_available(r.release_id)`;
 
 export function createPostgresEnrollmentService(pool: Pool): EnrollmentService {
   return {
@@ -77,7 +85,7 @@ export function createPostgresEnrollmentService(pool: Pool): EnrollmentService {
       return withTenantTransaction(pool,tenant,async client => {
         const result = kind === "members"
           ? await client.query(`SELECT subject FROM organization_memberships WHERE organization_id=$1 AND status='ACTIVE' AND ($2::text IS NULL OR subject>$2) ORDER BY subject LIMIT 51`,[tenant.organizationId,after ?? null])
-          : await client.query(`SELECT release_id,course_version_id,manifest->'content'->>'title' AS title FROM release_manifests WHERE organization_id=$1 AND status='PUBLISHED' AND ($2::text IS NULL OR release_id>$2) ORDER BY release_id LIMIT 51`,[tenant.organizationId,after ?? null]);
+          : await client.query(`SELECT release_id,course_version_id,manifest->'content'->>'title' AS title FROM release_manifests WHERE organization_id=$1 AND status='PUBLISHED' AND public.lifecycle_release_available(release_id) AND ($2::text IS NULL OR release_id>$2) ORDER BY release_id LIMIT 51`,[tenant.organizationId,after ?? null]);
         const rows = result.rows.slice(0,50);
         const items = rows.map(row => kind === "members" ? {learnerId:row.subject} : {releaseId:row.release_id,courseVersionId:row.course_version_id,title:text(row.title)});
         return { items, nextCursor: result.rows.length > 50 ? kind === "members" ? rows[49].subject : rows[49].release_id : null };

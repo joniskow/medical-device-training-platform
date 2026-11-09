@@ -53,6 +53,7 @@ try{
  await Promise.all([assessments.submit(tenant,attempt.sessionId,answers),assessments.submit(tenant,attempt.sessionId,answers)]);
  assert.equal((await service.list(tenant)).items.length,1,'Completion must issue without a separate request');
  const [first,second]=await Promise.all([service.issue(tenant,enrollmentId),service.issue(tenant,enrollmentId)]);assert.deepEqual(first,second);
+ assert.equal((await pool.query('SELECT status FROM enrollments WHERE enrollment_id=$1',[enrollmentId])).rows[0].status,'COMPLETED');assert.equal((await pool.query("SELECT count(*)::int n FROM outbox_events WHERE organization_id=$1 AND event_type='enrollment.completed' AND payload->>'enrollmentId'=$2",[org,enrollmentId])).rows[0].n,1);assert.ok(await enrollments.get(tenant,enrollmentId));
  assert.equal(first.status,'ACTIVE');assert.equal(first.title,'Safety training');assert.equal(new Date(first.expiresAt)-new Date(first.issuedAt),365*86400000);
  assert.ok(!JSON.stringify(first).includes('Private rationale'));
  for(const table of ['credentials','credential_events'])assert.equal((await pool.query(`SELECT count(*)::int n FROM ${table} WHERE organization_id=$1`,[org])).rows[0].n,1);

@@ -1,0 +1,161 @@
+name: Technical release gates
+
+on:
+  pull_request:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+    inputs:
+      single_image:
+        description: 'Build and scan the separately packaged single-image worker (large model downloads)'
+        type: boolean
+        default: false
+      scanner_base:
+        description: 'Reviewed official clamav/clamav:version@sha256:digest; empty skips scanner image'
+        type: string
+        default: ''
+
+permissions:
+  contents: read
+
+concurrency:
+  group: technical-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  headless:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 24.19.0
+      - name: Install pinned tools
+        run: |
+          npm install --global pnpm@11.25.0
+          sudo apt-get update
+          sudo apt-get install --yes ffmpeg
+          pnpm install --frozen-lockfile
+      - name: Type and source lint gates
+        run: |
+          pnpm typecheck
+          node tools/lint-source.mjs
+      - name: Compile infrastructure with verified pinned compiler
+        run: |
+          mkdir -p output/technical-tools
+          release=$(curl --fail --silent --show-error https://api.github.com/repos/Azure/bicep/releases/tags/v0.49.2)
+          url=$(printf '%s' "$release" | jq -r '.assets[] | select(.name=="bicep-linux-x64") | .browser_download_url')
+          digest=$(printf '%s' "$release" | jq -r '.assets[] | select(.name=="bicep-linux-x64") | .digest')
+          printf '%s' "$digest" | grep -Eq '^sha256:[a-f0-9]{64}$'
+          curl --fail --location --silent --show-error "$url" --output output/technical-tools/bicep
+          printf '%s  %s\n' "${digest#sha256:}" output/technical-tools/bicep | sha256sum --check
+          chmod +x output/technical-tools/bicep
+          BICEP_CLI="$PWD/output/technical-tools/bicep" node tools/technical-validation.mjs --profile infrastructure
+      - name: Fresh build and controlled headless gates
+        run: |
+          pnpm build
+          node tools/technical-validation.mjs --profile pure
+          node tools/technical-validation.mjs --profile auth
+      - name: Provision disposable restricted-role infrastructure
+        run: node tools/local-test-environment.mjs up
+      - name: Database and media/storage integration gates
+        run: |
+          node tools/technical-validation.mjs --profile database
+          node tools/technical-validation.mjs --profile integration
+      - name: Dependency vulnerability gate
+        run: |
+          mkdir -p output/security
+          pnpm audit --prod --audit-level high --json > output/security/dependency-audit.json
+      - name: Redacted repository secret scan
+        run: |
+          mkdir -p output/security
+          docker run --rm -v "$PWD:/repo" -w /repo -e GIT_CONFIG_COUNT=1 -e GIT_CONFIG_KEY_0=safe.directory -e GIT_CONFIG_VALUE_0=/repo zricethezav/gitleaks:v8.24.3 git . --redact --report-format json --report-path /repo/output/security/secrets.json
+      - name: Stop disposable services, preserving evidence
+        if: always()
+        run: node tools/local-test-environment.mjs down
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: headless-evidence-${{ github.sha }}
+          path: |
+            output/technical-validation/
+            output/security/
+            output/infrastructure/
+          if-no-files-found: error
+          retention-days: 30
+
+  images:
+    needs: headless
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Build source revision images
+        run: |
+          mkdir -p output/images
+          docker build --file Dockerfile.api --tag "medical-device-api:$GITHUB_SHA" .
+          docker build --file Dockerfile.worker --tag "medical-device-worker:$GITHUB_SHA" .
+      - name: Inspect packaged entrypoints, retain image identities and SBOMs
+        run: |
+          for service in api worker; do
+            image="medical-device-$service:$GITHUB_SHA"
+            docker run --rm --entrypoint node "$image" --check dist/entrypoint.js
+            docker image inspect "$image" --format '{{json .}}' > "output/images/$service-image.json"
+            docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v "$PWD/output/images:/reports" aquasec/trivy:0.60.0 image --format cyclonedx --output "/reports/$service.cdx.json" "$image"
+            docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v "$PWD/output/images:/reports" aquasec/trivy:0.60.0 image --severity HIGH,CRITICAL --exit-code 1 --format json --output "/reports/$service-vulnerabilities.json" "$image"
+            docker save "$image" | gzip > "output/images/$service-image.tar.gz"
+            sha256sum "output/images/$service-image.tar.gz" > "output/images/$service-image.tar.gz.sha256"
+          done
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: tested-images-${{ github.sha }}
+          path: output/images/
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0
+
+  optional-images:
+    if: github.event_name == 'workflow_dispatch' && (inputs.single_image || inputs.scanner_base != '')
+    needs: headless
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Build and verify single-image runtime
+        if: inputs.single_image
+        run: |
+          docker build --file Dockerfile.worker --target worker-single-image --tag "medical-device-single-image:$GITHUB_SHA" .
+          docker run --rm --entrypoint /opt/single-image/runtime/bin/python "medical-device-single-image:$GITHUB_SHA" /opt/reconstruction-scripts/single_image_preflight.py --assets /opt/single-image/assets --code /opt/TripoSR --manifest /opt/single-image/runtime-manifest.json
+      - name: Build reviewed scanner
+        if: inputs.scanner_base != ''
+        env:
+          CLAMAV_BASE: ${{ inputs.scanner_base }}
+        run: |
+          printf '%s' "$CLAMAV_BASE" | grep -Eq '^clamav/clamav:[A-Za-z0-9_.-]+@sha256:[a-f0-9]{64}$'
+          docker build --file Dockerfile.scanner --build-arg "CLAMAV_IMAGE=$CLAMAV_BASE" --tag "medical-device-scanner:$GITHUB_SHA" .
+      - name: Retain tested optional image identities and scan results
+        run: |
+          mkdir -p output/optional-images
+          for service in single-image scanner; do
+            image="medical-device-$service:$GITHUB_SHA"
+            if ! docker image inspect "$image" >/dev/null 2>&1; then continue; fi
+            docker image inspect "$image" --format '{{json .}}' > "output/optional-images/$service-image.json"
+            docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v "$PWD/output/optional-images:/reports" aquasec/trivy:0.60.0 image --format cyclonedx --output "/reports/$service.cdx.json" "$image"
+            docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v "$PWD/output/optional-images:/reports" aquasec/trivy:0.60.0 image --severity HIGH,CRITICAL --exit-code 1 --format json --output "/reports/$service-vulnerabilities.json" "$image"
+          done
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: optional-image-evidence-${{ github.sha }}
+          path: output/optional-images/
+          if-no-files-found: error
+          retention-days: 30

@@ -29,6 +29,11 @@ try {
   assert.equal((await store.get(tenant, id)).courseVersion.content.title, 'Edited');
   await store.saveGeneratedDraft({ tenant, courseVersionId: id, revision: 2, aiRunId: 'new-ai', content });
   assert.equal((await store.get(tenant, id)).courseVersion.revision, 3);
+  const malformed={...content,videoLessons:[{lessonId:'lesson:incomplete',scenes:null,direction:{beats:[null]},finalReview:{dimensions:null}}]};
+  await store.saveDraft({tenant,courseVersionId:id,revision:3,content:malformed});
+  const incomplete=await store.get(tenant,id);assert.equal(incomplete.courseVersion.revision,4);assert.equal(incomplete.courseVersion.content.videoLessons[0].scenes,null);
+  await store.saveDraft({tenant,courseVersionId:id,revision:4,content});
+  const recovered=await store.get(tenant,id);assert.equal(recovered.courseVersion.revision,5);assert.equal(recovered.courseVersion.content.videoLessons,undefined,'Incomplete production data should remain recoverable as an editable draft');
   await pool.query(`UPDATE course_versions SET status='PUBLISHED' WHERE course_version_id=$1`, [id]);
   await assert.rejects(store.saveDraft({ ...input, revision: 3 }), /COURSE_VERSION_IMMUTABLE/);
   assert.equal(await store.saveGeneratedDraft({ tenant, courseVersionId: id, revision: 3, aiRunId: 'later-ai', content }), false);

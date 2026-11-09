@@ -58,9 +58,12 @@ def main():
         raise ValueError("ENGINE_WEIGHTS_HASH_MISMATCH")
     # Upstream tokenizer requests main. Populate its offline cache and require the
     # exact reviewed revision instead of accepting a changed configuration.
-    config = Path(hf_hub_download("facebook/dino-vitb16", "config.json", revision="main", cache_dir=root / "hub"))
+    config = Path(hf_hub_download("facebook/dino-vitb16", "config.json", revision=DINO_REVISION, cache_dir=root / "hub"))
     if config.parent.name != DINO_REVISION:
         raise ValueError("DINO_CONFIG_REVISION_CHANGED")
+    refs = root / "hub/models--facebook--dino-vitb16/refs"
+    refs.mkdir(parents=True, exist_ok=True)
+    (refs / "main").write_text(DINO_REVISION + "\n")
     files.append(config)
     os.environ["U2NET_HOME"] = str(root / "u2net")
     import rembg

@@ -1,0 +1,154 @@
+{
+  "schemaVersion": "operational-panels.v1",
+  "workbooks": [
+    {
+      "id": "api-health",
+      "title": "API health",
+      "panels": [
+        {
+          "id": "request-rate",
+          "title": "Request count per minute",
+          "query": "ContainerAppConsoleLogs_CL | extend signal=parse_json(Log_s) | where signal.event == \"api_request\" | summarize requests=count() by bin(TimeGenerated,1m), tostring(signal.routeGroup)"
+        },
+        {
+          "id": "5xx-rate",
+          "title": "HTTP 5xx percentage",
+          "query": "ContainerAppConsoleLogs_CL | extend signal=parse_json(Log_s) | where signal.event == \"api_request\" | summarize requests=count(), errors=countif(toint(signal.status)>=500) by bin(TimeGenerated,5m) | extend errorPercent=100.0*errors/requests"
+        },
+        {
+          "id": "p95-latency",
+          "title": "HTTP p95 latency, milliseconds",
+          "query": "ContainerAppConsoleLogs_CL | extend signal=parse_json(Log_s) | where signal.event == \"api_request\" | summarize p95Ms=percentile(todouble(signal.durationMs),95) by bin(TimeGenerated,5m), tostring(signal.routeGroup)"
+        },
+        {
+          "id": "auth-denials",
+          "title": "HTTP authorization denial symptoms",
+          "query": "ContainerAppConsoleLogs_CL | extend signal=parse_json(Log_s) | where signal.event == \"api_request\" and toint(signal.status) in (401,403) | summarize denials=count() by bin(TimeGenerated,5m), tostring(signal.routeGroup)"
+        },
+        {
+          "id": "correlation-drilldown",
+          "title": "HMAC correlation drilldown",
+          "query": "ContainerAppConsoleLogs_CL | extend signal=parse_json(Log_s) | where isnotempty(signal.correlationHash) | project TimeGenerated, event=tostring(signal.event), correlationHash=tostring(signal.correlationHash), routeGroup=tostring(signal.routeGroup), status=toint(signal.status) | order by TimeGenerated desc | take 100"
+        },
+        {
+          "id": "database-pressure",
+          "title": "Native DB capacity and connection symptoms",
+          "query": "AzureMetrics | where ResourceId =~ \"__POSTGRES_ID__\" and MetricName in (\"active_connections\",\"connections_failed\",\"cpu_percent\",\"storage_percent\") | summarize peak=max(Maximum), mean=avg(Average), total=sum(Total) by bin(TimeGenerated,5m), MetricName"
+        }
+      ]
+    },
+    {
+      "id": "queue-recovery",
+      "title": "Queue recovery",
+      "panels": [
+        {
+          "id": "active-age",
+          "title": "Oldest observed eligible active message; bounded peek, unknown when none observed",
+          "query": "ContainerAppConsoleLogs_CL | extend signal=parse_json(Log_s) | where signal.event == \"broker_age_snapshot\" | project TimeGenerated, ageSeconds=tolong(signal.oldestObservedActiveAgeSeconds), hasEligibleActiveMessage=tobool(signal.hasEligibleActiveMessage), observation=tostring(signal.observation), sampledMessages=tolong(signal.sampledMessages), truncated=tobool(signal.truncated)"
+        },
+        {
+          "id": "outbox-age",
+          "title": "Bounded outbox pending-work sample",
+          "query": "ContainerAppConsoleLogs_CL | extend signal=parse_json(Log_s) | where signal.event == \"queue_snapshot\" | project TimeGenerated, pendingSampled=tolong(signal.outboxPendingSampled), failedSampled=tolong(signal.outboxFailedSampled), ageSeconds=tolong(signal.outboxOldestAgeSeconds), truncated=tobool(signal.truncated)"
+        },
+        {
+          "id": "retry-rate",
+          "title": "Processing retry outcomes per five minutes",
+          "query": "ContainerAppConsoleLogs_CL | extend signal=parse_json(Log_s) | where signal.event == \"job_failed\" and signal.jobState == \"RETRY_SCHEDULED\" | summarize retries=count() by bin(TimeGenerated,5m), tostring(signal.jobType)"
+        },
+        {
+          "id": "dead-letter-count",
+          "title": "Native broker active and dead-letter counts",
+          "query": "AzureMetrics | where ResourceId =~ \"__SERVICE_BUS_ID__\" and MetricName in (\"DeadletteredMessages\",\"ActiveMessages\") | summarize peak=max(Maximum) by bin(TimeGenerated,5m), MetricName"
+        },
+        {
+          "id": "terminal-failures",
+          "title": "Terminal processing outcomes",
+          "query": "ContainerAppConsoleLogs_CL | extend signal=parse_json(Log_s) | where signal.event == \"job_failed\" and signal.jobState in (\"FAILED\",\"DEAD_LETTERED\") | summarize failures=count() by bin(TimeGenerated,5m), tostring(signal.jobType)"
+        },
+        {
+          "id": "oldest-correlation-id",
+          "title": "Oldest broker correlation HMAC; no message identifiers",
+          "query": "ContainerAppConsoleLogs_CL | extend signal=parse_json(Log_s) | where signal.event == \"broker_age_snapshot\" and isnotempty(signal.oldestCorrelationHash) | project TimeGenerated, oldestCorrelationHash=tostring(signal.oldestCorrelationHash), ageSeconds=tolong(signal.oldestObservedActiveAgeSeconds) | order by TimeGenerated desc | take 100"
+        },
+        {
+          "id": "sampler-health",
+          "title": "Sampler failures and heartbeat",
+          "query": "ContainerAppConsoleLogs_CL | extend signal=parse_json(Log_s) | where signal.event in (\"operational_snapshot_failed\",\"queue_snapshot\",\"broker_age_snapshot\") | summarize samples=count() by bin(TimeGenerated,5m), tostring(signal.event)"
+        }
+      ]
+    },
+    {
+      "id": "provider-cost",
+      "title": "Provider and cost",
+      "panels": [
+        {
+          "id": "provider-latency",
+          "title": "Provider p95 completed-call latency, milliseconds",
+          "query": "ContainerAppConsoleLogs_CL | extend signal=parse_json(Log_s) | where (signal.event == \"source_usage\" and tostring(signal.operation) startswith \"provider.\") or signal.event == \"ai_run_metrics\" | extend durationMs=coalesce(todouble(signal.duration_ms),todouble(signal.durationMs)) | summarize p95Ms=percentile(durationMs,95) by bin(TimeGenerated,5m), tostring(signal.provider), tostring(signal.operation)"
+        },
+        {
+          "id": "provider-errors",
+          "title": "Provider failed source receipts and rejected AI outputs",
+          "query": "ContainerAppConsoleLogs_CL | extend signal=parse_json(Log_s) | where (signal.event == \"source_usage\" and tostring(signal.operation) startswith \"provider.\" and signal.phase == \"FAILED\") or (signal.event == \"ai_run_metrics\" and signal.status in (\"REJECTED\",\"FAILED\")) | summarize failures=count() by bin(TimeGenerated,5m), tostring(signal.provider), tostring(signal.operation)"
+        },
+        {
+          "id": "tokens",
+          "title": "Recorded token source units",
+          "query": "ContainerAppConsoleLogs_CL | extend signal=parse_json(Log_s) | where signal.event in (\"ai_run_metrics\",\"source_usage\") | extend input=coalesce(tolong(signal.inputTokens),tolong(signal.input_tokens)), output=tolong(signal.outputTokens) | summarize inputTokens=sum(input), outputTokens=sum(output) by bin(TimeGenerated,5m), tostring(signal.provider)"
+        },
+        {
+          "id": "estimated-cost",
+          "title": "Committed monetary receipts by provenance; do not add billed to estimates",
+          "query": "ContainerAppConsoleLogs_CL | extend signal=parse_json(Log_s) | where signal.event == \"cost_recorded\" | summarize usd=sum(todouble(signal.microUsd))/1000000.0 by bin(TimeGenerated,1h), tostring(signal.provenance)"
+        },
+        {
+          "id": "quota-denials",
+          "title": "Authoritative admission denials",
+          "query": "ContainerAppConsoleLogs_CL | extend signal=parse_json(Log_s) | where signal.event == \"api_admission_denied\" or signal.event == \"job_admission_denied\" | summarize denials=count() by bin(TimeGenerated,5m), tostring(signal.code)"
+        },
+        {
+          "id": "source-bytes",
+          "title": "Storage adapter bytes; excludes direct SAS client egress",
+          "query": "ContainerAppConsoleLogs_CL | extend signal=parse_json(Log_s) | where signal.event == \"source_usage\" and signal.operation in (\"storage.read\",\"storage.write\") | summarize bytes=sum(tolong(signal.bytes)) by bin(TimeGenerated,5m), tostring(signal.operation), tostring(signal.phase)"
+        }
+      ]
+    },
+    {
+      "id": "content-delivery",
+      "title": "Content and credentials",
+      "panels": [
+        {
+          "id": "asset-success-by-type",
+          "title": "Asset processing outcomes by bounded source type",
+          "query": "ContainerAppConsoleLogs_CL | extend signal=parse_json(Log_s) | where signal.event in (\"job_finished\",\"job_failed\") and signal.jobType==\"asset.process\" | summarize successes=countif(signal.event==\"job_finished\"), failures=countif(signal.event==\"job_failed\") by bin(TimeGenerated,5m), tostring(signal.sourceType)"
+        },
+        {
+          "id": "reconstruction-failures",
+          "title": "Reconstruction provider failed source receipts",
+          "query": "ContainerAppConsoleLogs_CL | extend signal=parse_json(Log_s) | where signal.event==\"source_usage\" and signal.operation==\"provider.reconstruction\" and signal.phase==\"FAILED\" | summarize failures=count() by bin(TimeGenerated,5m)"
+        },
+        {
+          "id": "publication-failures",
+          "title": "Publication HTTP 5xx symptoms, not a publication integrity audit",
+          "query": "ContainerAppConsoleLogs_CL | extend signal=parse_json(Log_s) | where signal.event==\"api_request\" and signal.routeGroup==\"publication\" and toint(signal.status)>=500 | summarize failures=count() by bin(TimeGenerated,5m)"
+        },
+        {
+          "id": "webhook-email-failures",
+          "title": "External delivery processing failures",
+          "query": "ContainerAppConsoleLogs_CL | extend signal=parse_json(Log_s) | where signal.event==\"domain_processing_result\" and signal.domain in (\"webhook\",\"email\") and signal.failed==true | summarize failures=count() by bin(TimeGenerated,5m), tostring(signal.domain)"
+        },
+        {
+          "id": "credential-anomalies",
+          "title": "Actual uniqueness violations and issuance-processing failures",
+          "query": "ContainerAppConsoleLogs_CL | extend signal=parse_json(Log_s) | where signal.event==\"credential_integrity_violation\" or (signal.event==\"domain_processing_result\" and signal.domain==\"credential\" and signal.failed==true) | summarize failures=count() by bin(TimeGenerated,5m), tostring(signal.event), tostring(signal.code)"
+        },
+        {
+          "id": "credential-http-symptoms",
+          "title": "Credential HTTP failures, separately from domain anomalies",
+          "query": "ContainerAppConsoleLogs_CL | extend signal=parse_json(Log_s) | where signal.event==\"api_request\" and signal.routeGroup==\"credentials\" and toint(signal.status)>=500 | summarize failures=count() by bin(TimeGenerated,5m)"
+        }
+      ]
+    }
+  ]
+}

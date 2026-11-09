@@ -25,8 +25,10 @@ function projection(row:Record<string,any>) {
     intendedUse:'Organization-issued product-training credential. Not professional licensure, accreditation, or regulatory approval.'};
 }
 export async function issueCredentialInTransaction(client:PoolClient,tenant:TenantContext,enrollmentId:string,automatic=false) {
+    try {
+        await client.query("SELECT pg_advisory_xact_lock(hashtextextended('lifecycle:'||$1,0))",[tenant.organizationId]);
         const bound=await client.query(`SELECT r.release_id,r.release_hash,r.course_version_id,r.manifest,v.course_id FROM enrollments e JOIN release_manifests r ON r.organization_id=e.organization_id AND r.course_version_id=e.course_version_id JOIN course_versions v ON v.organization_id=r.organization_id AND v.course_version_id=r.course_version_id
-          WHERE e.organization_id=$1 AND e.enrollment_id=$2 AND e.learner_id=$3 AND e.status='ACTIVE' AND r.status='PUBLISHED' FOR UPDATE OF e FOR SHARE OF r`,[tenant.organizationId,enrollmentId,tenant.actorId]);
+          WHERE e.organization_id=$1 AND e.enrollment_id=$2 AND e.learner_id=$3 AND e.status IN ('ACTIVE','COMPLETED') AND r.status='PUBLISHED' AND public.lifecycle_release_available(r.release_id) FOR UPDATE OF e FOR SHARE OF r`,[tenant.organizationId,enrollmentId,tenant.actorId]);
         const release=bound.rows[0];if(!release)throw new Error('CREDENTIAL_NOT_FOUND');
         const policy=release.manifest?.content?.policy;
         if(policy?.credentialIssuance==='DISABLED') { if(automatic)return null; throw new Error('CREDENTIAL_ISSUANCE_DISABLED'); }
@@ -37,7 +39,7 @@ export async function issueCredentialInTransaction(client:PoolClient,tenant:Tena
         // Serialize duplicate enrollments for the same learner/release as well as same-enrollment retries.
         await client.query(`SELECT pg_advisory_xact_lock(hashtextextended($1,0))`,[JSON.stringify([tenant.organizationId,tenant.actorId,release.release_id,policy?.version,qualificationId])]);
         const prior=await client.query(`SELECT *,expires_at<=now() AS expired FROM credentials WHERE organization_id=$1 AND learner_id=$2 AND release_id=$3 AND policy_version=$4 AND qualification_id=$5`,[tenant.organizationId,tenant.actorId,release.release_id,policy?.version??null,qualificationId]);
-        if(prior.rows[0])return projection(prior.rows[0]);
+        if(prior.rows[0]){if(prior.rows[0].status==='ACTIVE'&&!prior.rows[0].expired)await client.query("UPDATE enrollments SET status='COMPLETED',updated_at=now() WHERE organization_id=$1 AND enrollment_id=$2 AND learner_id=$3 AND status='ACTIVE'",[tenant.organizationId,enrollmentId,tenant.actorId]);return projection(prior.rows[0]);}
         const successor=await client.query(`SELECT credential_id FROM credentials WHERE organization_id=$1 AND learner_id=$2 AND evidence->'supersession'->>'sourceReleaseId'=$3 LIMIT 1`,[tenant.organizationId,tenant.actorId,release.release_id]);
         if(successor.rowCount){if(automatic)return null;throw Error('CREDENTIAL_RELEASE_SUPERSEDED');}
         await client.query(`SELECT session_id FROM assessment_sessions WHERE organization_id=$1 AND enrollment_id=$2 AND learner_id=$3 AND release_id=$4 FOR SHARE`,[tenant.organizationId,enrollmentId,tenant.actorId,release.release_id]);
@@ -73,7 +75,14 @@ export async function issueCredentialInTransaction(client:PoolClient,tenant:Tena
         if(inserted.rows[0].expires_at)await client.query(`INSERT INTO outbox_events(outbox_event_id,organization_id,event_type,deduplication_key,payload,state,available_at,created_at,updated_at)
           SELECT $1,$2,'credential.expire',$1,$3::jsonb,'PENDING',expires_at,now(),now() FROM credentials WHERE organization_id=$2 AND credential_id=$4`,['expiration:'+credentialId,tenant.organizationId,JSON.stringify({credentialId,learnerId:tenant.actorId}),credentialId]);
         if(supersession)await applyCredentialSupersession(client,tenant,credentialId,release.release_id,supersession);
+        await client.query("UPDATE enrollments SET status='COMPLETED',updated_at=now() WHERE organization_id=$1 AND enrollment_id=$2 AND learner_id=$3 AND status='ACTIVE'",[tenant.organizationId,enrollmentId,tenant.actorId]);
         return projection(inserted.rows[0]);
+    }catch(error){
+      if(error&&typeof error==='object'&&'code' in error&&error.code==='23505'&&'constraint' in error&&['credentials_qualification_unique','credentials_public_hash_unique'].includes(String(error.constraint))){
+        try{console.log(JSON.stringify({event:'credential_integrity_violation',service:'domain',code:error.constraint==='credentials_qualification_unique'?'QUALIFICATION_UNIQUENESS':'PUBLIC_HASH_UNIQUENESS'}));}catch{/* Preserve the original failed issuance even if telemetry is unavailable. */}
+      }
+      throw error;
+    }
 }
 
 export function createPostgresCredentialService(pool:Pool):CredentialService {

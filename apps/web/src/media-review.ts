@@ -1,7 +1,7 @@
 import {authenticatedFetch,getOrganizationHeaders,getSessionIdentity} from './auth-session.js';
 import {renderSourceReview} from './source-review-editor.js';
 
-export function createMediaReview(host:HTMLElement,api:<T>(path:string,init?:RequestInit)=>Promise<T>){
+export function createMediaReview(host:HTMLElement,api:<T>(path:string,init?:RequestInit)=>Promise<T>,options?:{rationaleDefault?:string}){
  const section=document.createElement('section');section.dataset.photoReviewStep='';const heading=document.createElement('h2'),load=document.createElement('button'),list=document.createElement('div'),panel=document.createElement('div'),status=document.createElement('p');
  heading.textContent='2. Check your photos';load.type='button';load.dataset.photoReviewLoad='';load.textContent='Review uploaded photos';status.setAttribute('role','status');section.append(heading,load,list,panel,status);host.append(section);
  let cursor:string|undefined,epoch=0,identity=getSessionIdentity(),objectUrl:string|undefined,abort:AbortController|undefined;
@@ -41,7 +41,7 @@ export function createMediaReview(host:HTMLElement,api:<T>(path:string,init?:Req
     try{const response=await authenticatedFetch(item.contentUrl,{headers:getOrganizationHeaders(),signal:abort!.signal});if(!response.ok)throw Error('MEDIA_LOAD_FAILED');const blob=await response.blob();if(!active())return;if(objectUrl)URL.revokeObjectURL(objectUrl);objectUrl=URL.createObjectURL(new Blob([blob],{type:item.contentType}));
      const media=document.createElement(item.sourceType==='image'?'img':'video');media.style.maxWidth='100%';media.style.maxHeight='480px';
      if(media instanceof HTMLVideoElement){media.controls=true;media.preload='metadata';media.setAttribute('aria-label',item.fileName);}else media.alt='Uploaded media under review';
-     const ready=()=>{if(!active())return;status.textContent='Media loaded. Inspect it before recording a decision.';if(item.state==='READY_FOR_REVIEW')renderSourceReview(decision,{subject:'media',active,save:(input,key)=>api(`/api/v1/media-review/${encodeURIComponent(id)}/review`,{method:'POST',headers:{'content-type':'application/json','Idempotency-Key':key},body:JSON.stringify({...input,sourceHash:item.sourceHash})}),refresh:async()=>{status.textContent='Decision saved. Refresh the course media selector to use approved media.';}});};
+     const ready=()=>{if(!active())return;status.textContent='Media loaded. Inspect it before recording a decision.';if(item.state==='READY_FOR_REVIEW')renderSourceReview(decision,{subject:'media',rationaleDefault:options?.rationaleDefault,active,save:(input,key)=>api(`/api/v1/media-review/${encodeURIComponent(id)}/review`,{method:'POST',headers:{'content-type':'application/json','Idempotency-Key':key},body:JSON.stringify({...input,sourceHash:item.sourceHash})}),refresh:async()=>{status.textContent='Decision saved. Refresh the course media selector to use approved media.';}});};
      media.addEventListener(item.sourceType==='image'?'load':'loadedmetadata',ready,{once:true});media.onerror=()=>{if(active()){decision.replaceChildren();preview.disabled=false;status.textContent='The browser cannot preview this media. Retry or inspect the original.';}};media.src=objectUrl;viewer.replaceChildren(media);
     }catch{if(active()){preview.disabled=false;status.textContent='Private media could not be loaded. Retry or refresh the item.';}}
    };

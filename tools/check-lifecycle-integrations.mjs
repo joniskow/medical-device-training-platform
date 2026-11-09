@@ -1,0 +1,180 @@
+import assert from 'node:assert/strict';
+import {randomUUID,createHash} from 'node:crypto';
+import {Pool} from 'pg';
+import {seedActiveOrganizationMembership,withTenantTransaction} from '../packages/db/dist/index.js';
+import {LIFECYCLE_GOVERNANCE_MIGRATION_SQL,createLifecycleGovernanceStore} from '../packages/db/dist/lifecycle-governance.js';
+import {DISCOVERY_INQUIRIES_MIGRATION_SQL,createDiscoveryInquiryStore} from '../packages/db/dist/discovery-inquiries.js';
+import {CUSTOMER_WEBHOOK_MIGRATION_SQL,createCustomerWebhookStore} from '../packages/db/dist/customer-webhooks.js';
+import {PROTECTED_EXPORT_MIGRATION_SQL,createProtectedExportStore} from '../packages/db/dist/protected-exports.js';
+import {createTechnicalReportingStore} from '../packages/db/dist/technical-reporting.js';
+import {LIFECYCLE_NOTIFICATION_MIGRATION_SQL,createLifecycleNotificationStore} from '../packages/db/dist/lifecycle-notifications.js';
+import {RETENTION_GOVERNANCE_MIGRATION_SQL,createRetentionGovernanceStore} from '../packages/db/dist/retention-governance.js';
+import {createCustomerWebhookProcessor,deriveWebhookSecret} from '../apps/worker/dist/customer-webhooks.js';
+import {createLifecycleNotificationProcessor} from '../apps/worker/dist/lifecycle-notifications.js';
+import {createHmac} from 'node:crypto';
+import {createTechnicalMeteringStore,recordTechnicalCost} from '../packages/db/dist/technical-metering.js';
+import {createPostgresAiRunStore,readAiCostRates} from '../packages/db/dist/ai-run-store.js';
+import {createPersonalAccountStore} from '../packages/db/dist/personal-account.js';
+import {LEARNING_REPORT_MIGRATION_SQL} from '../packages/db/dist/learning-reports.js';
+
+const owner=new Pool({connectionString:process.env.DATABASE_URL??'postgresql://local_app:local_only_change_me@127.0.0.1:54329/medical_device'}),runtime=new Pool({connectionString:process.env.DATABASE_RUNTIME_URL??'postgresql://local_runtime:local_runtime_only_change_me@127.0.0.1:54329/medical_device'});
+const prefix='life:'+randomUUID(),issuer=prefix+':issuer',employer=prefix+':employer',admin=prefix+':admin',learnerIds=[0,1,2].map(n=>prefix+':learner:'+n),tenant={organizationId:issuer,actorId:admin,correlationId:'lifecycle-test'},employerTenant={organizationId:employer,actorId:admin,correlationId:'lifecycle-test'},objects=new Map();
+const storage={async putObject({blobKey,bytes,contentType}){objects.set(blobKey,{bytes,contentType});},async readObject({blobKey}){const object=objects.get(blobKey);if(!object)throw Error('NOT_FOUND');return {...object,sha256:createHash('sha256').update(object.bytes).digest('hex')};}};
+const fnSignatures=['manage_discovery_profile(text,text,text,text,text,boolean,integer)','search_discovery(text,text,text,text)','search_discovery(text,text,text,text,jsonb)','create_discovery_inquiry(text,text,text,text,text)','respond_discovery_inquiry(text,text,text,text)','list_discovery_inquiries(text,text,text)'];
+try{
+ for(const migration of [LIFECYCLE_GOVERNANCE_MIGRATION_SQL,DISCOVERY_INQUIRIES_MIGRATION_SQL,CUSTOMER_WEBHOOK_MIGRATION_SQL,PROTECTED_EXPORT_MIGRATION_SQL,LIFECYCLE_NOTIFICATION_MIGRATION_SQL,RETENTION_GOVERNANCE_MIGRATION_SQL,LEARNING_REPORT_MIGRATION_SQL])await owner.query(migration);
+ await owner.query('GRANT SELECT,INSERT,UPDATE,DELETE ON lifecycle_holds,lifecycle_tombstones,customer_webhook_subscriptions,customer_webhook_deliveries,protected_exports TO local_runtime');
+ await owner.query('GRANT SELECT ON organizations TO local_runtime');await owner.query('GRANT EXECUTE ON FUNCTION public.access_personal_account(text,text,text,text,text,integer,text) TO local_runtime');
+ await owner.query('GRANT SELECT,INSERT,UPDATE,DELETE ON retention_schedules TO local_runtime');
+ await owner.query('GRANT EXECUTE ON FUNCTION public.set_lifecycle_notification_preference(text,text,timestamptz,boolean,integer),public.claim_lifecycle_notification_email(text) TO local_runtime');
+ for(const fn of fnSignatures)await owner.query('GRANT EXECUTE ON FUNCTION public.'+fn+' TO local_runtime');
+ for(const org of [issuer,employer]){
+  await owner.query("INSERT INTO organizations(organization_id,name,status,created_by,request_hash,created_at,updated_at) VALUES($1,'Lifecycle test','ACTIVE',$2,'test',now(),now())",[org,admin]);
+  await seedActiveOrganizationMembership(owner,{organizationId:org,subject:admin,roles:['organization_admin','employer']});
+ }
+ for(const user of learnerIds)await owner.query("INSERT INTO personal_accounts(user_id,display_name,status,created_at,updated_at) VALUES($1,'Learner','ACTIVE',now(),now())",[user]);
+ const asset=prefix+':source',course=prefix+':course',release=prefix+':release',digest='a'.repeat(64);
+ await owner.query("INSERT INTO assets(asset_id,organization_id,source_type,status,created_by,updated_by,created_at,updated_at) VALUES($1,$2,'pdf','ACTIVE',$3,$3,now(),now())",[asset,issuer,admin]);
+ await owner.query("INSERT INTO asset_versions(asset_version_id,asset_id,organization_id,source_type,blob_key,file_name,content_type,size_bytes,sha256,state,created_by,created_at,updated_at) VALUES($1,$1,$2,'pdf',$5,'manual.pdf','application/pdf',10,$3,'APPROVED',$4,now(),now())",[asset,issuer,digest,admin,issuer+'/source.pdf']);
+ await owner.query("INSERT INTO asset_rights_attestations(attestation_id,organization_id,asset_version_id,owner_name,use_scope,derivative_allowed,status,created_by,created_at,updated_at) VALUES($1,$2,$1,'test','test',true,'ACTIVE',$3,now(),now())",[asset,issuer,admin]);
+ await owner.query("INSERT INTO courses(course_id,organization_id,name,status,created_by,created_at,updated_at) VALUES($1,$2,'Test','ACTIVE',$3,now(),now())",[course,issuer,admin]);
+ await owner.query("INSERT INTO course_versions(course_version_id,course_id,organization_id,revision,content,status,created_by,created_at,updated_at) VALUES($1,$1,$2,1,$3,'PUBLISHED',$4,now(),now())",[course,issuer,JSON.stringify({sourceArtifactIds:[asset]}),admin]);
+ await withTenantTransaction(owner,tenant,client=>client.query("INSERT INTO release_manifests(release_id,organization_id,course_version_id,status,manifest,release_hash,published_by,idempotency_key,request_hash,created_at) VALUES($1,$2,$3,'PUBLISHED',$4,$5,$6,$1,$5,now())",[release,issuer,course,JSON.stringify({sourceArtifacts:[{assetVersionId:asset}],content:{policy:{policyId:'report-policy',version:1},modules:[{activities:[{activityId:'reading',type:'text'}]}]}}),digest,admin]));
+ for(const [index,user]of learnerIds.entries()){
+  const credential=prefix+':credential:'+index,session=prefix+':competency:'+index,enrollment=prefix+':enrollment:'+index;
+  await owner.query("INSERT INTO enrollments(enrollment_id,organization_id,learner_id,course_version_id,status,created_at,updated_at) VALUES($1,$2,$3,$4,'ACTIVE',now(),now())",[enrollment,issuer,user,course]);
+  await owner.query("INSERT INTO assessment_sessions(session_id,organization_id,learner_id,enrollment_id,release_id,release_hash,activity_id,assessment_id,assessment_version,policy_id,policy_version,definition,policy_snapshot,attempt_number,start_key,start_hash,status,answers,answer_hash,result,started_at,expires_at,submitted_at) VALUES($1,$2,$3,$4,$5,$6,'assessment','assessment-definition',1,'report-policy',1,'{}','{}',1,$1,$6,'PASSED','[]',$6,'{\"score\":5,\"maxScore\":5,\"demonstratedCompetencyIds\":[\"aseptic.technique\"]}',now(),now()+interval '1 hour',now())",[session,issuer,user,enrollment,release,digest]);
+  await owner.query("INSERT INTO credentials(credential_id,organization_id,learner_id,course_version_id,public_id,status,issued_at,created_at,updated_at,release_id,evidence) VALUES($1,$2,$3,$4,$1,'ACTIVE',now(),now(),now(),$5,$6)",[credential,issuer,user,course,release,JSON.stringify({evaluation:{evidenceIds:[session]}})]);
+ }
+ await owner.query("INSERT INTO progress_events(progress_event_id,organization_id,enrollment_id,learner_id,event_type,payload,created_at) VALUES($1,$2,$3,$4,'content.acknowledged',$5,now()),($6,$2,$3,$4,'content.acknowledged',$7,now())",[prefix+':reading',issuer,prefix+':enrollment:0',learnerIds[0],JSON.stringify({activityId:'reading',releaseId:release,releaseHash:digest,policyId:'report-policy',policyVersion:1}),prefix+':invalid-reading',JSON.stringify({activityId:'reading',releaseId:release,releaseHash:digest,policyId:'report-policy',policyVersion:2})]);
+ const derived=prefix+':render';
+ await owner.query("INSERT INTO assets(asset_id,organization_id,source_type,status,created_by,updated_by,created_at,updated_at) VALUES($1,$2,'video','ACTIVE',$3,$3,now(),now())",[derived,issuer,admin]);
+ await owner.query("INSERT INTO asset_versions(asset_version_id,asset_id,organization_id,source_type,blob_key,file_name,content_type,size_bytes,sha256,state,created_by,created_at,updated_at) VALUES($1,$1,$2,'video',$5,'lesson.mp4','video/mp4',10,$3,'APPROVED',$4,now(),now())",[derived,issuer,digest,admin,issuer+'/lesson.mp4']);
+ await owner.query("INSERT INTO processing_jobs(job_id,job_type,organization_id,tenant,attempt,max_attempts,idempotency_key,request_hash,payload,state,created_at,updated_at,available_at,correlation_id,outcome) VALUES($1,'lesson.render',$2,$3,1,1,$1,$1,$4,'SUCCEEDED',now(),now(),now(),'test',$5)",[derived,issuer,JSON.stringify(tenant),JSON.stringify({assets:[{assetVersionId:asset}]}),JSON.stringify({details:{assetVersionId:derived}})]);
+ const govern=createLifecycleGovernanceStore(runtime),discovery=createDiscoveryInquiryStore(runtime),reports=createTechnicalReportingStore(runtime),exports=createProtectedExportStore(runtime,storage),webhooks=createCustomerWebhookStore(runtime);
+ await assert.rejects(govern.inspect({...tenant,actorId:learnerIds[0]},asset),/ADMIN_REQUIRED/);
+ await assert.rejects(govern.inspect({...tenant,organizationId:employer},asset),/NOT_FOUND/);
+ const profiles=[];
+ for(const [index,user] of learnerIds.entries())profiles.push(await discovery.profile(user,{organizationId:issuer,credentialId:prefix+':credential:'+index,alias:'Training learner '+index,coarseArea:prefix+':area',enabled:true,revision:0}));
+ assert.equal((await discovery.search(employerTenant,{coarseArea:prefix+':area'})).items.length,3);
+ assert.equal((await discovery.search(employerTenant,{coarseArea:prefix+':area',courseId:course})).items.length,3);
+ assert.equal((await discovery.search(employerTenant,{coarseArea:prefix+':area',courseId:'unrelated-course'})).items.length,0);
+ assert.equal((await discovery.search(employerTenant,{coarseArea:prefix+':area',competencyId:'aseptic.technique'})).items.length,3);
+ assert.equal((await discovery.search(employerTenant,{coarseArea:prefix+':area',competencyId:'unproven.competency'})).items.length,0);
+ const period={from:new Date(Date.now()-3600000).toISOString(),to:new Date(Date.now()+3600000).toISOString(),courseId:course};
+ const activityReport=await reports.activities(tenant,period);assert.equal(activityReport.items.find(row=>row.kind==='assessment').passed,3);assert.equal(activityReport.items.find(row=>row.kind==='acknowledgement').evidenceCount,1);
+ const courseReport=await reports.courses(tenant,period);assert.equal(courseReport.items[0].enrollmentsCreated,3);assert.equal(courseReport.items[0].credentialsIssued,3);assert.equal(courseReport.items[0].completedEnrollmentRecords,0);
+ await owner.query("UPDATE assessment_sessions SET status='INVALIDATED' WHERE session_id=$1",[prefix+':competency:0']);const corrected=await reports.activities(tenant,period);assert.equal(corrected.items.find(row=>row.kind==='assessment').passed,2);assert.equal(corrected.items.find(row=>row.kind==='assessment').invalidated,1);assert.equal((await discovery.search(employerTenant,{coarseArea:prefix+':area',competencyId:'aseptic.technique'})).suppressed,true);
+ assert.equal((await reports.activities(tenant,{...period,courseId:'other-course'})).items.length,0);await assert.rejects(reports.activities({...tenant,actorId:learnerIds[0]},period),/ADMIN_REQUIRED/);await assert.rejects(reports.courses(tenant,{from:'2020-01-01T00:00:00Z',to:'2026-01-01T00:00:00Z'}),/FILTER_INVALID/);
+ const scanPrefix=randomUUID().replaceAll('-',''),scanIds=[];
+ for(let index=0;index<104;index++){
+  const profileId='profile:'+scanPrefix+index.toString(16).padStart(16,'0'),eligible=index<3||index>=100&&index<=102,user=eligible?learnerIds[index%3]:prefix+':missing:'+index,credential=prefix+':scan-credential:'+index;
+  await owner.query("INSERT INTO credentials(credential_id,organization_id,learner_id,course_version_id,public_id,status,issued_at,created_at,updated_at,release_id,evidence) VALUES($1,$2,$3,$4,$1,'ACTIVE',now(),now(),now(),$5,'{}')",[credential,issuer,user,course,release]);
+  await owner.query('INSERT INTO discovery_profiles(profile_id,user_id,organization_id,credential_id,alias,coarse_area,enabled) VALUES($1,$2,$3,$4,$5,$6,true)',[profileId,user,issuer,credential,'Scan learner',prefix+':scan-area']);scanIds.push(profileId);
+ }
+ const firstScan=await discovery.search(employerTenant,{coarseArea:prefix+':scan-area'});assert.equal(firstScan.items.length,3);assert.equal(firstScan.nextCursor,scanIds[99]);
+ const nextScan=await discovery.search(employerTenant,{coarseArea:prefix+':scan-area',after:firstScan.nextCursor});assert.equal(nextScan.items.length,3);assert.equal(nextScan.items[0].profileId,scanIds[100],'Eligibility lookahead skipped the 101st candidate');
+ await owner.query('DELETE FROM discovery_profiles WHERE profile_id=ANY($1::text[])',[scanIds]);await owner.query('DELETE FROM credentials WHERE credential_id LIKE $1',[prefix+':scan-credential:%']);
+ await assert.rejects(discovery.search({...employerTenant,actorId:learnerIds[0]},{coarseArea:prefix+':area'}),/EMPLOYER_REQUIRED/);
+ await assert.rejects(discovery.profile(learnerIds[1],{organizationId:issuer,credentialId:prefix+':credential:0',alias:'Wrong owner',coarseArea:prefix+':area',enabled:true,revision:0}),/ACCESS_DENIED/);
+ const inquiry=await discovery.createInquiry(employerTenant,{profileId:profiles[0].profileId,message:'Please consider our training role.',idempotencyKey:'first'});
+ assert.equal((await discovery.createInquiry(employerTenant,{profileId:profiles[0].profileId,message:'Please consider our training role.',idempotencyKey:'first'})).inquiryId,inquiry.inquiryId);
+ await assert.rejects(discovery.createInquiry(employerTenant,{profileId:profiles[0].profileId,message:'Changed',idempotencyKey:'first'}),/IDEMPOTENCY_KEY_REUSED/);
+ assert.equal((await discovery.list(admin,employer)).items[0].contact,null);
+ await assert.rejects(discovery.respond(learnerIds[1],inquiry.inquiryId,{decision:'ACCEPTED',contact:'learner@example.invalid'}),/UNAVAILABLE/);
+ await discovery.respond(learnerIds[0],inquiry.inquiryId,{decision:'ACCEPTED',contact:'learner@example.invalid'});
+ assert.equal((await discovery.list(admin,employer)).items[0].contact,'learner@example.invalid');
+ assert.equal((await discovery.list(learnerIds[0])).items[0].contact,null);
+ await discovery.profile(learnerIds[0],{organizationId:issuer,credentialId:prefix+':credential:0',alias:'Training learner 0',coarseArea:prefix+':area',enabled:false,revision:1});
+ assert.equal((await discovery.list(admin,employer)).items[0].status,'WITHDRAWN');assert.equal((await discovery.list(admin,employer)).items[0].contact,null);
+ assert.equal((await discovery.search(employerTenant,{coarseArea:prefix+':area'})).suppressed,true);
+ assert.equal((await reports.summary(tenant)).credentials[0].count,3);
+ const metering=createTechnicalMeteringStore(runtime),effort={courseVersionId:course,durationSeconds:60,kind:'AUTHORING',idempotencyKey:'effort-one'};
+ await assert.rejects(metering.effort({...tenant,actorId:learnerIds[0]},effort),/ROLE_REQUIRED/);assert.deepEqual(await metering.effort(tenant,effort),await metering.effort(tenant,effort));await assert.rejects(metering.effort(tenant,{...effort,durationSeconds:61}),/IDEMPOTENCY_KEY_REUSED/);
+ const cost={eventId:'cost-one',microUsd:250000,provenance:'PROVIDER_BILLED',provider:'azure-openai',operation:'course.draft'};
+ await withTenantTransaction(runtime,tenant,async client=>{await recordTechnicalCost(client,tenant,cost);await recordTechnicalCost(client,tenant,cost);});
+ const rates=readAiCostRates(JSON.stringify([{provider:'azure-openai',deployment:'fixture',model:'fixture',inputMicroUsdPerMillionTokens:1000000,outputMicroUsdPerMillionTokens:2000000}]));
+ await createPostgresAiRunStore(runtime,{costRates:rates}).record({tenant,request:{tenant,operation:'course.draft',sourceArtifactIds:[asset],outputSchemaVersion:'fixture.v1',tokenBudget:100,input:{}},result:{operation:'course.draft',status:'DRAFT',output:{},citations:[],warnings:[],metrics:{inputTokens:10,outputTokens:10,durationMs:20},providerMetadata:{provider:'azure-openai',deployment:'fixture',model:'fixture',apiVersion:'fixture'}},promptVersion:'fixture'});
+ const totals=await reports.summary(tenant);assert.equal(Number(totals.cost.providerBilled),0.25);assert.equal(Number(totals.cost.estimated),0.000030);assert.equal(Number(totals.authoring.effortSeconds.authoring),60);
+ await withTenantTransaction(runtime,tenant,async client=>{const snapshot=createTechnicalReportingStore(runtime,client);assert.equal((await snapshot.summary(tenant)).usage.some(row=>row.meterKey==='snapshot.new'),false);await owner.query("INSERT INTO usage_meter_events(usage_event_id,organization_id,meter_key,quantity,deduplication_key,created_at) VALUES($1,$2,'snapshot.new',1,$1,now())",[prefix+':snapshot-meter',issuer]);assert.equal((await snapshot.summary(tenant)).usage.some(row=>row.meterKey==='snapshot.new'),false);},{isolation:'repeatable read'});
+ assert.equal((await reports.summary(tenant)).usage.some(row=>row.meterKey==='snapshot.new'),true);
+ const notificationStore=createLifecycleNotificationStore(runtime);
+ await assert.rejects(notificationStore.preference(learnerIds[0],{enabled:true,revision:0}),/VERIFIED_EMAIL_REQUIRED/);
+ await notificationStore.preference(learnerIds[0],{enabled:true,revision:0},{email:'learner@example.invalid',expiresAt:new Date(Date.now()+3600000).toISOString()});
+ let sends=0;const noticeProcessor=createLifecycleNotificationProcessor(runtime,{sender:{async send(message){sends++;assert.equal(message.recipient,'learner@example.invalid');assert.equal(message.plainText.includes(learnerIds[0]),false);if(sends===1)throw Error('provider outage');return {providerMessageId:message.operationId};}}});
+ const notice=prefix+':notice';await owner.query("INSERT INTO notifications(notification_id,organization_id,recipient_id,notification_type,payload,idempotency_key,created_at) VALUES($1,$2,$3,'CREDENTIAL_LIFECYCLE','{}',$1,now())",[notice,issuer,learnerIds[0]]);
+ const noticeEvent=(await owner.query("SELECT outbox_event_id FROM outbox_events WHERE organization_id=$1 AND payload->>'notificationId'=$2",[issuer,notice])).rows[0].outbox_event_id;
+ assert.equal((await noticeProcessor.process(tenant,noticeEvent)).state,'PENDING');
+ await owner.query('UPDATE outbox_events SET available_at=now() WHERE outbox_event_id=$1',[noticeEvent]);
+ assert.equal((await noticeProcessor.process(tenant,noticeEvent)).state,'PUBLISHED');assert.equal((await noticeProcessor.process(tenant,noticeEvent)).state,'SKIPPED');assert.equal(sends,2);
+ await notificationStore.preference(learnerIds[0],{enabled:false,revision:1});
+ const requested=await exports.request(tenant,'report-one');assert.equal((await exports.request(tenant,'report-one')).exportId,requested.exportId);
+ assert.equal((await exports.process({...tenant,actorId:'worker'},requested.exportId)).state,'SUCCEEDED');
+ const output=await exports.content(tenant,requested.exportId);assert.equal(JSON.parse(Buffer.from(output.bytes).toString()).schemaVersion,'technical-report.v1');
+ const evidenceJob=await exports.request(tenant,'evidence-one','evidence-lineage','json',release);assert.equal((await exports.process({...tenant,actorId:'worker'},evidenceJob.exportId)).state,'SUCCEEDED');const evidenceText=Buffer.from((await exports.content(tenant,evidenceJob.exportId)).bytes).toString(),evidence=JSON.parse(evidenceText);assert.equal(evidence.schemaVersion,'evidence-lineage.v1');assert.equal(evidence.release.releaseHash,digest);assert.equal(evidence.credentials.length,3);assert.equal(evidenceText.includes(learnerIds[0]),false);assert.equal(evidenceText.includes('blob_key'),false);
+ const csvCredential=prefix+':csv-credential';await owner.query("INSERT INTO credentials(credential_id,organization_id,learner_id,course_version_id,public_id,status,issued_at,created_at,updated_at,release_id,evidence) VALUES($1,$2,$3,$4,$1,'ACTIVE',now(),now(),now(),$5,jsonb_build_object('title','=2+2'))",[csvCredential,issuer,learnerIds[0],course,release]);
+ const csvJob=await exports.request(tenant,'csv-one','credential-register','csv');assert.equal((await exports.process({...tenant,actorId:'worker'},csvJob.exportId)).state,'SUCCEEDED');const csvContent=await exports.content(tenant,csvJob.exportId);assert.equal(csvContent.contentType,'text/csv; charset=utf-8');assert.ok(Buffer.from(csvContent.bytes).toString().includes('"\'=2+2"'));await assert.rejects(exports.request(tenant,'csv-one','summary','json'),/IDEMPOTENCY_KEY_REUSED/);await owner.query('DELETE FROM credentials WHERE credential_id=$1',[csvCredential]);
+ for(const failFirst of [false,true]){
+  let releaseFirst,firstStarted;const started=new Promise(resolve=>{firstStarted=resolve;}),release=new Promise(resolve=>{releaseFirst=resolve;});let writes=0;
+  const racing=createProtectedExportStore(runtime,{...storage,async putObject(input){if(++writes===1){firstStarted();await release;if(failFirst)throw Error('Stale upload failed');}return storage.putObject(input);}});
+  const job=await racing.request(tenant,'lease-race-'+failFirst),stale=racing.process({...tenant,actorId:'worker-one'},job.exportId);await started;
+  await owner.query("UPDATE protected_exports SET lease_expires_at=now()-interval '1 second' WHERE export_id=$1",[job.exportId]);
+  await owner.query('INSERT INTO usage_meter_events(usage_event_id,organization_id,meter_key,quantity,deduplication_key,created_at) VALUES($1,$2,$3,1,$1,now())',[prefix+':race-meter:'+failFirst,issuer,'race.winner.'+failFirst]);
+  assert.equal((await racing.process({...tenant,actorId:'worker-two'},job.exportId)).state,'SUCCEEDED');releaseFirst();assert.equal((await stale).state,'STALE');
+  const current=JSON.parse(Buffer.from((await racing.content(tenant,job.exportId)).bytes).toString());assert.ok(current.usage.some(row=>row.meterKey==='race.winner.'+failFirst));
+  assert.equal((await owner.query('SELECT state FROM outbox_events WHERE outbox_event_id=$1',[job.exportId])).rows[0].state,'PUBLISHED');
+ }
+ await assert.rejects(exports.content({...tenant,organizationId:employer},requested.exportId),/UNAVAILABLE/);
+ const familySubscription=await webhooks.save(tenant,{endpoint:'https://receiver.example/events',keyId:'v1',eventTypes:['processing.completed','processing.failed','course.published','enrollment.completed','enrollment.created','membership.created','membership.removed','learner.created','learner.updated','assessment.attempt.completed'],enabled:true,revision:0});
+ await withTenantTransaction(runtime,tenant,async c=>{await c.query("UPDATE processing_jobs SET state='FAILED' WHERE job_id=$1",[derived]);await c.query("UPDATE processing_jobs SET state='SUCCEEDED' WHERE job_id=$1",[derived]);await c.query("UPDATE enrollments SET status='COMPLETED' WHERE organization_id=$1 AND learner_id=$2",[issuer,learnerIds[0]]);await c.query("UPDATE enrollments SET status='ACTIVE' WHERE organization_id=$1 AND learner_id=$2",[issuer,learnerIds[0]]);await c.query("UPDATE enrollments SET status='COMPLETED' WHERE organization_id=$1 AND learner_id=$2",[issuer,learnerIds[0]]);await c.query("INSERT INTO outbox_events(outbox_event_id,organization_id,event_type,deduplication_key,payload,state,available_at,created_at,updated_at) VALUES($1,$2,'course.release.published',$1,$3,'PENDING',now(),now(),now())",[prefix+':course-event',issuer,JSON.stringify({releaseId:release,courseVersionId:course,learnerId:learnerIds[0],answerKey:'secret',metadata:{private:'secret'}})]);});
+ await seedActiveOrganizationMembership(owner,{organizationId:issuer,subject:learnerIds[0],roles:['learner']});
+ await owner.query("INSERT INTO external_identities(issuer,identity_tenant,provider_subject,user_id,created_at) VALUES($1,'fixture',$2,$2,now())",[prefix,learnerIds[0]]);
+ await createPersonalAccountStore(runtime).access({issuer:prefix,identityTenant:'fixture',subject:learnerIds[0]},'UPDATE',{displayName:'Private changed name',revision:1,idempotencyKey:'family-profile'});
+ await owner.query("UPDATE organization_memberships SET status='REMOVED' WHERE organization_id=$1 AND subject=$2",[issuer,learnerIds[0]]);
+ await withTenantTransaction(runtime,tenant,async c=>{await c.query("INSERT INTO assessment_sessions(session_id,organization_id,learner_id,enrollment_id,release_id,release_hash,activity_id,assessment_id,assessment_version,policy_id,policy_version,definition,policy_snapshot,attempt_number,start_key,start_hash,status,answers,answer_hash,result,started_at,expires_at,submitted_at) SELECT $2,organization_id,learner_id,enrollment_id,release_id,release_hash,activity_id,assessment_id,assessment_version,policy_id,policy_version,definition,policy_snapshot,2,$2,start_hash,'PASSED',answers,answer_hash,result,started_at,expires_at,submitted_at FROM assessment_sessions WHERE session_id=$1",[prefix+':competency:0',prefix+':event-assessment']);await c.query("INSERT INTO enrollments(enrollment_id,organization_id,learner_id,course_version_id,status,created_at,updated_at) VALUES($1,$2,$3,$4,'ACTIVE',now(),now())",[prefix+':event-enrollment',issuer,learnerIds[0],course]);});
+ const familyDeliveries=(await owner.query('SELECT event_type,payload FROM customer_webhook_deliveries WHERE subscription_id=$1',[familySubscription.subscriptionId])).rows;assert.deepEqual(familyDeliveries.map(r=>r.event_type).sort(),['course.published','enrollment.completed','processing.completed','processing.failed','enrollment.created','membership.created','membership.removed','learner.created','learner.updated','assessment.attempt.completed'].sort());for(const row of familyDeliveries){assert.equal(row.payload.schemaVersion,'customer-event.v1');assert.equal(JSON.stringify(row.payload).includes(learnerIds[0]),false);assert.equal(JSON.stringify(row.payload).includes('secret'),false);}
+ await assert.rejects(webhooks.save({...tenant,organizationId:employer,actorId:learnerIds[0]},{endpoint:'https://receiver.example/events',keyId:'v1',eventTypes:['processing.completed'],enabled:true,revision:0}),/ADMIN/);
+ await webhooks.save(tenant,{subscriptionId:familySubscription.subscriptionId,endpoint:'https://receiver.example/events',keyId:'v1',eventTypes:['processing.completed','processing.failed','course.published','enrollment.completed','enrollment.created','membership.created','membership.removed','learner.created','learner.updated','assessment.attempt.completed'],enabled:false,revision:1});
+ await owner.query('DELETE FROM outbox_events WHERE organization_id=$1 AND outbox_event_id IN(SELECT delivery_id FROM customer_webhook_deliveries WHERE subscription_id=$2)',[issuer,familySubscription.subscriptionId]);await owner.query('DELETE FROM customer_webhook_deliveries WHERE subscription_id=$1',[familySubscription.subscriptionId]);
+ const subscription=await webhooks.save(tenant,{endpoint:'https://receiver.example/webhook',keyId:'v1',eventTypes:['asset.delivery.suppressed'],enabled:true,revision:0});
+ for(let n=0;n<21;n++){const deliveryId=prefix+':fair-delivery:'+n;await owner.query("INSERT INTO customer_webhook_deliveries(delivery_id,organization_id,subscription_id,event_id,event_type,payload,state,available_at) VALUES($1,$2,$3,$1,'credential.issued','{}','PENDING','epoch')",[deliveryId,issuer,subscription.subscriptionId]);await owner.query("INSERT INTO outbox_events(outbox_event_id,organization_id,event_type,deduplication_key,payload,state,available_at,created_at,updated_at) VALUES($1,$2,'customer.webhook.deliver',$1,'{}','PENDING','epoch',now(),now())",[deliveryId,issuer]);}
+ const fairExport=await exports.request(tenant,'fair-export');const fairDue=(await owner.query('SELECT * FROM public.due_lifecycle_deliveries()')).rows;assert.ok(fairDue.some(row=>row.kind==='export'));assert.ok(fairDue.filter(row=>row.kind==='webhook').length<=10);await owner.query('DELETE FROM outbox_events WHERE organization_id=$1 AND outbox_event_id LIKE $2',[issuer,prefix+':fair-delivery:%']);await owner.query('DELETE FROM customer_webhook_deliveries WHERE organization_id=$1 AND delivery_id LIKE $2',[issuer,prefix+':fair-delivery:%']);assert.equal((await exports.process({...tenant,actorId:'worker'},fairExport.exportId)).state,'SUCCEEDED');
+ await govern.administer(tenant,asset,{action:'HOLD',reason:'Evidence hold',idempotencyKey:'hold'});
+ await assert.rejects(govern.administer(tenant,asset,{action:'TOMBSTONE',reason:'Delete',idempotencyKey:'delete'}),/HELD/);
+ const result=await govern.administer(tenant,asset,{action:'WITHDRAW',reason:'Rights revoked',idempotencyKey:'withdraw'});
+ assert.equal(result.releases.length,1);assert.equal(result.releases[0].credentialCount,3);
+ const repeat=await govern.administer(tenant,asset,{action:'WITHDRAW',reason:'Rights revoked',idempotencyKey:'withdraw'});assert.deepEqual(repeat,result);
+ assert.equal((await govern.inspect(tenant,asset)).asset.suppressed,true);
+ assert.equal((await withTenantTransaction(runtime,tenant,c=>c.query('SELECT public.lifecycle_asset_suppressed($1) suppressed',[derived]))).rows[0].suppressed,true,'Derived render survived source withdrawal');
+ assert.equal((await withTenantTransaction(runtime,tenant,c=>c.query('SELECT public.lifecycle_release_available($1) available',[release]))).rows[0].available,false);
+ assert.equal((await owner.query('SELECT status FROM credentials WHERE organization_id=$1',[issuer])).rows.every(row=>row.status==='ACTIVE'),true);
+ assert.equal((await owner.query('SELECT release_hash FROM release_manifests WHERE release_id=$1',[release])).rows[0].release_hash,digest);
+ assert.equal((await discovery.search(employerTenant,{coarseArea:prefix+':area'})).items.length,0);
+ const delivery=(await owner.query('SELECT * FROM customer_webhook_deliveries WHERE organization_id=$1',[issuer])).rows[0];assert.equal(delivery.subscription_id,subscription.subscriptionId);
+ const claim=await webhooks.claim(tenant,delivery.delivery_id);assert.ok(claim);assert.equal(await webhooks.claim(tenant,delivery.delivery_id),null);
+ assert.equal((await webhooks.finish(tenant,delivery.delivery_id,'wrong',true)).state,'STALE');assert.equal((await webhooks.finish(tenant,delivery.delivery_id,claim.leaseToken,true)).state,'SUCCEEDED');
+ const deleted=[],retention=createRetentionGovernanceStore(runtime,{async deleteObject({blobKey}){deleted.push(blobKey);}});
+ await retention.schedule(tenant,asset,{purgeAfter:new Date(Date.now()+60000).toISOString(),reason:'Approved source retention policy'});
+ await owner.query('UPDATE retention_schedules SET purge_after=now() WHERE organization_id=$1',[issuer]);
+ assert.equal((await retention.manifest(tenant)).items[0].held,true);assert.equal((await retention.purgeDue({...tenant,actorId:'worker'})).purged,0);
+ await govern.administer(tenant,asset,{action:'RELEASE_HOLD',reason:'Hold completed',idempotencyKey:'release'});
+ await govern.administer(tenant,asset,{action:'TOMBSTONE',reason:'Remove content',idempotencyKey:'delete'});
+ assert.equal((await retention.purgeDue({...tenant,actorId:'worker'})).purged,1);assert.deepEqual(deleted,[issuer+'/source.pdf']);assert.equal((await retention.purgeDue({...tenant,actorId:'worker'})).purged,0);
+ await owner.query("UPDATE asset_versions SET state='APPROVED' WHERE asset_version_id=$1",[asset]);assert.equal((await retention.replayTombstones(tenant)).reapplied,1);assert.equal((await retention.replayTombstones(tenant)).reapplied,0);
+ const second=(await owner.query("SELECT delivery_id FROM customer_webhook_deliveries WHERE organization_id=$1 AND state='PENDING'",[issuer])).rows[0].delivery_id;
+ let deliveries=0;const master=Buffer.alloc(32,7),processor=createCustomerWebhookProcessor(runtime,{keys:new Map([['v1',master]]),transport:async input=>{deliveries++;assert.equal(input.headers['X-Training-Event-ID'],JSON.parse(input.body).eventId);const expected='v1:'+createHmac('sha256',deriveWebhookSecret(master,issuer,subscription.subscriptionId)).update(input.headers['X-Training-Timestamp']+'.'+input.body).digest('hex');assert.equal(input.headers['X-Training-Signature'],expected);assert.equal(input.body.includes(learnerIds[0]),false);if(deliveries===1)throw Error('PROVIDER_HTTP_500');return {bytes:Buffer.from('ok'),contentType:'text/plain'};}});
+ assert.equal((await processor.process(tenant,second)).state,'PENDING');await owner.query('UPDATE customer_webhook_deliveries SET available_at=now() WHERE delivery_id=$1',[second]);assert.equal((await processor.process(tenant,second)).state,'SUCCEEDED');assert.equal(deliveries,2);
+ assert.equal((await owner.query("SELECT count(*)::int n FROM outbox_events WHERE organization_id=$1 AND event_type='asset.delivery.suppressed'",[issuer])).rows[0].n,2);
+ await assert.rejects(runtime.query('SELECT * FROM discovery_profiles'),/permission denied/);
+ console.log('Lifecycle integrations passed: runtime roles/tenants, default consent ownership, bounded employer search/cohort suppression, inquiry replay/acceptance/contact withdrawal, authoritative reports, asynchronous private exports, holds/tombstones, preserved immutable evidence, immediate dependency suppression, atomic minimized webhooks and delivery leases.');
+}finally{
+ // Scoped cleanup only; never reset/drop a shared test database.
+ try{
+  await owner.query('DELETE FROM discovery_inquiries WHERE organization_id=$1',[employer]);await owner.query('DELETE FROM discovery_profiles WHERE organization_id=$1',[issuer]);
+  await owner.query('DELETE FROM external_identities WHERE issuer=$1',[prefix]);
+  for(const table of ['email_delivery_reports','email_delivery_attempts','email_deliveries','customer_webhook_deliveries','customer_webhook_subscriptions','protected_exports','retention_schedules','lifecycle_holds','lifecycle_tombstones','notifications','outbox_events','audit_events','usage_meter_events','ai_runs','credentials','progress_events','assessment_sessions','enrollments','release_model_bindings','release_manifests','course_review_decisions','course_versions','courses','asset_rights_attestations','processing_jobs','asset_versions','assets','role_assignments','organization_memberships','organizations'])await owner.query('DELETE FROM '+table+' WHERE organization_id=ANY($1::text[])',[[issuer,employer]]);
+  await owner.query('DELETE FROM lifecycle_notification_preferences WHERE user_id=ANY($1::text[])',[learnerIds]);
+  await owner.query('DELETE FROM personal_account_events WHERE user_id=ANY($1::text[])',[learnerIds]);await owner.query('DELETE FROM personal_accounts WHERE user_id=ANY($1::text[])',[learnerIds]);
+  await owner.query('DELETE FROM discovery_limits WHERE bucket LIKE $1',['%'+prefix+'%']);
+ }finally{await runtime.end();await owner.end();}
+}

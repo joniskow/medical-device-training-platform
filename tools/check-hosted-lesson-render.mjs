@@ -1,0 +1,12 @@
+import assert from 'node:assert/strict';
+import {hostedLessonAssetIds, validateHostedLessonRequest,validateHostedCorrectedTakeRequest} from '../packages/contracts/dist/hosted-lesson-render.js';
+const request={courseVersionId:'course:v1',revision:1,lessonId:'lesson:1',mode:'rough-cut',idempotencyKey:'render:1'};
+assert.deepEqual(validateHostedLessonRequest(request),request);
+for(const bad of [{...request,revision:0},{...request,mode:'draft'},{...request,assets:{a:'/etc/passwd'}},{...request,idempotencyKey:''}]) assert.throws(()=>validateHostedLessonRequest(bad),/LESSON_RENDER_REQUEST_INVALID/);
+const lesson={scenes:[{visual:{kind:'source_image',assetVersionId:'image:1'},citations:[{assetVersionId:'manual:1'}],audioMix:{instructionalSounds:[{assetVersionId:'sound:1'}]}}],citations:[{assetVersionId:'manual:1'}]};
+assert.deepEqual(hostedLessonAssetIds(lesson),['image:1','manual:1','sound:1']);
+assert.throws(()=>hostedLessonAssetIds({...lesson,sceneTakes:{unexpected:true}}),/LESSON_RENDER_LOCAL_TAKES_FORBIDDEN/);
+const take={courseVersionId:'course:v1',revision:1,lessonId:'lesson:1',sceneId:'scene:1',assetVersionId:'clip:1',sourceHash:'a'.repeat(64),reason:'Replace the reviewed shot',idempotencyKey:'take:1'};
+assert.deepEqual(validateHostedCorrectedTakeRequest(take),take);
+for(const bad of [{...take,path:'C:/private.mp4'},{...take,sourceHash:'invalid'},{...take,reason:''},{...take,revision:0}])assert.throws(()=>validateHostedCorrectedTakeRequest(bad),/LESSON_TAKE_REQUEST_INVALID/);
+console.log('hosted lesson contract checks passed');

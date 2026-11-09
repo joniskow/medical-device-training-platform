@@ -12,7 +12,7 @@ export function createScheduledQualificationStore(pool:Pool){return {
       const {learnerId,enrollmentId,releaseId,releaseHash}=event.payload;
       if(![learnerId,enrollmentId,releaseId,releaseHash].every(v=>typeof v==='string'&&v.length>0))throw Error('QUALIFICATION_EVENT_INVALID');
       const bound=(await client.query(`SELECT r.manifest FROM enrollments e JOIN release_manifests r ON r.organization_id=e.organization_id AND r.course_version_id=e.course_version_id
-        WHERE e.organization_id=$1 AND e.enrollment_id=$2 AND e.learner_id=$3 AND e.status='ACTIVE' AND r.status='PUBLISHED' AND r.release_id=$4 AND r.release_hash=$5 FOR UPDATE OF e FOR SHARE OF r`,[tenant.organizationId,enrollmentId,learnerId,releaseId,releaseHash])).rows[0];
+        WHERE e.organization_id=$1 AND e.enrollment_id=$2 AND e.learner_id=$3 AND e.status IN ('ACTIVE','COMPLETED') AND r.status='PUBLISHED' AND public.lifecycle_release_available(r.release_id) AND r.release_id=$4 AND r.release_hash=$5 FOR UPDATE OF e FOR SHARE OF r`,[tenant.organizationId,enrollmentId,learnerId,releaseId,releaseHash])).rows[0];
       let result:unknown=null;
       if(bound){
         const change=bound.manifest?.content?.releaseChange;

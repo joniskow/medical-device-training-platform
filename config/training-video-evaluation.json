@@ -1,0 +1,9 @@
+{
+  "schemaVersion": "training-video-evaluation.v1",
+  "status": "pilot-thresholds-require-representative-device-validation",
+  "dimensions": ["factualProcedural", "identityContinuity", "actionVisibility", "labelCaptionLegibility", "audioTiming", "instructionalPurpose"],
+  "acceptance": "Every dimension passes independently; unresolved critical defects block publication.",
+  "review": "Independent authenticated reviewer inspects the exact final hash, whole sound/motion and complete scene intervals. Automation flags anomalies only and cannot approve clinical meaning or mechanics.",
+  "devices": ["laptop", "tablet"],
+  "thresholds": { "minimumWidth": 800, "minimumHeight": 600, "minimumLabelPixels": 18, "minimumCaptionPixels": 24, "maximumCaptionTaskOcclusionPercent": 0, "maximumSyncOffsetMs": 200, "clippedSpeechCount": 0, "minimumIntegratedLufs": -20, "maximumIntegratedLufs": -14, "maximumTruePeakDb": -1 }
+}

@@ -79,15 +79,9 @@ const previousTimeout = process.env.OPENMONTAGE_PROVIDER_TIMEOUT_MS;
 process.env.OPENMONTAGE_PROVIDER_POLL_MS = '250';
 process.env.OPENMONTAGE_PROVIDER_TIMEOUT_MS = '2000';
 try {
-  const httpProvider = createOpenMontageProvider({ mode: 'http', endpoint: `http://127.0.0.1:${httpServer.address().port}/generate` });
-  const httpResult = await httpProvider.generate({ generationId: 'http-generation:test', prompt: 'fixture', mode: 'LOCKED_INTERACTIVE', width: 960, height: 540, frameRate: 30, durationSeconds: 3, modelVersionId: 'preview:nxstage-system-one-v1', modelSourceHash });
-  assert.equal(httpResult.provider.name, 'http-fixture');
-  assert.equal(httpResult.provider.jobId, 'http-job-1');
-  assert.deepEqual([...httpResult.video.bytes], [...httpVideo]);
-  assert.equal(pollCount, 2, 'HTTP provider must poll a queued job before retrieving completed bytes');
-  const failingProvider = createOpenMontageProvider({ mode: 'http', endpoint: `http://127.0.0.1:${httpServer.address().port}/fail` });
-  await assert.rejects(() => failingProvider.generate({ generationId: 'http-generation:retry', prompt: 'fixture', mode: 'LOCKED_INTERACTIVE', width: 960, height: 540, frameRate: 30, durationSeconds: 3, modelVersionId: 'preview:nxstage-system-one-v1', modelSourceHash }), /OPENMONTAGE_PROVIDER_HTTP_503/);
-  assert.equal(failedPostCount, 2, 'HTTP provider must retry a failed create request once');
+  assert.throws(() => createOpenMontageProvider({mode:'http',endpoint:`http://127.0.0.1:${httpServer.address().port}/generate`}), /DESTINATION_DENIED/);
+  assert.equal(pollCount,0);
+  assert.equal(failedPostCount,0);
 } finally {
   if (previousPoll === undefined) delete process.env.OPENMONTAGE_PROVIDER_POLL_MS; else process.env.OPENMONTAGE_PROVIDER_POLL_MS = previousPoll;
   if (previousTimeout === undefined) delete process.env.OPENMONTAGE_PROVIDER_TIMEOUT_MS; else process.env.OPENMONTAGE_PROVIDER_TIMEOUT_MS = previousTimeout;

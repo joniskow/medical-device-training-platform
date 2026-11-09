@@ -90,8 +90,11 @@ try{
  assert.equal(JSON.parse(Buffer.from(objects.get(imported.details.manifestBlobKey))).reconstructionLineage.jobId,done.jobId);
  objects.set(artifact.blobKey,Buffer.from('changed'));assert.equal((await fetch(base+'/'+generated.jobId+'/candidate',{headers})).status,409);objects.set(artifact.blobKey,expectedCandidate);
  assert.equal(await service.artifact({...tenant,organizationId:'foreign'},generated.jobId,'candidate'),null);
+ const beforeWithdrawal=(await admin.query('SELECT status,manifest FROM model_versions WHERE organization_id=$1 AND model_version_id=$2',[org,imported.details.modelVersionId])).rows[0];
  await admin.query("UPDATE asset_rights_attestations SET status='WITHDRAWN' WHERE organization_id=$1",[org]);
- await assert.rejects(()=>models.review({...tenant,actorId:'fixture-independent-reviewer'},imported.details.modelVersionId,{sourceHash:preparedHash,expectedRevision:0,decision:'APPROVE',rationale:'Controlled denial test; no approval is issued.',idempotencyKey:'withdrawn-denial'}),/SOURCE_UNAVAILABLE/);
+ await assert.rejects(()=>models.review({...tenant,actorId:'fixture-independent-reviewer'},imported.details.modelVersionId,{sourceHash:preparedHash,expectedRevision:0,decision:'APPROVE',rationale:'Controlled denial test; no approval is issued.',idempotencyKey:'withdrawn-denial'}),/MODEL_UNAVAILABLE/,'Derived suppression must hide the model before disclosing source-specific review state');
+ assert.deepEqual((await admin.query('SELECT status,manifest FROM model_versions WHERE organization_id=$1 AND model_version_id=$2',[org,imported.details.modelVersionId])).rows[0],beforeWithdrawal);
+ assert.equal((await admin.query(`SELECT count(*)::int n FROM audit_events WHERE organization_id=$1 AND event_type='MODEL_REVIEW_DECISION' AND resource_id=$2`,[org,imported.details.modelVersionId])).rows[0].n,0,'A denied approval must not create a model-review decision');
  assert.equal((await fetch(base+'/'+generated.jobId+'/candidate',{headers})).status,404);await admin.query("UPDATE asset_rights_attestations SET status='ACTIVE' WHERE organization_id=$1",[org]);
  const bad=await store.create(tenant,{...input,idempotencyKey:'bad-source'});objects.set(org+'/source.png',Buffer.from('tampered source'));
  assert.equal((await run(bad.jobId)).lastFailure.code,'RECONSTRUCTION_SOURCE_CONTENT_MISMATCH');assert.equal(calls,1);objects.delete(org+'/source.png');

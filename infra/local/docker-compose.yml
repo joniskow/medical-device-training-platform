@@ -1,4 +1,20 @@
 services:
+  postgres-vector:
+    image: pgvector/pgvector:0.8.2-pg16@sha256:00ba258a66dac104fd5171074a0084462a64a1369d8513f3d0a634e2f24d15bc
+    environment:
+      POSTGRES_DB: medical_device
+      POSTGRES_USER: local_app
+      POSTGRES_PASSWORD: local_only_change_me
+    ports:
+      - "127.0.0.1:54339:5432"
+    volumes:
+      - postgres-vector-data:/var/lib/postgresql/data
+      - ./postgres-init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U local_app -d medical_device"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
   postgres:
     image: postgres:16-alpine
     environment:
@@ -27,5 +43,6 @@ services:
       - azurite-data:/data
 
 volumes:
+  postgres-vector-data:
   postgres-data:
   azurite-data:

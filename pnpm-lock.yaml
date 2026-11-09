@@ -109,6 +109,9 @@ importers:
       '@azure/storage-blob':
         specifier: ^12.34.0
         version: 12.34.0(supports-color@10.2.2)
+      '@medical-device/ai-gateway':
+        specifier: workspace:*
+        version: link:../../packages/ai-gateway
       '@medical-device/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts
@@ -118,6 +121,9 @@ importers:
       '@medical-device/model-runtime':
         specifier: workspace:*
         version: link:../../packages/model-runtime
+      '@medical-device/simulation-schema':
+        specifier: workspace:*
+        version: link:../../packages/simulation-schema
       '@medical-device/storage':
         specifier: workspace:*
         version: link:../../packages/storage

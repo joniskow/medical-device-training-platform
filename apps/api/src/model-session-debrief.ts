@@ -33,7 +33,7 @@ export async function readModelSessionDebrief(pool: Pool, tenant: TenantContext,
       JOIN release_manifests r ON r.organization_id=s.organization_id AND r.release_id=s.release_id AND r.course_version_id=e.course_version_id
       JOIN certification_policies p ON p.organization_id=s.organization_id AND p.policy_id=s.policy_id AND p.version=s.policy_version AND p.course_version_id=e.course_version_id
       JOIN simulation_definitions d ON d.organization_id=s.organization_id AND d.simulation_definition_id=s.simulation_definition_id
-      WHERE s.organization_id=$1 AND s.simulation_session_id=$2 AND s.learner_id=$3 AND e.status='ACTIVE' AND r.status='PUBLISHED' AND p.status='PUBLISHED' AND d.status='PUBLISHED'
+      WHERE s.organization_id=$1 AND s.simulation_session_id=$2 AND s.learner_id=$3 AND e.status IN ('ACTIVE','COMPLETED') AND r.status='PUBLISHED' AND p.status='PUBLISHED' AND d.status='PUBLISHED'
       FOR SHARE OF s,e,a,r,p,d`, [tenant.organizationId, sessionId, tenant.actorId]);
     const row = session.rows[0];
     if (!row) return null;

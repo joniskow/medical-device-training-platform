@@ -21,8 +21,8 @@ async function sessionAccessActive(client: PoolClient, tenant: TenantContext, se
     JOIN certification_policies p ON p.organization_id=s.organization_id AND p.policy_id=s.policy_id
       AND p.course_version_id=e.course_version_id AND p.version=s.policy_version
     WHERE s.organization_id=$1 AND s.simulation_session_id=$2 AND s.learner_id=$3
-      AND s.status='ACTIVE' AND s.expires_at>CURRENT_TIMESTAMP AND e.status='ACTIVE'
-      AND (a.status='ACTIVE' OR (a.status='COMPLETED' AND COALESCE(s.state->'modelState',s.state)->>'completed'='true')) AND r.status='PUBLISHED' AND p.status='PUBLISHED'
+      AND s.status='ACTIVE' AND s.expires_at>CURRENT_TIMESTAMP AND e.status IN ('ACTIVE','COMPLETED')
+      AND (a.status='ACTIVE' OR (a.status='COMPLETED' AND COALESCE(s.state->'modelState',s.state)->>'completed'='true')) AND r.status='PUBLISHED' AND public.lifecycle_release_available(r.release_id) AND p.status='PUBLISHED'
       AND a.started_at+COALESCE((p.policy->>'attemptTtlSeconds')::integer,86400)*interval '1 second'>CURRENT_TIMESTAMP
     FOR SHARE OF e,r,p FOR UPDATE OF a`,[tenant.organizationId,sessionId,tenant.actorId]);
   if(!access.rowCount)return false;
@@ -223,8 +223,8 @@ export function createPostgresModelSessionService(input: { pool: Pool }): ModelS
       return withTenantTransaction(input.pool, tenant, async (client) => {
         const access=await client.query(`SELECT enrollment.enrollment_id FROM enrollments enrollment
           JOIN release_manifests release ON release.organization_id=enrollment.organization_id AND release.course_version_id=enrollment.course_version_id
-          WHERE enrollment.organization_id=$1 AND enrollment.enrollment_id=$2 AND enrollment.learner_id=$3 AND enrollment.status='ACTIVE'
-            AND release.release_id=$4 AND release.status='PUBLISHED' FOR UPDATE OF enrollment FOR SHARE OF release`,[tenant.organizationId,request.enrollmentId,tenant.actorId,request.releaseId]);
+          WHERE enrollment.organization_id=$1 AND enrollment.enrollment_id=$2 AND enrollment.learner_id=$3 AND enrollment.status IN ('ACTIVE','COMPLETED')
+            AND release.release_id=$4 AND release.status='PUBLISHED' AND public.lifecycle_release_available(release.release_id) FOR UPDATE OF enrollment FOR SHARE OF release`,[tenant.organizationId,request.enrollmentId,tenant.actorId,request.releaseId]);
         if(!access.rows[0])throw new Error('ENROLLMENT_NOT_ACTIVE_FOR_RELEASE');
         await assertStoryActivityAccess(client,tenant,request.enrollmentId,request.releaseId,request.activityId,true);
         const startHash = requestHash({ actorId: tenant.actorId, request });
@@ -250,7 +250,7 @@ export function createPostgresModelSessionService(input: { pool: Pool }): ModelS
           `SELECT binding.release_binding_id, binding.model_version_id, binding.manifest
            FROM release_model_bindings binding
            JOIN release_manifests release ON release.organization_id = binding.organization_id AND release.release_id = binding.release_id
-           WHERE binding.organization_id = $1 AND binding.release_id = $2 AND binding.model_version_id = $3 AND release.status = 'PUBLISHED'`,
+           WHERE binding.organization_id = $1 AND binding.release_id = $2 AND binding.model_version_id = $3 AND release.status = 'PUBLISHED' AND public.lifecycle_release_available(release.release_id)`,
           [tenant.organizationId, request.releaseId, request.modelVersionId]
         );
         const bindingRow = binding.rows[0];
@@ -263,8 +263,8 @@ export function createPostgresModelSessionService(input: { pool: Pool }): ModelS
            FROM enrollments enrollment
            JOIN release_manifests release ON release.organization_id = enrollment.organization_id AND release.course_version_id = enrollment.course_version_id
            WHERE enrollment.organization_id = $1 AND enrollment.enrollment_id = $2 AND enrollment.learner_id = $3
-             AND enrollment.status = 'ACTIVE'
-             AND release.release_id = $4 AND release.status = 'PUBLISHED'`,
+             AND enrollment.status IN ('ACTIVE','COMPLETED')
+             AND release.release_id = $4 AND release.status = 'PUBLISHED' AND public.lifecycle_release_available(release.release_id)`,
           [tenant.organizationId, request.enrollmentId, tenant.actorId, request.releaseId]
         );
         if (!enrollment.rows[0]) throw new Error("ENROLLMENT_NOT_ACTIVE_FOR_RELEASE");
@@ -273,7 +273,7 @@ export function createPostgresModelSessionService(input: { pool: Pool }): ModelS
            FROM activities activity
            JOIN modules module ON module.organization_id = activity.organization_id AND module.module_id = activity.module_id
            JOIN release_manifests release ON release.organization_id = module.organization_id AND release.course_version_id = module.course_version_id
-           WHERE activity.organization_id = $1 AND activity.activity_id = $2 AND release.release_id = $3 AND release.status = 'PUBLISHED'
+           WHERE activity.organization_id = $1 AND activity.activity_id = $2 AND release.release_id = $3 AND release.status = 'PUBLISHED' AND public.lifecycle_release_available(release.release_id)
              AND activity.content->>'simulationDefinitionId' = $4`,
           [tenant.organizationId, request.activityId, request.releaseId, request.simulationDefinitionId]
         );
@@ -283,7 +283,7 @@ export function createPostgresModelSessionService(input: { pool: Pool }): ModelS
            FROM certification_policies policy
            JOIN release_manifests release ON release.organization_id = policy.organization_id AND release.course_version_id = policy.course_version_id
            WHERE policy.organization_id = $1 AND policy.policy_id = $2 AND policy.status = 'PUBLISHED'
-             AND release.release_id = $3 AND release.status = 'PUBLISHED'`,
+             AND release.release_id = $3 AND release.status = 'PUBLISHED' AND public.lifecycle_release_available(release.release_id)`,
           [tenant.organizationId, request.policyId, request.releaseId]
         );
         if (!policy.rows[0]) throw new Error("POLICY_NOT_PUBLISHED_FOR_RELEASE");
@@ -379,7 +379,7 @@ export function createPostgresModelSessionService(input: { pool: Pool }): ModelS
         if (!tenant.actorId) return result("expired_session", 1, "An authenticated learner is required for this model activity.", undefined, { clientActionId: action.clientActionId });
         // Use the same enrollment-first lock order as assessment completion and credential issuance.
         const enrollment=await client.query(`SELECT e.enrollment_id FROM enrollments e JOIN simulation_sessions s ON s.organization_id=e.organization_id AND s.enrollment_id=e.enrollment_id
-          WHERE s.organization_id=$1 AND s.simulation_session_id=$2 AND s.learner_id=$3 AND e.learner_id=$3 AND e.status='ACTIVE' FOR UPDATE OF e`,[tenant.organizationId,sessionId,tenant.actorId]);
+          WHERE s.organization_id=$1 AND s.simulation_session_id=$2 AND s.learner_id=$3 AND e.learner_id=$3 AND e.status IN ('ACTIVE','COMPLETED') FOR UPDATE OF e`,[tenant.organizationId,sessionId,tenant.actorId]);
         if(!enrollment.rows[0])return result("expired_session",1,"This model activity session is not available.",undefined,{clientActionId:action.clientActionId});
         const session = await client.query<{ state: unknown; next_sequence: number; expires_at: Date | string; learner_id: string; status: string; release_id: string | null; policy_id: string | null; simulation_definition_id: string }>(
           `SELECT state, next_sequence, expires_at, learner_id, status, release_id, policy_id, simulation_definition_id
@@ -407,7 +407,7 @@ export function createPostgresModelSessionService(input: { pool: Pool }): ModelS
            JOIN release_manifests release ON release.organization_id = binding.organization_id AND release.release_id = binding.release_id
            JOIN certification_policies policy ON policy.organization_id = release.organization_id AND policy.course_version_id = release.course_version_id
            WHERE binding.organization_id = $1 AND binding.release_id = $2 AND binding.release_binding_id = $3
-             AND policy.policy_id = $4 AND release.status = 'PUBLISHED' AND policy.status = 'PUBLISHED'`,
+             AND policy.policy_id = $4 AND release.status = 'PUBLISHED' AND public.lifecycle_release_available(release.release_id) AND policy.status = 'PUBLISHED'`,
           [tenant.organizationId, row.release_id, action.releaseBindingId, row.policy_id]
         );
         if (!activeBinding.rows[0]) return result("expired_session", row.next_sequence, "The release or certification policy is no longer active.", model, { clientActionId: action.clientActionId });
@@ -612,7 +612,7 @@ export function createPostgresModelSessionService(input: { pool: Pool }): ModelS
            JOIN release_manifests release ON release.organization_id = binding.organization_id AND release.release_id = binding.release_id
            JOIN certification_policies policy ON policy.organization_id = release.organization_id AND policy.course_version_id = release.course_version_id
            WHERE binding.organization_id = $1 AND binding.release_id = $2 AND binding.release_binding_id = $3
-             AND policy.policy_id = $4 AND release.status = 'PUBLISHED' AND policy.status = 'PUBLISHED'`,
+             AND policy.policy_id = $4 AND release.status = 'PUBLISHED' AND public.lifecycle_release_available(release.release_id) AND policy.status = 'PUBLISHED'`,
           [tenant.organizationId, row.release_id, request.releaseBindingId, row.policy_id]
         );
         if (!activeBinding.rows[0]) return result("expired_session", row.next_sequence, "The release or certification policy is no longer active.", model);

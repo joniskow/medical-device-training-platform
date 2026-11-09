@@ -10,6 +10,7 @@ export function createModelImportService(pool:Pool,storage:PrivateObjectStorageP
    const row=await store.get(tenant,id);if(!row||!row.blobKey.startsWith(tenant.organizationId+'/'))return null;
    const object=await storage.readObject({blobKey:row.blobKey,maxBytes:64*1024*1024});
    if(createHash('sha256').update(object.bytes).digest('hex')!==row.sha256||row.manifest.sourceHash!==row.sha256)throw Error('MODEL_CONTENT_MISMATCH');
+   if(!await store.get(tenant,id))return null;
    return object.bytes;
   }
  };

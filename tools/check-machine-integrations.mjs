@@ -1,0 +1,73 @@
+import assert from 'node:assert/strict';
+import {Pool} from 'pg';
+import {randomUUID,generateKeyPairSync,sign} from 'node:crypto';
+import {MACHINE_INTEGRATION_MIGRATION_SQL,createMachineIntegrationStore,seedActiveOrganizationMembership,createPostgresOrganizationMembershipStore,createTechnicalReportingStore,createProtectedExportStore,createCustomerWebhookStore,withTenantTransaction} from '../packages/db/dist/index.js';
+import {createEntraRequestAuthenticator} from '../apps/api/dist/entra-authenticator.js';
+import {createMachineIntegrationHttp} from '../apps/api/dist/machine-integration-http.js';
+import {createJobStatusHttpServer} from '../apps/api/dist/job-status-http.js';
+import {createCustomerWebhookProcessor,deriveWebhookSecret} from '../apps/worker/dist/customer-webhooks.js';
+const ownerUrl=process.env.TEST_DATABASE_URL??'postgresql://local_app:local_only_change_me@127.0.0.1:54329/medical_device';
+const owner=new Pool({connectionString:ownerUrl}),role='machine_test_'+randomUUID().replaceAll('-',''),runtime=new Pool({connectionString:ownerUrl,options:'-c role='+role});
+const organizationId='machine-test:'+randomUUID(),otherOrganizationId=organizationId+':other',admin='machine-admin:'+randomUUID(),tenant={organizationId,actorId:admin,correlationId:'machine-test'},issuer='https://login.example.test/tenant/v2.0',identityTenant=randomUUID(),clientId=randomUUID(),servicePrincipalId=randomUUID(),machine={clientId,servicePrincipalId,applicationRoles:['Training.Reports.Read','Training.Exports.Read','Training.Exports.Write','Training.Webhooks.Read','Training.Webhooks.Write'],issuedAt:new Date(Date.now()-30_000).toISOString()};
+let server;
+try{
+ await owner.query(MACHINE_INTEGRATION_MIGRATION_SQL);
+ // Local suites share the worker role; these are the same scoped table permissions used by bootstrap.
+ await owner.query('GRANT SELECT,INSERT,UPDATE ON machine_integrations,machine_integration_references TO local_runtime');
+ await owner.query(`CREATE ROLE ${role} NOLOGIN NOBYPASSRLS`);await owner.query(`GRANT USAGE ON SCHEMA public TO ${role}`);
+ await owner.query(`GRANT SELECT ON ALL TABLES IN SCHEMA public TO ${role}`);
+ await owner.query(`GRANT INSERT,UPDATE ON machine_integrations,machine_integration_references,audit_events,customer_webhook_subscriptions,customer_webhook_deliveries,protected_exports,outbox_events TO ${role}`);
+ await owner.query(`GRANT EXECUTE ON FUNCTION public.authorize_machine_integration(uuid,text,text,uuid,uuid,timestamptz,text,text[]),public.sync_machine_integration_actor(uuid,text) TO ${role}`);
+ assert.equal((await runtime.query("SELECT has_table_privilege(current_user,'organization_memberships','INSERT') AS allowed")).rows[0].allowed,false);
+ for(const org of [organizationId,otherOrganizationId]){await owner.query("INSERT INTO organizations(organization_id,name,status,created_by,request_hash,created_at,updated_at) VALUES($1,'Machine integration test','ACTIVE',$2,'test',now(),now())",[org,admin]);await seedActiveOrganizationMembership(owner,{organizationId:org,subject:admin,roles:['organization_admin']});}
+ const store=createMachineIntegrationStore(runtime),saved=await store.save(tenant,{issuer,identityTenant,clientId,servicePrincipalId,scopes:['reports:read','exports:read','exports:write','webhooks:read','webhooks:write'],enabled:true,revision:0});
+ const authorize=overrides=>store.authorize({integrationId:saved.integrationId,issuer,identityTenant,machine,scope:'reports:read',correlationId:'test',...overrides});
+ assert.equal((await authorize()).organizationId,organizationId);
+ assert.equal(await authorize({machine:{...machine,clientId:randomUUID()}}),null);
+ assert.equal(await authorize({machine:{...machine,servicePrincipalId:randomUUID()}}),null);
+ assert.equal(await authorize({machine:{...machine,applicationRoles:['organization_admin']}}),null);
+ const other=await store.save({...tenant,organizationId:otherOrganizationId},{issuer,identityTenant,clientId:randomUUID(),servicePrincipalId:randomUUID(),scopes:['reports:read'],enabled:true,revision:0});
+ assert.equal(await authorize({integrationId:other.integrationId}),null);
+ const {privateKey,publicKey}=generateKeyPairSync('rsa',{modulusLength:2048}),jwk=publicKey.export({format:'jwk'}),now=Math.floor(Date.now()/1000);
+ const token=overrides=>{const claims={iss:issuer,aud:'api://machine-test',tid:identityTenant,oid:servicePrincipalId,azp:clientId,idtyp:'app',iat:now-30,exp:now+300,roles:machine.applicationRoles,...overrides};const encoded=Buffer.from(JSON.stringify({alg:'RS256',kid:'key1'})).toString('base64url')+'.'+Buffer.from(JSON.stringify(claims)).toString('base64url');return encoded+'.'+sign('RSA-SHA256',Buffer.from(encoded),privateKey).toString('base64url');};
+ const authenticator=createEntraRequestAuthenticator({tenantId:identityTenant,audience:'api://machine-test',openIdConfigurationUrl:'https://login.example.test/config',fetchImpl:async url=>new Response(JSON.stringify(String(url).endsWith('/config')?{issuer,jwks_uri:'https://login.example.test/keys'}:{keys:[{...jwk,kid:'key1'}]}))});
+ const app=await authenticator.authenticate({headers:{authorization:'Bearer '+token({email:'forged@example.com',email_verified:true})}});assert.equal(app.verifiedEmail,undefined);assert.deepEqual(app.roles,[]);assert.equal(app.machineIdentity.clientId,clientId);
+ assert.equal(await authenticator.authenticate({headers:{authorization:'Bearer '+token({idtyp:undefined})}}),null);
+ assert.equal(await authenticator.authenticate({headers:{authorization:'Bearer '+token({scp:'user.read'})}}),null);
+ const webhookMaster=Buffer.alloc(32,7);
+ const integration=createMachineIntegrationHttp({store,reports:createTechnicalReportingStore(runtime),exports:createProtectedExportStore(runtime),webhooks:createCustomerWebhookStore(runtime),webhookKeyIds:new Set(['key1']),webhookSigningSecret:(t,id)=>deriveWebhookSecret(webhookMaster,t.organizationId,id)});
+ let personalCalls=0;
+ server=createJobStatusHttpServer({machineIntegrationApi:integration,authenticator,organizationContextResolver:createPostgresOrganizationMembershipStore(runtime),statusService:{get:async()=>null,retry:async()=>null},personalAccountStore:{access:async identity=>{personalCalls++;if(identity.subject!==admin)throw Error('MACHINE_REACHED_PERSONAL_ACCOUNT');return {userId:admin};},observeVerification:async()=>{}}});
+ await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));const base='http://127.0.0.1:'+server.address().port;
+ const call=(path,body,claims)=>fetch(base+path,{method:body?'POST':'GET',headers:{authorization:'Bearer '+token(claims),...(claims?.oid===admin?{'x-organization-id':organizationId}:{}),...(body?{'content-type':'application/json','idempotency-key':randomUUID()}: {})},...(body?{body:JSON.stringify(body)}:{})});
+ let response=await call('/api/v1/integration/'+saved.integrationId+'/reports/summary');assert.equal(response.status,200,await response.clone().text());assert.equal((await response.text()).includes(organizationId),false);
+ response=await call('/api/v1/integration/'+saved.integrationId+'/reports/summary',undefined,{roles:['Training.Exports.Read']});assert.equal(response.status,403);
+ for(const path of ['/api/v1/account','/api/v1/organization-profile','/api/v1/integration-clients','/api/v1/courses'])assert.equal((await call(path)).status,403,path);
+ assert.equal(personalCalls,0);
+ const humanClaims={oid:admin,idtyp:undefined,azp:undefined,scp:'training.read',roles:[]};
+ response=await call('/api/v1/integration-clients',undefined,humanClaims);assert.equal(response.status,200,await response.clone().text());assert.equal((await response.json()).items.length,1);
+ const createdBody={issuer,identityTenant,clientId:randomUUID(),servicePrincipalId:randomUUID(),scopes:['reports:read'],enabled:true,revision:0};
+ const managementKey=randomUUID();const manage=()=>fetch(base+'/api/v1/integration-clients',{method:'POST',headers:{authorization:'Bearer '+token(humanClaims),'content-type':'application/json','x-organization-id':organizationId,'idempotency-key':managementKey},body:JSON.stringify(createdBody)});
+ response=await manage();assert.equal(response.status,201,await response.clone().text());const created=await response.json();response=await manage();assert.equal(response.status,201,await response.clone().text());assert.equal((await response.json()).integrationId,created.integrationId);
+ response=await call('/api/v1/integration/'+saved.integrationId+'/exports',{kind:'summary'});assert.equal(response.status,202,await response.clone().text());const exported=await response.json();assert.match(exported.exportId,/^[0-9a-f-]{36}$/);assert.equal(exported.exportId.startsWith('export:'),false);
+ assert.equal((await call('/api/v1/integration/'+saved.integrationId+'/exports/'+exported.exportId)).status,200);
+ response=await call('/api/v1/integration/'+saved.integrationId+'/webhooks',{endpoint:'https://receiver.example/events',keyId:'key1',eventTypes:['credential.issued'],enabled:true,revision:0});assert.equal(response.status,200,await response.clone().text());const hook=await response.json();assert.match(hook.subscriptionId,/^[0-9a-f-]{36}$/);assert.equal(hook.keyId,'key1');assert.match(hook.signingSecret,/^[a-f0-9]{64}$/);
+ const internalHook=await store.internal(tenant,saved.integrationId,'subscriptionId',hook.subscriptionId);
+ const eventId='machine-event:'+randomUUID(),rawCredential='credential:private:'+randomUUID();
+ await withTenantTransaction(owner,tenant,client=>client.query("INSERT INTO outbox_events(outbox_event_id,organization_id,event_type,deduplication_key,payload,state,available_at,created_at,updated_at) VALUES($1,$2,'credential.issued',$1,$3,'PENDING',now(),now(),now())",[eventId,organizationId,JSON.stringify({credentialId:rawCredential,status:'ACTIVE'})]));
+ const delivery=(await withTenantTransaction(owner,tenant,client=>client.query('SELECT delivery_id FROM customer_webhook_deliveries WHERE organization_id=$1 AND subscription_id=$2 AND event_id=$3',[organizationId,internalHook,eventId]))).rows[0];assert.ok(delivery);
+ let sent;
+ const processor=createCustomerWebhookProcessor(runtime,{keys:new Map([['key1',webhookMaster]]),transport:async input=>{sent=input;return {bytes:Buffer.from('ok'),contentType:'text/plain'};}});
+ await processor.process(tenant,delivery.delivery_id);assert.ok(sent);assert.equal(sent.body.includes(rawCredential),false);assert.equal(sent.body.includes(eventId),false);assert.equal(sent.headers['X-Training-Event-ID'],JSON.parse(sent.body).eventId);assert.match(sent.headers['X-Training-Delivery-ID'],/^[a-f0-9-]{36}$/);
+ response=await call('/api/v1/integration/'+saved.integrationId+'/webhooks');const hooks=await response.json();assert.equal(hooks.items.length,1);assert.equal(hooks.items[0].subscriptionId,hook.subscriptionId);
+ const rotated=await store.save(tenant,{integrationId:saved.integrationId,issuer,identityTenant,clientId,servicePrincipalId,scopes:['reports:read'],enabled:true,revision:1,validAfter:new Date().toISOString()});
+ assert.equal(await authorize(),null);assert.equal((await call('/api/v1/integration/'+saved.integrationId+'/reports/summary')).status,403);
+ assert.equal((await withTenantTransaction(owner,tenant,client=>client.query('SELECT enabled FROM customer_webhook_subscriptions WHERE subscription_id=$1',[internalHook]))).rows[0].enabled,false);
+ await store.save(tenant,{integrationId:saved.integrationId,issuer,identityTenant,clientId,servicePrincipalId,scopes:['reports:read'],enabled:false,revision:rotated.revision});assert.equal(await authorize({machine:{...machine,issuedAt:new Date(Date.now()+1000).toISOString()}}),null);
+ console.log('Restricted-role DB and signed-token HTTP machine integrations passed: isolation, least privilege, private-account exclusion, aliases, rotation and revocation.');
+}finally{
+ if(server){server.closeAllConnections();await new Promise(resolve=>server.close(resolve));}
+ await runtime.end();
+ for(const org of [organizationId,otherOrganizationId])await withTenantTransaction(owner,{organizationId:org,actorId:admin,correlationId:'cleanup'},async client=>{for(const table of ['customer_webhook_deliveries','customer_webhook_subscriptions','machine_integration_references','machine_integrations','protected_exports','outbox_events','audit_events','role_assignments','organization_memberships','organizations'])await client.query('DELETE FROM '+table+' WHERE organization_id=$1',[org]);});
+ await owner.query(`DROP OWNED BY ${role}`);await owner.query(`DROP ROLE IF EXISTS ${role}`);await owner.end();
+}

@@ -8,11 +8,12 @@ import {runReconstructionProcess} from './bounded-reconstruction-process.js';
 type VideoTools={kind:'native';ffmpeg:string;ffprobe:string}|{kind:'docker';executable:string;image:string};
 export function createPhotogrammetryEngine(options:{pythonExecutable:string;scriptsDirectory:string;openMvsDirectory:string;workDirectory?:string;videoTools?:VideoTools;
   retainEvidenceDirectory?:string;calibration?:{file:string;sourceHashes:readonly string[]};blender?:{executable:string;script:string}}):ReconstructionEngine{
- return {modes:options.videoTools?['multi-view','video']:['multi-view'],async generate({job,sources}){
+ return {modes:options.videoTools?['multi-view','video']:['multi-view'],async generate({job,sources,signal}){
+  signal?.throwIfAborted();
   if(!['multi-view','video'].includes(job.payload.mode)||job.payload.mode==='video'&&(!options.videoTools||sources.length!==1)||job.payload.mode==='multi-view'&&(sources.length<20||sources.length>100))throw Error('RECONSTRUCTION_MODE_UNAVAILABLE');
   const root=resolve(options.workDirectory??tmpdir());await mkdir(root,{recursive:true});const work=await mkdtemp(join(root,'mdt-photogrammetry-')),images=join(work,'images'),run=join(work,'result'),scripts=resolve(options.scriptsDirectory);
   let safeCleanup=true;
-  const launch=(command:string,args:string[],timeout:number)=>runReconstructionProcess(command,args,timeout,{...process.env,OMP_NUM_THREADS:'4',OPENBLAS_NUM_THREADS:'4'});
+  const launch=(command:string,args:string[],timeout:number)=>runReconstructionProcess(command,args,timeout,{...process.env,OMP_NUM_THREADS:'4',OPENBLAS_NUM_THREADS:'4'},signal);
   try{
    let inputImages=images;
    if(job.payload.mode==='video'){
@@ -23,7 +24,7 @@ export function createPhotogrammetryEngine(options:{pythonExecutable:string;scri
     else{
      const destination=join(work,'video-output');await mkdir(destination);const name='mdt-video-views-'+randomUUID();
      try{await launch(tools.executable,['run','--rm','--name',name,'--network','none','--memory','2g','--cpus','2','--mount',`type=bind,source=${video},target=/input/source.${extension},readonly`,'--mount',`type=bind,source=${scripts},target=/checks,readonly`,'--mount',`type=bind,source=${destination},target=/runs`,'--entrypoint','python3',tools.image,'/checks/video_views.py','--video',`/input/source.${extension}`,'--output','/runs/views','--frames','48'],240_000);}
-     catch(error){try{await launch(tools.executable,['rm','-f',name],20_000);}catch(cleanupError){if(!String((cleanupError as {stderr?:string}).stderr).includes('No such container'))safeCleanup=false;}throw error;}
+     catch(error){try{await runReconstructionProcess(tools.executable,['rm','-f',name],20_000,process.env);}catch(cleanupError){if(!String((cleanupError as {stderr?:string}).stderr).includes('No such container'))safeCleanup=false;}throw error;}
      inputImages=join(destination,'views','images');
     }
     if(tools.kind==='native')inputImages=join(views,'images');

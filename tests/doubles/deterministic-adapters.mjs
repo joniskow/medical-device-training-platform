@@ -132,12 +132,13 @@ export function createInMemoryJobStore() {
       record.updatedAt = current;
       return clone(record);
     },
-    async succeed(tenant, jobId, workerId, leaseGeneration, outcome, now) {
+    async succeed(tenant, jobId, workerId, leaseGeneration, outcome, now, completion) {
       const record = records.get(jobId);
       if (!tenant?.organizationId) throw new Error("TENANT_CONTEXT_REQUIRED");
       if (!record) throw new Error("JOB_NOT_FOUND");
       if (record.tenant.organizationId !== tenant.organizationId) return null;
       if (record.state !== "RUNNING" || record.leaseOwner !== workerId || record.leaseGeneration !== leaseGeneration) return null;
+      await completion?.beforeCommit?.();
       record.state = "SUCCEEDED";
       record.outcome = cloneOutcome(outcome);
       record.outputArtifactIds = [...outcome.outputArtifactIds];
@@ -145,12 +146,13 @@ export function createInMemoryJobStore() {
       record.updatedAt = timestamp(now);
       return clone(record);
     },
-    async fail(tenant, jobId, workerId, leaseGeneration, failure, now, outcome) {
+    async fail(tenant, jobId, workerId, leaseGeneration, failure, now, outcome, completion) {
       const record = records.get(jobId);
       if (!tenant?.organizationId) throw new Error("TENANT_CONTEXT_REQUIRED");
       if (!record) throw new Error("JOB_NOT_FOUND");
       if (record.tenant.organizationId !== tenant.organizationId) return null;
       if (record.state !== "RUNNING" || record.leaseOwner !== workerId || record.leaseGeneration !== leaseGeneration) return null;
+      await completion?.beforeCommit?.();
       record.lastFailure = failure;
       if (outcome) {
         record.outcome = cloneOutcome(outcome);

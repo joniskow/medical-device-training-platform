@@ -4,6 +4,11 @@ import { validateAssessmentDefinition, scoreAssessment, learnerAssessment, valid
 const question = (questionId,type,correctOptionIds) => ({questionId,type,prompt:'Choose the supported action.',options:[{optionId:'c',text:'Third'},{optionId:'a',text:'First'},{optionId:'b',text:'Second'}],correctOptionIds,points:2,competencyIds:['safe-use'],rationale:'See the approved manual.',citations:[{assetVersionId:'source:manual',page:1}]});
 const assessment={schemaVersion:'assessment-definition.v1',assessmentId:'assessment:test',version:1,passScore:0.8,questions:[question('q1','multiple_choice',['a']),question('q2','multi_select',['a','c']),question('q3','ordered_step',['c','b','a'])]};
 assert.equal(validateAssessmentDefinition(assessment).valid,true);
+for (const type of ['multiple_choice', 'multi_select', 'ordered_step']) {
+ const ambiguous=structuredClone(assessment);ambiguous.questions[0]=question('ambiguous',type,type==='ordered_step'?['a','b','c']:['a']);
+ ambiguous.questions[0].options[0].text='  First\n  ';
+ assert.equal(validateAssessmentDefinition(ambiguous).valid,false,'Indistinguishable answer labels must not be scored differently: '+type);
+}
 const answers=[{questionId:'q1',selectedOptionIds:['a']},{questionId:'q2',selectedOptionIds:['c','a']},{questionId:'q3',selectedOptionIds:['c','b','a']}];
 assert.deepEqual(scoreAssessment(assessment,answers),{score:6,maxScore:6,passed:true,demonstratedCompetencyIds:['safe-use'],missedCompetencyIds:[]});
 const wrong=structuredClone(answers);wrong[2].selectedOptionIds=['a','b','c'];

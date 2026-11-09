@@ -45,3 +45,25 @@ The `auth` object above is supplied by your application. The Azure-hosted starte
 Methods cover public auth metadata, account, organization contexts/selection, enrollment pages/details, activity launch, asset descriptor, actions, resume and debrief. `paths` and `components` expose generated OpenAPI types for additional direct `openapi-fetch` use. The model manifest remains versioned runtime data; validate it and the state before rendering. Fetch private model bytes only through the authenticated same-origin API route.
 
 Build: `pnpm --filter @medical-device/contracts build` then `pnpm --filter @medical-device/api-client build`. Do not hand-edit `src/schema.ts` or `openapi.json`; edit `packages/contracts/src/learner-openapi.ts` and regenerate. This private package can be handed off as a `pnpm pack` tarball without publishing to a registry.
+
+
+The 0.2.0 contract adds headless certification methods: course snapshot/save/review/publish,
+assignment, reading acknowledgment, assessment start/resume/submission, credential list/issuance,
+sharing, revocation/supersession and anonymous public verification. Review/publish, assessment
+start, sharing and lifecycle changes require an explicit stable idempotency key. Draft saves
+require the snapshot revision. A 409 requires reconciliation before a new intent; do not silently
+replace its revision. Assessment answers contain only question and selected option identities.
+The server resolves immutable answer keys, release policy and exactly-once credential eligibility.
+
+Public verification never requests or forwards a bearer token or organization header. Other
+methods continue to fence account/organization changes and never automatically replay mutations.
+Server roles and independent-review rules remain authoritative; client types do not grant permission.
+Course content remains a versioned domain document and must pass the existing server validators;
+this contract does not claim complete coverage of every author/admin/operator/integration surface.
+
+Run `node tools/check-certification-api-client.mjs` after building contracts, API and api-client.
+This tests the generated client against the real HTTP handler with controlled service dependencies;
+it is a compatibility test, not proof of a deployed identity/provider/storage journey.
+
+Email possession verification uses `startEmailVerification`, `completeEmailVerification` and `revokeEmailVerification` on the current signed account, without an organization requirement. Starts are rate limited; the library never automatically retries them. Revocation may still return `verified: true` when a signed provider claim independently attests the email.
+Every generated operation is available through `client.request(api => api.GET(...))` (or `POST`, `PUT`, etc.). This typed callback uses the same destination restriction, bearer acquisition, organization context, context-switch rejection and `TrainingApiError` handling as the convenience methods. Use it for lifecycle, reporting, webhook and render surfaces without creating a second transport.

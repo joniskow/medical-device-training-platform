@@ -1,6 +1,29 @@
 import type {ReconstructionEngine} from '@medical-device/contracts';
 import {createSingleImageEngine} from './single-image-engine.js';
 import {createPhotogrammetryEngine} from './photogrammetry-engine.js';
+import {execFile} from 'node:child_process';
+import {join} from 'node:path';
+
+type Preflight=(executable:string,args:string[])=>Promise<void>;
+const executePreflight:Preflight=(executable,args)=>new Promise((resolve,reject)=>execFile(executable,args,{windowsHide:true,timeout:180_000,maxBuffer:64*1024,env:{...process.env,HF_HUB_OFFLINE:'1',TRANSFORMERS_OFFLINE:'1',HF_HUB_DISABLE_TELEMETRY:'1'}},error=>error?reject(error):resolve()));
+/** Run before queue consumption. Configured capability is unavailable unless its exact offline runtime passes. */
+export async function initializeReconstructionEngine(env:NodeJS.ProcessEnv,preflight:Preflight=executePreflight):Promise<ReconstructionEngine|undefined>{
+ const feature=env.RECONSTRUCTION_SINGLE_IMAGE_ENABLED?.trim();
+ if(feature!==undefined&&!['true','false'].includes(feature))throw Error('RECONSTRUCTION_SINGLE_IMAGE_FEATURE_INVALID');
+ const required=(name:string)=>{const value=env[name]?.trim();if(!value)throw Error('WORKER_CONFIGURATION_MISSING:'+name);return value;};
+ const configured=feature==='true'||feature===undefined&&Boolean(env.RECONSTRUCTION_ASSETS_DIR?.trim());
+ if(configured){
+  const executable=required('RECONSTRUCTION_PYTHON'),scripts=required('RECONSTRUCTION_SCRIPTS_DIR'),assets=required('RECONSTRUCTION_ASSETS_DIR'),code=required('RECONSTRUCTION_SINGLE_IMAGE_CODE_DIR'),manifest=required('RECONSTRUCTION_SINGLE_IMAGE_MANIFEST');
+  try{await preflight(executable,[join(scripts,'single_image_preflight.py'),'--assets',assets,'--code',code,'--manifest',manifest]);}
+  catch{throw Error('RECONSTRUCTION_SINGLE_IMAGE_PREFLIGHT_FAILED');}
+ }
+ const engine=readReconstructionEngine({...env,...(!configured?{RECONSTRUCTION_ASSETS_DIR:''}:{})});
+ if(env.RECONSTRUCTION_MODES!==undefined){
+  const expected=env.RECONSTRUCTION_MODES.split(',').map(v=>v.trim()).sort(),actual=[...(engine?.modes??[])].sort();
+  if(expected.some(mode=>!['single-image','multi-view','video'].includes(mode))||new Set(expected).size!==expected.length||JSON.stringify(actual)!==JSON.stringify(expected))throw Error('RECONSTRUCTION_CAPABILITY_CONFIGURATION_MISMATCH');
+ }
+ return engine;
+}
 
 export function readReconstructionEngine(env:NodeJS.ProcessEnv):ReconstructionEngine|undefined{
  const required=(name:string)=>{const value=env[name]?.trim();if(!value)throw Error('WORKER_CONFIGURATION_MISSING:'+name);return value;};

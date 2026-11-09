@@ -8,6 +8,8 @@ import {
 } from "@azure/storage-blob";
 import type { TokenCredential } from "@azure/core-auth";
 import type { PrivateObjectStoragePort } from "@medical-device/contracts";
+import {createSourceMeteredStorage,type StorageUsageSink} from './metered-storage.js';
+export {createSourceMeteredStorage,type StorageUsageSink} from './metered-storage.js';
 export * from "./release-artifacts.js";
 
 export interface AzureBlobStorageOptions {
@@ -18,6 +20,7 @@ export interface AzureBlobStorageOptions {
   quarantineContainerName?: string;
   allowHttp?: boolean;
   maxReadBytes?: number;
+  onUsage?:StorageUsageSink;
 }
 
 function connectionSetting(connectionString: string, name: string): string {
@@ -35,6 +38,7 @@ function safeBlobKey(blobKey: string): string {
 
 export function createAzureBlobStorage(options: AzureBlobStorageOptions): PrivateObjectStoragePort & {
   ensureContainers(): Promise<void>;
+  deleteObject(input:{blobKey:string}):Promise<void>;
   putObject(input: { blobKey: string; bytes: Uint8Array; contentType: string }): Promise<void>;
 } {
   const sharedKeyCredential = options.connectionString
@@ -86,7 +90,7 @@ export function createAzureBlobStorage(options: AzureBlobStorageOptions): Privat
     return `${blob(normalizedKey).url}?${sas}`;
   };
 
-  return {
+  const storage:PrivateObjectStoragePort & {ensureContainers():Promise<void>;deleteObject(input:{blobKey:string}):Promise<void>;putObject(input:{blobKey:string;bytes:Uint8Array;contentType:string}):Promise<void>} = {
     async ensureContainers() {
       await container.createIfNotExists();
       await quarantineContainer.createIfNotExists();
@@ -141,8 +145,9 @@ export function createAzureBlobStorage(options: AzureBlobStorageOptions): Privat
       const properties = await client.getProperties();
       const contentLength = properties.contentLength ?? 0;
       const limit = Math.min(maxBytes ?? maxReadBytes, maxReadBytes);
-      if (contentLength > limit) throw new Error("BLOB_SIZE_LIMIT_EXCEEDED");
-      const bytes = await client.downloadToBuffer();
+      if (!Number.isSafeInteger(contentLength) || contentLength < 0 || contentLength > limit) throw new Error("BLOB_SIZE_LIMIT_EXCEEDED");
+      if(!properties.etag)throw new Error('BLOB_ETAG_REQUIRED');
+      const bytes = contentLength===0?Buffer.alloc(0):await client.downloadToBuffer(0,contentLength,{conditions:{ifMatch:properties.etag}});
       if (bytes.byteLength > limit) throw new Error("BLOB_SIZE_LIMIT_EXCEEDED");
       return {
         bytes: Uint8Array.from(bytes),
@@ -159,6 +164,9 @@ export function createAzureBlobStorage(options: AzureBlobStorageOptions): Privat
         throw error;
       }
     },
+    async deleteObject({blobKey}) {
+      await blob(safeBlobKey(blobKey)).deleteIfExists({deleteSnapshots:'include'});
+    },
     async quarantine({ blobKey, reason }) {
       const normalizedKey = safeBlobKey(blobKey);
       const source = blob(normalizedKey);
@@ -173,4 +181,5 @@ export function createAzureBlobStorage(options: AzureBlobStorageOptions): Privat
       await source.deleteIfExists();
     }
   };
+  return options.onUsage?createSourceMeteredStorage(storage,options.onUsage):storage;
 }
