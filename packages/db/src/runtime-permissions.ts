@@ -19,6 +19,8 @@ export async function grantRuntimeDomainTables(pool: Pool, role: string): Promis
   await pool.query(`GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE ${runtimeDomainTables.map(table => `public.${table}`).join(', ')} TO "${role}"`);
   if((await pool.query("SELECT to_regclass('public.knowledge_embeddings') IS NOT NULL AS present")).rows[0]?.present)await pool.query(`GRANT SELECT,INSERT,UPDATE,DELETE ON public.knowledge_embeddings TO "${role}"`);
   for(const [table,privileges]of [
+    ['credential_verifications','SELECT,INSERT,UPDATE,DELETE'],['public_verification_limits','SELECT,INSERT,UPDATE,DELETE'],
+    ['course_story_positions','SELECT,INSERT,UPDATE'],['course_story_choices','SELECT,INSERT'],
     ['lifecycle_tombstones','SELECT,INSERT'],['lifecycle_holds','SELECT,INSERT,UPDATE'],
     ['customer_webhook_subscriptions','SELECT,INSERT,UPDATE,DELETE'],['customer_webhook_deliveries','SELECT,INSERT,UPDATE,DELETE'],
     ['protected_exports','SELECT,INSERT,UPDATE'],['retention_schedules','SELECT,INSERT,UPDATE'],

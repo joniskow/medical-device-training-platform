@@ -15,7 +15,7 @@ const admin=new Pool({connectionString:'postgresql://local_app:local_only_change
 const pool=new Pool({connectionString:'postgresql://local_runtime:local_runtime_only_change_me@127.0.0.1:54329/medical_device'});
 const org='reconstruction:'+randomUUID(),tenant={organizationId:org,actorId:'fixture-author',correlationId:'reconstruction-check'};
 const store=createReconstructionStore(pool),jobs=createPostgresJobStore(pool);
-const bytes=await readFile('output/single-image-capture/images/view-003.png'),sha=createHash('sha256').update(bytes).digest('hex');
+const bytes=await readFile('fixtures/reference/images/aic-overview.png'),sha=createHash('sha256').update(bytes).digest('hex');
 const source={assetVersionId:org+':source',sourceHash:sha},input={mode:'single-image',sources:[source],idempotencyKey:'fixture-request'};
 const objects=new Map(),storage={readObject:async({blobKey})=>({bytes:objects.get(blobKey)??bytes}),putObject:async({blobKey,bytes})=>objects.set(blobKey,bytes)};
 const service=createReconstructionService(pool,storage,['single-image']);
@@ -64,7 +64,13 @@ try{
  const claimed=await jobs.claim(tenant,first.jobId,'fixture-worker',undefined,3600);assert.equal(claimed.state,'RUNNING');
  assert.equal(await jobs.claim(tenant,first.jobId,'other-worker',undefined,3600),null);
  await jobs.fail(tenant,first.jobId,'fixture-worker',claimed.leaseGeneration,{class:'VALIDATION',code:'TEST_FINISHED',message:'Controlled fixture cleanup'});
- const candidate=await readFile('output/aurora-single-image-clean-01/candidate-private.glb'),quality=await readFile('output/aurora-single-image-clean-01/quality.json');
+ // A bounded tetrahedron makes contract replay independent of untracked engine output.
+ // Actual inference remains available only through the explicit --real-engine path.
+ const positions=Buffer.from(new Float32Array([0,0,0,1,0,0,0,1,0,0,0,1]).buffer),indices=Buffer.from(new Uint32Array([0,1,2,0,3,1,0,2,3,1,3,2]).buffer),binary=Buffer.concat([positions,indices]);
+ const document={asset:{version:'2.0'},scene:0,scenes:[{nodes:[0]}],nodes:[{mesh:0}],meshes:[{primitives:[{attributes:{POSITION:0},indices:1,material:0}]}],materials:[{pbrMetallicRoughness:{baseColorFactor:[.5,.5,.5,1],metallicFactor:0,roughnessFactor:1}}],buffers:[{byteLength:binary.length}],bufferViews:[{buffer:0,byteOffset:0,byteLength:positions.length},{buffer:0,byteOffset:positions.length,byteLength:indices.length}],accessors:[{bufferView:0,componentType:5126,count:4,type:'VEC3',min:[0,0,0],max:[1,1,1]},{bufferView:1,componentType:5125,count:12,type:'SCALAR'}],extras:{reconstructionMethod:'single-image-generative-hypothesis'}};
+ let json=Buffer.from(JSON.stringify(document));json=Buffer.concat([json,Buffer.alloc((4-json.length%4)%4,32)]);
+ const header=Buffer.alloc(20),tail=Buffer.alloc(8);header.write('glTF');header.writeUInt32LE(2,4);header.writeUInt32LE(28+json.length+binary.length,8);header.writeUInt32LE(json.length,12);header.writeUInt32LE(0x4e4f534a,16);tail.writeUInt32LE(binary.length);tail.writeUInt32LE(0x004e4942,4);
+ const candidate=Buffer.concat([header,json,tail,binary]),quality=Buffer.from(JSON.stringify({schemaVersion:'reconstruction-quality.v1',status:'REVIEW_REQUIRED',method:'single-image-generative-hypothesis',candidate:{sha256:createHash('sha256').update(candidate).digest('hex'),bytes:candidate.length,triangles:4},inputImages:[{sha256:sha,bytes:bytes.length}],warnings:['CONTROLLED_GEOMETRY_CONTRACT_FIXTURE_ONLY']}));
  let calls=0,expectedCandidate=candidate;const realEngine=process.argv.includes('--real-engine')?createSingleImageEngine({runtime:{kind:'docker',executable:'docker',image:'medical-device-reconstruction:single-image'},assetsDirectory:resolve('output/triposr-assets'),scriptsDirectory:resolve('tools/reconstruction'),workDirectory:resolve('output/reconstruction-jobs')}):undefined;
  const engine={modes:['single-image'],generate:async input=>{calls++;assert.deepEqual(Buffer.from(input.sources[0].bytes),bytes);const result=realEngine?await realEngine.generate(input):{candidate,quality};expectedCandidate=Buffer.from(result.candidate);return result;}};
  const generated=await store.create(tenant,{...input,idempotencyKey:'worker-success'});
