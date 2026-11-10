@@ -40,6 +40,7 @@ server.on('request', (req, res) => { void (async () => {
   const path = new URL(req.url, applicationOrigin).pathname;
   if (path === '/healthz' || path === '/readyz') { json(res, 200, { ok: true, provider: 'azure-foundry-fal', storage: 'azure-blob' }); return; }
   if (path === '/demo-config.js') { res.writeHead(200, { 'content-type': 'text/javascript', 'cache-control': 'no-store' }); res.end("globalThis.__DEMO_HOSTING__='AZURE';"); return; }
+  if (path === '/demo-signin.js' && req.method === 'GET') { const script = await readFile(resolve(staticRoot, 'demo-signin.js')); res.writeHead(200, { 'content-type': 'text/javascript; charset=utf-8', 'cache-control': 'no-store', 'x-content-type-options': 'nosniff' }); res.end(script); return; }
   if (path === '/api/v1/auth/config') { json(res, 200, { clientId: required('BROWSER_AUTH_CLIENT_ID'), tenantId: required('ENTRA_TENANT_ID'), authority: required('BROWSER_AUTH_AUTHORITY'), apiScope: required('BROWSER_AUTH_API_SCOPE'), applicationOrigin, knownAuthorities: ['login.microsoftonline.com'] }); return; }
   if (path === '/api/v1/account') { json(res, await authorize(req) ? 200 : 401, {}); return; }
   if (path === '/signin') {

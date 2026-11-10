@@ -34,9 +34,9 @@ The hosted runtime makes no Hugging Face requests and needs no local server, Azu
 
 ## Deployment and verification
 
-Deployment `demo-20261110` succeeded on 2026-11-10. Ready revision: `mdt-personal-demo--jb0cqj0`.
+Deployment `demo-20261110` succeeded on 2026-11-10. The sign-in script route was subsequently fixed in ready revision `mdt-personal-demo--0000001`.
 
-Image: `mdtpersonalacr01.azurecr.io/demo@sha256:6f93c31f6c413b15327bf5e9868339e44d6760e98e0b1a41adba51382ca58381`.
+Current image: `mdtpersonalacr01.azurecr.io/demo@sha256:994536b37dd27729929ef048657beb25f087f3f633f40523d346335ce1b30c19`.
 
 The [Bicep template](../infra/azure/demo.bicep) defines the demo resources, model, roles, and runtime configuration. Build workspace dependencies first with `corepack pnpm build`, then run `node tools/build-azure-demo.mjs` and build its generated image context using Azure Container Registry. Deploy the template with the resulting immutable image digest and the existing Entra/operator IDs. On a new subscription the `Microsoft.CognitiveServices/Fal.EnableDeploy` preview feature must be registered; also register the resulting `/auth/redirect` URI on the browser app. Do not put credentials in parameters or Git.
 
@@ -48,3 +48,7 @@ Verified:
 - All workspace type checks, source lint, focused provider/background/pipeline/browser tests, and all 14 infrastructure templates passed. Infrastructure compilation used pinned Bicep 0.49.2 without diagnostics.
 
 The operator's interactive Microsoft sign-in and a new paid render initiated through that signed-in browser were not exercised. The real model request was verified separately using Entra authentication. Completed outputs and status persist in Azure Blob; unfinished in-process generations do not have worker recovery after a container restart. Cancelling browser polling does not cancel a provider render. Keep the page open while rendering; failed requests do not substitute a sample or automatically buy another render.
+
+Follow-up verification found that `/demo-signin.js` was missing from the HTTP routes even though the image contained it. The hosted service now explicitly serves that script. Clicking **Sign in with Microsoft** reaches the tenant's Microsoft login page. Run `AZURE_DEMO_ORIGIN=https://<demo-host> node tools/check-azure-hosted-demo.mjs` (set the environment variable separately in PowerShell) to check the executable sign-in asset, auth config, sample integrity, byte ranges, and anonymous generation rejection without submitting a billed request.
+
+The first GitHub release gate failed on four generic-key findings in historical prose/test descriptions. The scanner configuration now excludes only the three exact extracted prose values, with anchored secret-value matching. Default secret rules and full history scanning remain enabled.

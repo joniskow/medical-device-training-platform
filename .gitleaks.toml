@@ -4,6 +4,8 @@ title = "Medical device training secret scan"
 useDefault = true
 
 [allowlist]
-description = "Only the public Azurite emulator key and exact synthetic local HTTP test token"
+description = "Public emulator key, synthetic local test token, and exact non-secret prose identified in CI"
 regexTarget = "secret"
-regexes = ['Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==', 'operational-test-secret-at-least-32-bytes']
+regexes = ['Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==', 'operational-test-secret-at-least-32-bytes', '^(expiration/requalification|bounce/suppression/rate|launch/direct)$']
+# Generic API key detection mistakes these slash-separated prose phrases for secrets.
+# Anchor the full extracted value; do not exempt files, commits, or the rule itself.
