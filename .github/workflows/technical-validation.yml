@@ -106,6 +106,7 @@ jobs:
           for service in api worker; do
             image="medical-device-$service:$GITHUB_SHA"
             docker run --rm --entrypoint node "$image" --check dist/entrypoint.js
+            docker run --rm --entrypoint sh "$image" -c 'test ! -e /usr/local/lib/node_modules/npm && ! command -v npm && ! command -v npx'
             docker image inspect "$image" --format '{{json .}}' > "output/images/$service-image.json"
             docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v "$PWD/output/images:/reports" aquasec/trivy:0.60.0 image --format cyclonedx --output "/reports/$service.cdx.json" "$image"
             docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v "$PWD/output/images:/reports" aquasec/trivy:0.60.0 image --severity HIGH,CRITICAL --exit-code 1 --format json --output "/reports/$service-vulnerabilities.json" "$image"

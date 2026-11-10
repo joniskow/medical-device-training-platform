@@ -57,7 +57,10 @@ ENV RECONSTRUCTION_WORK_DIR=/tmp/reconstruction
 ENV BLENDER_EXECUTABLE=/usr/bin/blender
 ENV BLENDER_SCRIPT=/opt/reconstruction-scripts/blender_postprocess.py
 ENV BLENDER_USER_CONFIG=/tmp/blender-config
-RUN groupadd --system app && useradd --system --gid app app
+# Runtime starts Node directly; omit npm and its unnecessary dependency tree.
+RUN groupadd --system app && useradd --system --gid app app \
+ && rm -rf /usr/local/lib/node_modules/npm \
+ && rm -f /usr/local/bin/npm /usr/local/bin/npx
 COPY --from=build /out ./
 COPY tools/migrate-database.mjs ./tools/migrate-database.mjs
 COPY --from=build /workspace/tools/reconstruction /opt/reconstruction-scripts

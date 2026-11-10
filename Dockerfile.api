@@ -34,7 +34,10 @@ RUN pnpm --filter @medical-device/contracts build && pnpm --filter @medical-devi
 FROM node:24-alpine AS runtime
 WORKDIR /app
 ENV NODE_ENV=production
-RUN addgroup -S app && adduser -S app -G app
+# Runtime starts Node directly; omit npm and its unnecessary dependency tree.
+RUN addgroup -S app && adduser -S app -G app \
+ && rm -rf /usr/local/lib/node_modules/npm \
+ && rm -f /usr/local/bin/npm /usr/local/bin/npx
 COPY --from=build /out ./
 COPY --from=build /workspace/apps/web/dist ./web
 USER app
