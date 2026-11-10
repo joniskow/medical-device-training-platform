@@ -3,6 +3,21 @@
   "profiles": {
     "pure": [
       {
+        "id": "azure-demo-provider",
+        "script": "tools/check-azure-demo-provider.mjs",
+        "timeoutMs": 60000
+      },
+      {
+        "id": "demo-background-generation",
+        "script": "tools/check-demo-background-generation.mjs",
+        "timeoutMs": 60000
+      },
+      {
+        "id": "free-demo-video-provider",
+        "script": "tools/check-free-demo-video-provider.mjs",
+        "timeoutMs": 60000
+      },
+      {
         "id": "source-lint",
         "script": "tools/check-source-lint.mjs",
         "timeoutMs": 60000

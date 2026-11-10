@@ -82,3 +82,5 @@ for(const name of ['training-viewer.js','developer-starter.js','signin.js','auth
  const file=resolve(root,'dist',name);
  await writeFile(`${file}.gz`,gzipSync(await readFile(file),{level:9}));
 }
+
+await copyFile(resolve(root, 'src/demo-config.js'), resolve(root, 'dist/demo-config.js'));

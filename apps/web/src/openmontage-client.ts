@@ -1,3 +1,4 @@
+import { authenticatedFetch } from './auth-session.js';
 import type { OpenMontageGenerationStatus, OpenMontageIntegrationMode, OpenMontageRenderArtifact, OpenMontageSceneBrief, TrainingSceneManifest } from '@medical-device/contracts';
 
 export interface OpenMontageBriefResponse { briefId: string; brief: OpenMontageSceneBrief; }
@@ -45,15 +46,29 @@ export function openMontageVideoUrl(apiBaseUrl: string, sceneId: string): string
   return endpoint(apiBaseUrl, `/api/v1/openmontage/scenes/${encodeURIComponent(sceneId)}/video`);
 }
 
+function generationFetch(input: string, init?: RequestInit): Promise<Response> {
+  const hosted = (globalThis as typeof globalThis & { __DEMO_HOSTING__?: string }).__DEMO_HOSTING__ === 'AZURE';
+  return hosted && !input.includes('/demo-motion-sample') ? authenticatedFetch(input, init) : fetch(input, init);
+}
+
+export async function loadOpenMontagePreview(apiBaseUrl: string, generationId: string): Promise<string> {
+  const url = openMontageGenerationPreviewUrl(apiBaseUrl, generationId);
+  const hosted = (globalThis as typeof globalThis & { __DEMO_HOSTING__?: string }).__DEMO_HOSTING__ === 'AZURE';
+  if (!hosted || generationId === 'demo-motion-sample') return url;
+  const response = await generationFetch(url, { cache: 'no-store' });
+  if (!response.ok) throw Error('DEMO_PREVIEW_UNAVAILABLE');
+  return URL.createObjectURL(await response.blob());
+}
+
 export function createOpenMontageGeneration(apiBaseUrl: string, input: { sceneManifest: TrainingSceneManifest; prompt: string; mode?: OpenMontageIntegrationMode; narrationText?: string; narrationVoice?: string; idempotencyKey: string }): Promise<OpenMontageGenerationResponse> {
-  return fetch(endpoint(apiBaseUrl, '/api/v1/openmontage/generations'), {
+  return generationFetch(endpoint(apiBaseUrl, '/api/v1/openmontage/generations'), {
     method: 'POST', headers: { 'content-type': 'application/json', 'idempotency-key': input.idempotencyKey },
     body: JSON.stringify({ sceneManifest: input.sceneManifest, prompt: input.prompt, ...(input.mode ? { mode: input.mode } : {}), ...(input.narrationText ? { narrationText: input.narrationText } : {}), ...(input.narrationVoice ? { narrationVoice: input.narrationVoice } : {}) })
   }).then(json<OpenMontageGenerationResponse>);
 }
 
-export function loadOpenMontageGeneration(apiBaseUrl: string, generationId: string): Promise<OpenMontageGenerationStatus> {
-  return fetch(endpoint(apiBaseUrl, `/api/v1/openmontage/generations/${encodeURIComponent(generationId)}`), { cache: 'no-store' }).then(json<OpenMontageGenerationStatus>);
+export function loadOpenMontageGeneration(apiBaseUrl: string, generationId: string): Promise<OpenMontageGenerationStatus & { previewVideo?: TrainingSceneManifest['video']; previewMotion?: boolean }> {
+  return generationFetch(endpoint(apiBaseUrl, `/api/v1/openmontage/generations/${encodeURIComponent(generationId)}`), { cache: 'no-store' }).then(json<OpenMontageGenerationStatus>);
 }
 
 export function openMontageGenerationPreviewUrl(apiBaseUrl: string, generationId: string): string {

@@ -1,0 +1,14 @@
+{
+  "model": "Fal-LTX-2.5-Fast",
+  "sourceProvider": "Azure Foundry / fal",
+  "purpose": "Azure-generated prepared motion demo; replay makes no new inference request",
+  "prompt": "A healthcare instructor in plain blue scrubs walks from left to right across the rear of a bright clinical teaching room. Show clear walking movement. The middle foreground stays empty. No patients, no device, no text. Stationary viewpoint.",
+  "sha256": "850934248a0109e57e61b3508ba614bd45c813c3e9a43a34682cf12b83ede415",
+  "width": 960,
+  "height": 540,
+  "frameRate": 30,
+  "durationSeconds": 3,
+  "reviewStatus": "REVIEW_REQUIRED",
+  "sourceDeployment": "mdtpersonalmotion01/training-motion",
+  "sourceJobId": "2f59f952-389d-45ed-b146-e627899ce924"
+}

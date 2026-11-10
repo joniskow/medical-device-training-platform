@@ -1,6 +1,6 @@
 import { createBabylonModelRuntime } from './babylon-model-runtime.js';
 import { updateNxstageWarmerPreview } from './nxstage-warmer-preview.js';
-import { createOpenMontageGeneration, loadOpenMontageGeneration, openMontageGenerationNarrationUrl, openMontageGenerationPreviewUrl } from './openmontage-client.js';
+import { createOpenMontageGeneration, loadOpenMontageGeneration, openMontageGenerationNarrationUrl, openMontageGenerationPreviewUrl, loadOpenMontagePreview } from './openmontage-client.js';
 import type { InteractiveModelRuntime } from './model-contract.js';
 import { validateTrainingSceneManifest, type OpenMontageGenerationStatus, type TrainingSceneManifest } from '@medical-device/contracts';
 import { validateBrowserModelManifest, type ModelManifest } from '@medical-device/model-runtime';
@@ -11,10 +11,10 @@ type SourceStage = 'upload' | 'processing' | 'model' | 'content';
 type SourceKind = 'photos' | 'pdf';
 type CreatorStep = 'source' | 'convert' | 'model' | 'content' | 'build' | 'publish';
 type PipelinePhase = 'IDLE' | 'QUEUED' | 'RUNNING' | 'REVIEW_REQUIRED' | 'APPROVED' | 'CONTENT_READY';
-type DemoState = { view: View; published: boolean; learnerProgress: number; currentLesson: number; selectedModule: number | null; editingModule: number | null; creatorStep: CreatorStep; sourceStage: SourceStage; sourceKind: SourceKind; sourceFiles: string[]; sourcePreviewDataUrl: string; demoSource: boolean; sourceFileName: string; sourceProgress: number; pipelinePhase: PipelinePhase; pipelineJobId: string; pipelineAttempt: number; candidateTriangles: number; reviewRationale: string; videoPlaying: boolean; sceneInteractive: boolean; backgroundPrompt: string; narrationText: string; narrationUrl: string; backgroundMode: 'LOCKED_INTERACTIVE' | 'CINEMATIC'; backgroundStatus: 'IDLE' | 'GENERATING' | 'PREVIEW_READY' | 'REVIEW_REQUIRED'; backgroundApproved: boolean; backgroundGenerationId: string; backgroundJobId: string; backgroundProgress: number; backgroundPreviewUrl: string; answer: 'idle' | 'correct' | 'incorrect'; modules: Module[] };
+type DemoState = { view: View; published: boolean; learnerProgress: number; currentLesson: number; selectedModule: number | null; editingModule: number | null; creatorStep: CreatorStep; sourceStage: SourceStage; sourceKind: SourceKind; sourceFiles: string[]; sourcePreviewDataUrl: string; demoSource: boolean; sourceFileName: string; sourceProgress: number; pipelinePhase: PipelinePhase; pipelineJobId: string; pipelineAttempt: number; candidateTriangles: number; reviewRationale: string; videoPlaying: boolean; sceneInteractive: boolean; backgroundPrompt: string; narrationText: string; narrationUrl: string; backgroundMode: 'LOCKED_INTERACTIVE' | 'CINEMATIC'; backgroundStatus: 'IDLE' | 'GENERATING' | 'PREVIEW_READY' | 'REVIEW_REQUIRED'; backgroundApproved: boolean; backgroundGenerationId: string; backgroundJobId: string; backgroundProgress: number; backgroundPreviewUrl: string; backgroundVideo: TrainingSceneManifest['video'] | null; backgroundHasMotion: boolean; answer: 'idle' | 'correct' | 'incorrect'; modules: Module[] };
 
 const defaultState: DemoState = {
-  view: 'creator', published: false, learnerProgress: 33, currentLesson: 0, selectedModule: null, editingModule: null, creatorStep: 'source', sourceStage: 'upload', sourceKind: 'photos', sourceFiles: [], sourcePreviewDataUrl: '', demoSource: false, sourceFileName: '', sourceProgress: 0, pipelinePhase: 'IDLE', pipelineJobId: '', pipelineAttempt: 0, candidateTriangles: 0, reviewRationale: '', videoPlaying: false, sceneInteractive: false, backgroundPrompt: 'A calm, photorealistic clinical exam room with soft daylight, neutral medical materials, realistic depth, and a clear floor area for the System One.', narrationText: 'This lesson is simulation-only. Identify the control panel, safety cover, and line sensor before beginning. Open the safety cover, select Prime, and confirm the displayed mode. When the line sensor reports Blocked, acknowledge the warning, inspect the simulated line, and clear the blockage. Resume only after the system records Ready, then complete the shutdown sequence. Do not use this material to operate real equipment.', narrationUrl: '', backgroundMode: 'LOCKED_INTERACTIVE', backgroundStatus: 'IDLE', backgroundApproved: false, backgroundGenerationId: '', backgroundJobId: '', backgroundProgress: 0, backgroundPreviewUrl: '', answer: 'idle',
+  view: 'creator', published: false, learnerProgress: 33, currentLesson: 0, selectedModule: null, editingModule: null, creatorStep: 'source', sourceStage: 'upload', sourceKind: 'photos', sourceFiles: [], sourcePreviewDataUrl: '', demoSource: false, sourceFileName: '', sourceProgress: 0, pipelinePhase: 'IDLE', pipelineJobId: '', pipelineAttempt: 0, candidateTriangles: 0, reviewRationale: '', videoPlaying: false, sceneInteractive: false, backgroundPrompt: 'A calm, photorealistic clinical exam room with soft daylight, neutral medical materials, realistic depth, and a clear floor area for the System One.', narrationText: 'This lesson is simulation-only. Identify the control panel, safety cover, and line sensor before beginning. Open the safety cover, select Prime, and confirm the displayed mode. When the line sensor reports Blocked, acknowledge the warning, inspect the simulated line, and clear the blockage. Resume only after the system records Ready, then complete the shutdown sequence. Do not use this material to operate real equipment.', narrationUrl: '', backgroundMode: 'LOCKED_INTERACTIVE', backgroundStatus: 'IDLE', backgroundApproved: false, backgroundGenerationId: '', backgroundJobId: '', backgroundProgress: 0, backgroundPreviewUrl: '', backgroundVideo: null, backgroundHasMotion: false, answer: 'idle',
   modules: [
     { title: 'The Aurora controller at a glance', type: 'Reading', minutes: 8, description: 'Orientation to the device, controls, and safety language.', completed: true },
     { title: 'Recognize the flow path', type: 'Interactive lesson', minutes: 12, description: 'Trace the fluid path and identify the clamp sequence.', completed: false },
@@ -23,6 +23,7 @@ const defaultState: DemoState = {
 };
 
 const app = document.querySelector<HTMLDivElement>('#app')!;
+const azureHostedDemo = (globalThis as typeof globalThis & { __DEMO_HOSTING__?: string }).__DEMO_HOSTING__ === 'AZURE';
 let nxstageDemoReview = new URLSearchParams(window.location.search).get('model') === 'nxstage-review';
 const storageKey = 'aurora-training-demo-v4';
 let state = loadState();
@@ -32,7 +33,10 @@ if (nxstageDemoReview && state.demoSource && state.backgroundMode !== 'CINEMATIC
 let toastTimer: number | undefined;
 let conversionTimer: number | undefined;
 let backgroundRequestToken = 0;
+let backgroundError = '';
 let demoModelRuntime: InteractiveModelRuntime | undefined;
+let modelPreviewReady = false;
+let backgroundPreviewReady = false;
 let demoReviewManifest: ModelManifest | undefined;
 let demoModelGeneration = 0;
 let sourcePreviewUrls: string[] = [];
@@ -84,7 +88,7 @@ function shell(content: string, title: string): string {
       <div class="sidebar-bottom"><div class="profile-chip"><div class="avatar">MC</div><div class="profile-copy"><div class="profile-name">Maya Chen</div><span class="profile-role">Training lead</span></div></div></div>
     </aside>
     <main class="main">
-      <header class="topbar"><div class="crumbs"><span>Aurora Training Hub</span><span>›</span><strong>${title}</strong></div><div class="top-actions"><div class="demo-state"><span class="status-dot"></span>Local demo</div><button class="outline-btn" data-action="reset">Reset demo</button>${state.view !== 'lesson' ? `<button class="primary-btn lime" data-action="toggle-view">${state.view === 'creator' ? 'Preview as learner' : 'Open creator studio'} ${icon('arrow', 14)}</button>` : ''}</div></header>
+      <header class="topbar"><div class="crumbs"><span>Aurora Training Hub</span><span>›</span><strong>${title}</strong></div><div class="top-actions"><div class="demo-state"><span class="status-dot"></span>${azureHostedDemo ? 'Azure demo' : 'Local demo'}</div><button class="outline-btn" data-action="reset">Reset demo</button>${state.view !== 'lesson' ? `<button class="primary-btn lime" data-action="toggle-view">${state.view === 'creator' ? 'Preview as learner' : 'Open creator studio'} ${icon('arrow', 14)}</button>` : ''}</div></header>
       ${content}
     </main>
   </div>`;
@@ -121,8 +125,9 @@ function renderPipelineSteps(): string {
 
 function renderPipelineProcessing(): string {
   const isPhoto = state.sourceKind === 'photos';
+  if (isPhoto && !state.demoSource) return '<div class="processing-panel"><p class="eyebrow">Preparing photo preview</p><h3>Model generation has not started.</h3><p class="muted">Custom photos stay in this browser. This demo does not submit a reconstruction job. Use the demo photo set for a prepared model you can inspect and approve.</p></div>';
   const phaseLabel = state.pipelinePhase === 'QUEUED' ? 'Service Bus job queued' : state.pipelinePhase === 'RUNNING' ? 'Reconstruction worker running' : state.pipelinePhase === 'REVIEW_REQUIRED' ? 'Candidate ready for review' : 'Processing source';
-  return `<div class="processing-panel"><div class="processing-header"><div><p class="eyebrow">${phaseLabel}</p><h3>${escapeHtml(state.sourceFileName || 'Aurora setup guide.pdf')}</h3><p class="muted">${isPhoto ? 'Private source asset → Service Bus → accuracy-focused reconstruction worker.' : 'Building a source-grounded learning experience from the uploaded guide.'}</p></div><strong class="processing-percent">${state.sourceProgress}%</strong></div><div class="progress-track processing-track"><div class="progress-bar" style="width:${state.sourceProgress}%"></div></div>${renderPipelineSteps()}${isPhoto ? `<div class="pipeline-meta"><span class="mono">${escapeHtml(state.pipelineJobId || 'job_pending')}</span><span>attempt ${state.pipelineAttempt || 1}</span><span>no automatic approval</span></div>` : ''}</div>`;
+  return `<div class="processing-panel"><div class="processing-header"><div><p class="eyebrow">${state.demoSource ? 'Sample workflow: simulated conversion' : phaseLabel}</p><h3>${escapeHtml(state.sourceFileName || 'Aurora setup guide.pdf')}</h3><p class="muted">${isPhoto ? 'Private source asset → Service Bus → accuracy-focused reconstruction worker.' : 'Building a source-grounded learning experience from the uploaded guide.'}</p></div><strong class="processing-percent">${state.sourceProgress}%</strong></div><div class="progress-track processing-track"><div class="progress-bar" style="width:${state.sourceProgress}%"></div></div>${renderPipelineSteps()}${isPhoto ? `<div class="pipeline-meta"><span class="mono">${escapeHtml(state.pipelineJobId || 'job_pending')}</span><span>attempt ${state.pipelineAttempt || 1}</span><span>no automatic approval</span></div>` : ''}</div>`;
 }
 
 function renderSourcePipeline(): string {
@@ -137,7 +142,7 @@ function renderSourcePipeline(): string {
     const title = nxstage ? 'NxStage System One' : 'Aurora infusion controller';
     const instructions = nxstage ? 'Press the front-panel controls. Lift the black cycler handle, then pull the upper door open; close the door before lowering the handle. The upper door travel and interior are estimates. The lower cabinet door also opens.' : 'Press buttons, drag the edge of the flow dial around to turn it, and open the safety cover using its latch.';
     const chips = nxstage ? '<button class="component-chip" data-action="select-demo-component" data-component="nxstage-control-panel">Control panel</button><button class="component-chip" data-action="select-demo-component" data-component="nxstage-cycler-handle">Cycler handle</button><button class="component-chip" data-action="select-demo-component" data-component="nxstage-cycler-door">Cycler door</button><button class="component-chip" data-action="select-demo-component" data-component="nxstage-cabinet-door">Cabinet door</button>' : '<button class="component-chip" data-action="select-demo-component" data-component="AIC-C01">Control panel</button><button class="component-chip" data-action="select-demo-component" data-component="AIC-C02">Safety cover</button><button class="component-chip" data-action="select-demo-component" data-component="AIC-C03">Line sensor</button><button class="component-chip" data-action="select-demo-component" data-component="AIC-C04">Flow dial</button>';
-    body = state.sourceKind === 'photos' && !photoCandidateApproved() ? renderPhotoReviewGate() : `<div class="model-preview-panel"><div class="model-canvas-wrap"><canvas id="demo-model-canvas" aria-label="Interactive 3D ${title} model. Drag to rotate, use the wheel or pinch to zoom, and use arrow keys then Enter to activate a control.${nxstage ? ' Hold Shift and use arrow keys to move a door or tub in increments.' : ' Hold Shift and use arrow keys to turn the flow dial or move a door in increments.'}"></canvas><span class="model-badge">${icon('spark', 12)} Live 3D preview</span></div><div class="model-preview-copy"><p class="eyebrow">Training model preview</p><h3>${title}</h3><p class="muted">${instructions} Geometry remains a training/demo representation until dimensional evidence and device review are complete.</p><div class="component-chips">${chips}</div><div class="model-actions"><button class="outline-btn" data-action="reset-demo-model">Reset view</button><button class="primary-btn" data-action="source-stage" data-stage="content">Continue to training content ${icon('arrow', 14)}</button></div><p id="demo-model-status" class="model-status" role="status" aria-live="polite">Loading model…</p></div></div>`;
+    body = state.sourceKind === 'photos' && (!state.demoSource || state.candidateTriangles === 0) ? renderPhotoReviewGate() : `<div class="model-preview-panel"><div class="model-canvas-wrap"><canvas id="demo-model-canvas" aria-label="Interactive 3D ${title} model. Drag to rotate, use the wheel or pinch to zoom, and use arrow keys then Enter to activate a control.${nxstage ? ' Hold Shift and use arrow keys to move a door or tub in increments.' : ' Hold Shift and use arrow keys to turn the flow dial or move a door in increments.'}"></canvas><span class="model-badge">${icon('spark', 12)} Live 3D preview</span></div><div class="model-preview-copy"><p class="eyebrow">Training model preview</p><h3>${title}</h3><p class="muted">${instructions} Geometry remains a training/demo representation until dimensional evidence and device review are complete.</p><div class="component-chips">${chips}</div>${state.demoSource ? renderModelApproval() : ''}<div class="model-actions"><button class="outline-btn" data-action="reset-demo-model">Reset view</button><button class="primary-btn" data-action="source-stage" data-stage="content">Continue to training content ${icon('arrow', 14)}</button></div><p id="demo-model-status" class="model-status" role="status" aria-live="polite">Loading model…</p></div></div>`;
   }
   if (state.sourceStage === 'model' && state.demoSource) body = `${renderNxStageReference()}${body}`;
   if (state.sourceStage === 'content') body = `<div class="content-preview-panel"><div class="generated-video ${state.videoPlaying ? 'playing' : ''}"><div class="video-topline"><span class="tag lime">Generated lesson video</span><span class="mono">02:14</span></div>${renderTrainingScene()}<div class="video-controls"><span class="video-progress"><span style="width:${state.videoPlaying ? '46%' : '18%'}"></span></span><span class="mono">00:${state.videoPlaying ? '59' : '24'}</span></div></div><div class="content-preview-copy"><p class="eyebrow">Generated from ${escapeHtml(state.sourceFileName || 'Aurora setup guide.pdf')}</p><h3>Ready-to-teach content, grounded in the source</h3><p class="muted">The lesson now uses a real video plate with the approved Babylon model composited above it. Production camera pose, scale, and reviewer sign-off stay bound to the scenario manifest.</p><div class="generated-list"><span>${icon('check', 13)} 1 source-bound video/model scene</span><span>${icon('check', 13)} 3-step guided procedure</span><span>${icon('check', 13)} 1 knowledge check with feedback</span></div><button class="primary-btn" data-action="open-generated-lesson">Open as learner ${icon('arrow', 14)}</button></div></div>`;
@@ -148,7 +153,7 @@ function renderSourcePipeline(): string {
 const creatorFlow: Array<[CreatorStep, string, string]> = [
   ['source', 'Start with the source', 'Upload the product guide that contains the knowledge your team needs.'],
   ['convert', 'Convert the source', 'We extract the important sections and map them to the device.'],
-  ['model', 'Inspect the 3D model', 'Explore the converted model before you build the lesson.'],
+  ['model', 'Inspect the 3D model', 'Load and inspect the model, then approve it for scene preview before building the lesson.'],
   ['content', 'Review generated content', 'See the lesson video, procedure, and knowledge check together.'],
   ['build', 'Shape the course', 'Edit the learning path and make the course feel like yours.'],
   ['publish', 'Publish to learners', 'Review the release summary, then make it available.'],
@@ -159,7 +164,7 @@ function creatorStepIndex(): number { return creatorFlow.findIndex(([step]) => s
 function renderSourceUpload(): string {
   const photos = state.sourceKind === 'photos';
   const files = state.sourceFiles.length ? `<div class="source-file-list"><div class="source-file-list-head"><strong>${state.sourceFiles.length} ${photos ? 'photos' : 'source file'} selected</strong><span class="muted">${photos ? 'Ready for reconstruction' : 'Ready for conversion'}</span></div><div class="source-file-chips">${state.sourceFiles.slice(0, 8).map((file) => `<span class="source-file-chip">${escapeHtml(file)}</span>`).join('')}${state.sourceFiles.length > 8 ? `<span class="source-file-chip more">+${state.sourceFiles.length - 8} more</span>` : ''}</div></div>` : '';
-  return `<div class="focus-upload"><div class="source-mode-picker" role="group" aria-label="Choose a source type"><button class="source-mode ${photos ? 'active' : ''}" data-action="choose-source-kind" data-kind="photos">${icon('grid', 14)} Product photos <small>3D reconstruction</small></button><button class="source-mode ${!photos ? 'active' : ''}" data-action="choose-source-kind" data-kind="pdf">${icon('book', 14)} Guide PDF <small>Video + lesson</small></button></div><label class="focus-dropzone" for="source-file"><span class="upload-icon">${icon('plus', 19)}</span><span><strong>${photos ? 'Upload multiple product photos' : 'Upload a product guide PDF'}</strong><small>${photos ? 'Use 20–100 overlapping views for the strongest reconstruction.' : 'PDF guide · up to 50 MB'}</small></span><input id="source-file" type="file" ${photos ? 'multiple' : ''} accept="${photos ? '.png,.jpg,.jpeg,image/png,image/jpeg' : '.pdf,application/pdf'}" /></label>${files}<div class="focus-upload-footer"><span class="muted">${state.sourceFileName ? escapeHtml(state.sourceFileName) : photos ? 'Use the sample photo set to see a matched 3D result.' : 'Use the sample guide for the demo.'}</span><div class="source-demo-actions">${photos ? `<button class="outline-btn" data-action="simulate-upload" data-kind="photos">${icon('spark', 14)} Use demo photo set</button>` : ''}<button class="primary-btn" data-action="simulate-upload" data-kind="pdf">${icon('spark', 14)} Use demo PDF</button></div></div></div>`;
+  return `<div class="focus-upload"><div class="source-mode-picker" role="group" aria-label="Choose a source type"><button class="source-mode ${photos ? 'active' : ''}" data-action="choose-source-kind" data-kind="photos">${icon('grid', 14)} Product photos <small>3D reconstruction</small></button><button class="source-mode ${!photos ? 'active' : ''}" data-action="choose-source-kind" data-kind="pdf">${icon('book', 14)} Guide PDF <small>Video + lesson</small></button></div><label class="focus-dropzone" for="source-file"><span class="upload-icon">${icon('plus', 19)}</span><span><strong>${photos ? 'Upload multiple product photos' : 'Upload a product guide PDF'}</strong><small>${photos ? 'Use 20–100 overlapping views for the strongest reconstruction.' : 'PDF guide · up to 50 MB'}</small></span><input id="source-file" type="file" ${photos ? 'multiple' : ''} accept="${photos ? '.png,.jpg,.jpeg,image/png,image/jpeg' : '.pdf,application/pdf'}" /></label>${files}<div class="focus-upload-footer"><span class="muted">${state.sourceFileName ? escapeHtml(state.sourceFileName) : photos ? 'Custom photos require the reconstruction service. The sample loads a prepared model.' : 'Use the sample guide for the demo.'}</span><div class="source-demo-actions">${photos ? `<button class="outline-btn" data-action="simulate-upload" data-kind="photos">${icon('spark', 14)} Use demo photo set</button>` : ''}<button class="primary-btn" data-action="simulate-upload" data-kind="pdf">${icon('spark', 14)} Use demo PDF</button></div></div></div>`;
 }
 
 function currentPhotoPreviewUrls(): string[] {
@@ -182,8 +187,9 @@ function renderTrainingScene(): string {
   const photorealWalkthrough = nxstage && !cinematic && videoUrl.endsWith('nxstage-doctors-office-walkthrough-photoreal-v3.mp4');
   const title = nxstage ? 'NxStage System One' : 'Aurora controller';
   const walkthroughPlayback = photorealWalkthrough ? '<button class="scene-playback" data-action="play-walkthrough" type="button">Play walkthrough</button>' : '';
-  const interactionControl = walkthroughPlayback + (cinematic ? '<span class="scene-interact cinematic-disabled" aria-disabled="true">Cinematic output · no live interaction</span>' : `<button class="scene-interact" data-action="toggle-scene-interaction" aria-pressed="${state.sceneInteractive ? 'true' : 'false'}">${state.sceneInteractive ? 'Exit model interaction' : 'Interact with model'}</button>${nxstage && nxstageDemoReview ? `<button class="scene-explore" data-action="toggle-review-explore" aria-pressed="false" ${state.sceneInteractive ? '' : 'hidden'}>Explore model</button>` : ''}`);
-  return `<div class="training-scene doctors-office ${interactive ? 'interactive' : ''} ${cinematic ? 'cinematic' : ''} ${photoPlate ? 'photo-plate' : ''} ${photorealWalkthrough ? 'photoreal-walkthrough' : ''} ${nxstage && nxstageDemoReview && !cinematic ? 'nxstage-review-scene' : ''}" data-scene-manifest="${manifestUrl}"><div class="doctors-office-backdrop" aria-hidden="true"><div class="office-window"><span></span><span></span><span></span></div><div class="office-poster"><strong>Patient care</strong><small>Clear steps. Safer setup.</small></div><div class="office-shelf"><i></i><i></i><i></i></div><div class="office-desk"><div class="office-monitor"><b></b><em></em></div><div class="office-drawer"></div></div><div class="office-chair"></div><div class="office-plant"><i></i><i></i><i></i><b></b></div></div>${photoPlate ? `<img id="training-photo" class="training-scene-video" src="${state.backgroundPreviewUrl}" alt="Generated clinical background draft" />` : `<video id="training-video" class="training-scene-video" src="${videoUrl}" muted loop playsinline preload="${nxstage && nxstageDemoReview ? 'auto' : 'metadata'}" aria-label="Source-bound training video plate"></video>`}${photorealWalkthrough ? '<img id="training-room-photo" class="training-room-photo" src="/demo-assets/nxstage-interactive-exam-room.png" alt="Photorealistic clinical exam room" />' : ''}<canvas id="demo-scene-canvas" class="training-scene-model" aria-label="${cinematic ? `Non-interactive baked cinematic ${title} composite` : `Interactive ${title} model in a clinical scene. When interaction is enabled, use arrow keys to choose a control, Enter or Space to operate it, and Escape to cancel a held control.${nxstage ? " Hold Shift and use arrow keys to move a door or tub in increments." : " Hold Shift and use arrow keys to turn the flow dial or move a door in increments."}`}"></canvas><span class="video-caption">${title} · ${photoPlate ? 'photographic draft plate · preview only' : cinematic ? 'cinematic baked-composite preview · interaction disabled' : photorealWalkthrough ? 'photoreal hallway → exam room · interactive reveal' : 'draft composite preview'}</span>${interactionControl}<span class="scene-status" id="demo-model-status" role="status" aria-live="polite">Loading source-bound scene…</span></div>`;
+  const backgroundPlayback = state.backgroundPreviewUrl ? '<button class="scene-playback" data-action="toggle-background-playback" type="button">Play background</button>' : '';
+  const interactionControl = backgroundPlayback + walkthroughPlayback + (cinematic ? '<span class="scene-interact cinematic-disabled" aria-disabled="true">Cinematic output · no live interaction</span>' : `<button class="scene-interact" data-action="toggle-scene-interaction" aria-pressed="${state.sceneInteractive ? 'true' : 'false'}">${state.sceneInteractive ? 'Exit model interaction' : 'Interact with model'}</button>${nxstage && nxstageDemoReview ? `<button class="scene-explore" data-action="toggle-review-explore" aria-pressed="false" ${state.sceneInteractive ? '' : 'hidden'}>Explore model</button>` : ''}`);
+  return `<div class="training-scene doctors-office ${state.backgroundPreviewUrl ? 'generated-background' : ''} ${interactive ? 'interactive' : ''} ${cinematic ? 'cinematic' : ''} ${photoPlate ? 'photo-plate' : ''} ${photorealWalkthrough ? 'photoreal-walkthrough' : ''} ${nxstage && nxstageDemoReview && !cinematic ? 'nxstage-review-scene' : ''}" data-scene-manifest="${manifestUrl}"><div class="doctors-office-backdrop" aria-hidden="true"><div class="office-window"><span></span><span></span><span></span></div><div class="office-poster"><strong>Patient care</strong><small>Clear steps. Safer setup.</small></div><div class="office-shelf"><i></i><i></i><i></i></div><div class="office-desk"><div class="office-monitor"><b></b><em></em></div><div class="office-drawer"></div></div><div class="office-chair"></div><div class="office-plant"><i></i><i></i><i></i><b></b></div></div>${photoPlate ? `<img id="training-photo" class="training-scene-video" src="${state.backgroundPreviewUrl}" alt="Generated clinical background draft" />` : `<video id="training-video" class="training-scene-video" src="${videoUrl}" muted loop playsinline ${state.backgroundPreviewUrl ? 'autoplay' : ''} preload="${nxstage && nxstageDemoReview ? 'auto' : 'metadata'}" aria-label="Source-bound training video plate"></video>`}${photorealWalkthrough ? '<img id="training-room-photo" class="training-room-photo" src="/demo-assets/nxstage-interactive-exam-room.png" alt="Photorealistic clinical exam room" />' : ''}<canvas id="demo-scene-canvas" class="training-scene-model" aria-label="${cinematic ? `Non-interactive baked cinematic ${title} composite` : `Interactive ${title} model in a clinical scene. When interaction is enabled, use arrow keys to choose a control, Enter or Space to operate it, and Escape to cancel a held control.${nxstage ? " Hold Shift and use arrow keys to move a door or tub in increments." : " Hold Shift and use arrow keys to turn the flow dial or move a door in increments."}`}"></canvas><span class="video-caption">${title} · ${photoPlate ? 'photographic draft plate · preview only' : cinematic ? 'cinematic baked-composite preview · interaction disabled' : photorealWalkthrough ? 'photoreal hallway → exam room · interactive reveal' : 'draft composite preview'}</span>${interactionControl}<span class="scene-status" id="demo-model-status" role="status" aria-live="polite">Loading source-bound scene…</span></div>`;
 }
 
 const trainingSceneManifestUrl = '/model/aurora-training-scene-manifest.json';
@@ -204,6 +210,35 @@ async function waitForVideoMetadata(video: HTMLVideoElement, sceneVideo: Trainin
   });
   if (video.videoWidth !== sceneVideo.width || video.videoHeight !== sceneVideo.height || !Number.isFinite(video.duration) || Math.abs(video.duration - sceneVideo.durationSeconds) > 0.05) throw new Error(`SCENE_VIDEO_PROFILE_MISMATCH:${video.videoWidth}x${video.videoHeight}/${video.duration.toFixed(3)} expected ${sceneVideo.width}x${sceneVideo.height}/${sceneVideo.durationSeconds.toFixed(3)}`);
 }
+async function verifyBackgroundMotion(video: HTMLVideoElement): Promise<void> {
+  const canvas = document.createElement('canvas'); canvas.width = 160; canvas.height = 90;
+  const context = canvas.getContext('2d', { willReadFrequently: true });
+  if (!context) throw new Error('MOTION_CHECK_UNAVAILABLE');
+  video.pause();
+  const frame = async (time: number): Promise<Uint8ClampedArray> => {
+    await new Promise<void>((resolve, reject) => {
+      const timer = window.setTimeout(() => { cleanup(); reject(new Error('MOTION_CHECK_TIMEOUT')); }, 8000);
+      const cleanup = () => { window.clearTimeout(timer); video.removeEventListener('seeked', done); video.removeEventListener('error', failed); };
+      const done = () => { cleanup(); resolve(); };
+      const failed = () => { cleanup(); reject(new Error('MOTION_CHECK_DECODE_FAILED')); };
+      video.addEventListener('seeked', done, { once: true }); video.addEventListener('error', failed, { once: true });
+      video.currentTime = time;
+    });
+    // Seeking can finish before the new decoded frame reaches the canvas.
+    await new Promise(resolve => window.setTimeout(resolve, 150));
+    context.drawImage(video, 0, 0, 160, 90);
+    return context.getImageData(0, 0, 160, 90).data;
+  };
+  const first = await frame(0.25), last = await frame(Math.min(2.5, video.duration - 0.1));
+  let sum = 0, changed = 0;
+  for (let i = 0; i < first.length; i += 4) {
+    const difference = (Math.abs(first[i] - last[i]) + Math.abs(first[i + 1] - last[i + 1]) + Math.abs(first[i + 2] - last[i + 2])) / 3;
+    sum += difference; if (difference > 5) changed++;
+  }
+  video.currentTime = 0;
+  if (sum / (160 * 90) <= 0.2 || changed <= 100) throw new Error('INSUFFICIENT_VISIBLE_MOTION: try a prompt with a clear moving subject');
+}
+
 async function loadTrainingScene(): Promise<{ scene: TrainingSceneManifest; modelManifest: ModelManifest }> {
   const sceneUrl = state.demoSource ? state.backgroundMode === 'CINEMATIC' ? '/model/nxstage-cinematic-scene-manifest.json' : nxstageDemoReview ? '/model/nxstage-review-scene.json' : '/model/nxstage-training-scene-manifest.json' : trainingSceneManifestUrl;
   const photoPlate = state.demoSource && state.backgroundStatus === 'REVIEW_REQUIRED' && state.backgroundMode === 'LOCKED_INTERACTIVE' && state.backgroundPreviewUrl.endsWith('.png');
@@ -214,7 +249,8 @@ async function loadTrainingScene(): Promise<{ scene: TrainingSceneManifest; mode
     fetch(modelManifestUrl, { cache: 'no-store' })
   ]);
   if (!sceneResponse.ok || !modelResponse.ok) throw new Error('SCENE_MANIFEST_FETCH_FAILED');
-  const scene = validateTrainingSceneManifest(await sceneResponse.json());
+  let scene = validateTrainingSceneManifest(await sceneResponse.json());
+  if (state.backgroundPreviewUrl && state.backgroundVideo) scene = validateTrainingSceneManifest({ ...scene, video: state.backgroundVideo });
   const modelManifest = validateBrowserModelManifest(await modelResponse.json());
   if (scene.model.modelVersionId !== modelManifest.modelVersionId || scene.model.sourceHash.toLowerCase() !== modelManifest.sourceHash?.toLowerCase()) throw new Error('SCENE_MODEL_BINDING_MISMATCH');
   for (const cue of scene.interaction?.cues ?? []) {
@@ -224,10 +260,11 @@ async function loadTrainingScene(): Promise<{ scene: TrainingSceneManifest; mode
   }
   if (photoPlate) return { scene, modelManifest };
   if (scene.video.contentType !== 'video/mp4') throw new Error('SCENE_VIDEO_TYPE_UNSUPPORTED');
-  if ((await digestUrl(videoUrl)).toLowerCase() !== scene.video.sourceHash.toLowerCase() && !state.backgroundPreviewUrl) throw new Error('SCENE_VIDEO_HASH_MISMATCH');
+  if ((await digestUrl(videoUrl)).toLowerCase() !== scene.video.sourceHash.toLowerCase() && (!state.backgroundPreviewUrl || state.backgroundVideo)) throw new Error('SCENE_VIDEO_HASH_MISMATCH');
   const video = app.querySelector<HTMLVideoElement>('#training-video');
   if (!video) throw new Error('SCENE_VIDEO_ELEMENT_MISSING');
   await waitForVideoMetadata(video, scene.video);
+  if (state.backgroundHasMotion) await verifyBackgroundMotion(video);
   return { scene, modelManifest };
 }
 
@@ -243,11 +280,12 @@ function renderPhotoModelDraft(): string {
 }
 
 function renderPhotoReviewGate(): string {
-  const isDemoCandidate = state.demoSource && state.candidateTriangles > 0;
-  const visualReview = isDemoCandidate && nxstageDemoReview;
-  const preview = currentPhotoPreviewUrls()[0] || state.sourcePreviewDataUrl;
-  const evidence = preview ? `<img src="${preview}" alt="Representative source view for the reviewed reconstruction" />` : `<div class="photo-placeholder">${icon('grid', 26)}<span>Source views are stored privately with the reconstruction job.</span></div>`;
-  return `<div class="pipeline-review-card"><div class="pipeline-review-evidence"><div class="photo-model-shell">${evidence}</div><span class="model-badge">${icon('shield', 12)} Private source evidence</span></div><div class="pipeline-review-copy"><div class="pipeline-review-heading"><div><p class="eyebrow">${visualReview ? 'Visual reconstruction' : 'Candidate quality report'}</p><h3>Review is required before this model can reach the scene.</h3></div><span class="tag yellow">REVIEW_REQUIRED</span></div><p class="muted">${visualReview ? 'This sample is a visual reconstruction. Its dimensions and hidden geometry are estimates, and it is not approved for clinical use.' : 'The reconstruction worker produced a source-bound candidate. Keep it private until an independent reviewer approves the geometry, measurements, and intended training use.'}</p>${isDemoCandidate ? `${visualReview ? '' : '<div class="pipeline-metrics"><div><strong>502,001</strong><span>triangles</span></div><div><strong>0.54 mm</strong><span>mean surface error</span></div><div><strong>24</strong><span>source views</span></div></div>'}<p class="pipeline-rationale">${escapeHtml(state.reviewRationale || 'Candidate is awaiting review.')}</p><button class="primary-btn" data-action="approve-demo-candidate">${visualReview ? 'Open visual review' : 'Approve candidate for scene preview'} ${icon('arrow', 14)}</button>` : `<div class="reconstruction-status"><span class="status-dot"></span><strong>Candidate remains review-required</strong><small>Use the reconstruction API to attach a quality report and reviewer decision.</small></div><button class="outline-btn" data-action="back-to-source">Replace photo set</button>`}</div></div>`;
+  return `<div class="pipeline-review-card"><div class="pipeline-review-copy"><p class="eyebrow">Awaiting model generation</p><h3>No generated model is available to review yet.</h3><p class="muted">Your photos are available for preview in this browser. This demo does not submit custom photos to the reconstruction service. Generate a candidate through the reconstruction workflow before inspecting and approving it.</p><div class="focus-actions"><button class="outline-btn" data-action="back-to-source">Replace photo set</button><button class="primary-btn" data-action="simulate-upload" data-kind="photos">Use demo photo set</button></div></div></div>`;
+}
+
+function renderModelApproval(): string {
+  if (photoCandidateApproved()) return '<p class="tag lime" role="status">Model approved for demo scene preview</p>';
+  return `<div class="pipeline-review-copy"><p class="eyebrow">Review the model above</p><p class="muted">This is a prepared sample model, loaded after the demo conversion. Inspect its geometry and controls before approving it for scene preview. It remains an unmeasured visual reconstruction.</p><button class="primary-btn" data-action="approve-demo-candidate" disabled>Approve model for scene preview</button><button class="outline-btn" data-action="back-to-source">Replace photo set</button></div>`;
 }
 
 function renderCreatorRail(): string {
@@ -268,9 +306,9 @@ function renderBackgroundReviewArtifacts(): string {
 function renderBackgroundPromptEditor(): string {
   const generating = state.backgroundStatus === 'GENERATING';
   const label = state.backgroundApproved ? 'Review approved' : state.backgroundStatus === 'PREVIEW_READY' ? 'Draft preview ready' : state.backgroundStatus === 'REVIEW_REQUIRED' ? 'Review required' : generating ? 'Generating background…' : 'No background generation submitted';
-  const source = state.backgroundGenerationId ? `Generation ${escapeHtml(state.backgroundGenerationId)}${state.backgroundJobId ? ` · job ${escapeHtml(state.backgroundJobId)}` : ''}` : configuredOpenMontageApiBase() ? 'Provider adapter configured' : 'Deterministic local preview';
+  const source = state.backgroundGenerationId ? `Generation ${escapeHtml(state.backgroundGenerationId)}${state.backgroundJobId ? ` · job ${escapeHtml(state.backgroundJobId)}` : ''}` : configuredOpenMontageApiBase() ? azureHostedDemo ? 'Azure Foundry LTX-2.5' : 'Free LTX-2.5 on Hugging Face; no paid fallback' : 'Server video provider';
   const progress = generating ? `<div class="progress-track" aria-label="Background generation progress"><div class="progress-bar" style="width:${state.backgroundProgress}%"></div></div><small class="muted">${state.backgroundProgress}% · ${source}</small>` : state.backgroundGenerationId ? `<small class="muted">${source}</small>` : '';
-  return `<section class="background-generation-panel"><div class="background-generation-head"><div><p class="eyebrow">Background generation</p><h3>Describe the clinical scene</h3><p class="muted">The prompt controls the environment and lighting. The device model stays source-bound and is never regenerated by the background provider.</p></div><span class="tag ${state.backgroundApproved ? 'lime' : state.backgroundStatus === 'REVIEW_REQUIRED' ? 'yellow' : state.backgroundStatus === 'PREVIEW_READY' ? 'lime' : 'gray'}">${label}</span></div><label class="edit-field">Background prompt<textarea id="background-prompt" maxlength="1800">${escapeHtml(state.backgroundPrompt)}</textarea></label><label class="edit-field">Narration script<textarea id="narration-text" maxlength="12000">${escapeHtml(state.narrationText)}</textarea><small class="muted">This script is sent to the configured Azure Speech adapter as preview narration. It remains review-required and editable.</small></label>${state.narrationUrl ? `<audio controls preload="metadata" src="${escapeHtml(state.narrationUrl)}" aria-label="Generated narration preview"></audio>` : ''}<div class="background-generation-controls"><label class="edit-field">Integration mode<select id="background-mode"><option value="LOCKED_INTERACTIVE" ${state.backgroundMode === 'LOCKED_INTERACTIVE' ? 'selected' : ''}>Locked interactive overlay</option><option value="CINEMATIC" ${state.backgroundMode === 'CINEMATIC' ? 'selected' : ''}>Cinematic tracked composite</option></select></label><button class="primary-btn" data-action="generate-background" ${generating ? 'disabled' : ''}>${icon('spark', 14)} ${generating ? 'Generating…' : 'Generate background video + narration'}</button>${generating ? '<button class="secondary-btn" data-action="cancel-background">Cancel</button>' : ''}${state.backgroundStatus === 'REVIEW_REQUIRED' && !state.backgroundApproved ? '<button class="secondary-btn" data-action="approve-background">Approve reviewed draft</button>' : ''}</div>${progress}<p class="background-generation-note">${state.backgroundMode === 'LOCKED_INTERACTIVE' ? 'Camera, safe region, frame rate, and duration remain locked for model alignment.' : 'Camera motion is allowed only for a non-interactive tracked composite.'} Drafts remain preview-only until independent rights and visual review.</p></section>${renderBackgroundReviewArtifacts()}`;
+  return `<section class="background-generation-panel">${backgroundError ? `<p role="alert">${escapeHtml(backgroundError)}</p>` : ''}<div class="background-generation-head"><div><p class="eyebrow">Background generation</p><h3>Generate a moving background</h3>${azureHostedDemo ? '<p><a href="/signin">Sign in to generate an Azure video</a></p>' : ''}<p class="muted">${azureHostedDemo ? 'Azure-hosted LTX-2.5 motion generation. New renders are usage billed and require operator sign-in. The prepared sample makes no new render request.' : 'Free LTX-2.5 video generation on Hugging Face. Shared GPU quotas and queues apply; no paid fallback runs automatically.'} Describe clear motion with a stationary viewpoint.</p><p class="muted">The prompt controls the environment and lighting. The device model stays source-bound and is never regenerated by the background provider.</p></div><span class="tag ${state.backgroundApproved ? 'lime' : state.backgroundStatus === 'REVIEW_REQUIRED' ? 'yellow' : state.backgroundStatus === 'PREVIEW_READY' ? 'lime' : 'gray'}">${label}</span></div><label class="edit-field">Background prompt<textarea id="background-prompt" maxlength="1800">${escapeHtml(state.backgroundPrompt)}</textarea></label><label class="edit-field">Narration script<textarea id="narration-text" maxlength="12000">${escapeHtml(state.narrationText)}</textarea><small class="muted">Narration is separate from background video generation. The video model generates motion. The demo mutes background audio; this script remains separate from narration generation.</small></label>${state.narrationUrl ? `<audio controls preload="metadata" src="${escapeHtml(state.narrationUrl)}" aria-label="Generated narration preview"></audio>` : ''}<div class="background-generation-controls"><label class="edit-field">Integration mode<select id="background-mode"><option value="LOCKED_INTERACTIVE" ${state.backgroundMode === 'LOCKED_INTERACTIVE' ? 'selected' : ''}>Locked interactive overlay</option><option value="CINEMATIC" ${configuredOpenMontageApiBase() === window.location.origin ? 'disabled' : ''} ${state.backgroundMode === 'CINEMATIC' ? 'selected' : ''}>Cinematic tracked composite</option></select></label><button class="primary-btn" data-action="generate-background" ${generating ? 'disabled' : ''}>${icon('spark', 14)} ${generating ? 'Generating…' : (azureHostedDemo ? 'Generate Azure motion video' : 'Generate motion video (free)')}</button>${generating ? '<button class="secondary-btn" data-action="cancel-background">Stop waiting</button>' : ''}${state.demoSource && !generating ? '<button class="outline-btn" data-action="use-motion-sample">Use generated motion sample</button>' : ''}${state.backgroundStatus === 'REVIEW_REQUIRED' && !state.backgroundApproved ? '<button class="secondary-btn" data-action="approve-background" disabled>Approve reviewed draft</button>' : ''}</div>${progress}<p class="background-generation-note">${state.backgroundMode === 'LOCKED_INTERACTIVE' ? 'Camera, safe region, frame rate, and duration remain locked for model alignment.' : 'Camera motion is allowed only for a non-interactive tracked composite.'} Drafts remain preview-only until independent rights and visual review.</p></section>${renderBackgroundReviewArtifacts()}`;
 }
 
 function renderCreator(): string {
@@ -288,8 +326,8 @@ function renderCreator(): string {
   const moduleEditor = !selected ? `<div class="focus-empty"><span class="module-num">+</span><div><strong>Choose a module to edit</strong><p>Select a row and its fields will open here.</p></div></div>` : editing ? `<div class="focus-editor"><p class="eyebrow">Editing module ${String((state.selectedModule ?? 0) + 1).padStart(2, '0')}</p><label class="edit-field">Module title<input id="edit-module-title" maxlength="120" value="${escapeHtml(selected.title)}" /></label><label class="edit-field">Description<textarea id="edit-module-description" maxlength="240">${escapeHtml(selected.description)}</textarea></label><div class="focus-actions"><button class="outline-btn" data-action="cancel-edit">Cancel</button><button class="primary-btn" data-action="save-module" data-index="${state.selectedModule}">${icon('check', 13)} Save changes</button></div></div>` : `<div class="focus-selection"><div><p class="eyebrow">Selected module</p><h3>${escapeHtml(selected.title)}</h3><p>${escapeHtml(selected.description)}</p></div><button class="outline-btn" data-action="edit-module" data-index="${state.selectedModule}">${icon('edit', 13)} Edit details</button></div>`;
   let body = '';
   if (state.creatorStep === 'source') body = renderSourceUpload();
-  if (state.creatorStep === 'convert') body = state.sourceProgress < 100 ? renderPipelineProcessing() : `<div class="focus-complete"><span class="complete-mark">${icon('check', 20)}</span><div><p class="eyebrow">${state.sourceKind === 'photos' ? 'Candidate ready for review' : 'Conversion complete'}</p><h3>${escapeHtml(state.sourceFileName || 'Aurora setup guide.pdf')} is ready.</h3><p class="muted">${state.sourceKind === 'photos' ? 'The candidate is held at REVIEW_REQUIRED until a reviewer approves it.' : 'The source is structured and connected to the next two steps.'}</p></div><button class="primary-btn" data-action="creator-next">${state.sourceKind === 'photos' ? 'Open review gate' : 'Open 3D model'} ${icon('arrow', 14)}</button></div>`;
-  if (state.creatorStep === 'model') body = state.sourceKind === 'photos' && !photoCandidateApproved() ? renderPhotoReviewGate() : `${renderNxStageReference()}<div class="focus-model"><div class="model-canvas-wrap"><canvas id="demo-model-canvas" aria-label="${previewAria}. Drag to rotate, use the wheel or pinch to zoom, move over a tagged control to preview it, and use arrow keys then Enter to activate a control."></canvas><span class="model-badge">${icon('spark', 12)} ${visualReview ? 'Visual reconstruction' : state.demoSource ? 'Reviewed demo reconstruction' : 'Reviewed 3D preview'}</span></div><div class="focus-model-copy"><p class="eyebrow">${visualReview ? 'Visual reconstruction from the sample photo set' : state.demoSource ? 'Reviewed reconstruction candidate from the sample photo set' : 'Reviewed source-bound training model'}</p><h3>${previewTitle}</h3><p class="muted">Drag to rotate, use the wheel to zoom, select the named component, or press a tagged control. This preview is not dimensional, clinical, or manufacturing acceptance.</p><div class="component-chips">${componentChips}</div><p id="demo-model-status" class="model-status" role="status" aria-live="polite">Loading reviewed model…</p>${state.demoSource ? `<div class="demo-photo-strip">${currentPhotoPreviewUrls().slice(0, 3).map((url, photoIndex) => `<img src="${url}" alt="Sample reconstruction source view ${photoIndex + 1}" />`).join('')}<span>24 source views</span></div>` : ''}</div></div>`;
+  if (state.creatorStep === 'convert') body = state.sourceProgress < 100 ? renderPipelineProcessing() : `<div class="focus-complete"><span class="complete-mark">${icon('check', 20)}</span><div><p class="eyebrow">${state.sourceKind === 'photos' ? state.demoSource ? 'Sample model ready to inspect' : 'Awaiting model generation' : 'Conversion complete'}</p><h3>${escapeHtml(state.sourceFileName || 'Aurora setup guide.pdf')} is ready.</h3><p class="muted">${state.sourceKind === 'photos' ? state.demoSource ? 'The prepared sample model is ready. Open it, inspect the geometry and controls, then approve it for scene preview.' : 'No reconstruction job is submitted by this demo. Use the sample photo set to walk through model inspection and approval.' : 'The source is structured and connected to the next two steps.'}</p></div><button class="primary-btn" data-action="creator-next">${state.sourceKind === 'photos' ? 'Inspect model' : 'Open 3D model'} ${icon('arrow', 14)}</button></div>`;
+  if (state.creatorStep === 'model') body = state.sourceKind === 'photos' && (!state.demoSource || state.candidateTriangles === 0) ? renderPhotoReviewGate() : `${renderNxStageReference()}<div class="focus-model"><div class="model-canvas-wrap"><canvas id="demo-model-canvas" aria-label="${previewAria}. Drag to rotate, use the wheel or pinch to zoom, move over a tagged control to preview it, and use arrow keys then Enter to activate a control."></canvas><span class="model-badge">${icon('spark', 12)} ${visualReview ? 'Visual reconstruction' : state.demoSource ? (photoCandidateApproved() ? 'Approved demo model' : 'Model awaiting review') : 'Reviewed 3D preview'}</span></div><div class="focus-model-copy"><p class="eyebrow">${visualReview ? 'Visual reconstruction from the sample photo set' : state.demoSource ? 'Prepared model from the sample photo set' : 'Reviewed source-bound training model'}</p><h3>${previewTitle}</h3><p class="muted">Drag to rotate, use the wheel to zoom, select the named component, or press a tagged control. This preview is not dimensional, clinical, or manufacturing acceptance.</p><div class="component-chips">${componentChips}</div><p id="demo-model-status" class="model-status" role="status" aria-live="polite">Loading model for inspection...</p>${state.demoSource ? renderModelApproval() : ''}${state.demoSource ? `<div class="demo-photo-strip">${currentPhotoPreviewUrls().slice(0, 3).map((url, photoIndex) => `<img src="${url}" alt="Sample reconstruction source view ${photoIndex + 1}" />`).join('')}<span>24 source views</span></div>` : ''}</div></div>`;
   if (state.creatorStep === 'content') body = `${renderBackgroundPromptEditor()}<div class="focus-content"><div class="generated-video ${state.videoPlaying ? 'playing' : ''}"><div class="video-topline"><span class="tag ${visualReview || state.backgroundStatus === 'REVIEW_REQUIRED' ? 'yellow' : 'lime'}">${visualReview ? 'Visual review' : state.backgroundStatus === 'REVIEW_REQUIRED' ? 'Preview · review required' : 'Generated lesson video'}</span>${visualReview ? '' : '<span class="mono">02:14</span>'}</div>${renderTrainingScene()}${visualReview ? '' : `<div class="video-controls"><span class="video-progress"><span style="width:${state.videoPlaying ? '46%' : '18%'}"></span></span><span class="mono">00:${state.videoPlaying ? '59' : '24'}</span></div>`}</div><div class="focus-content-copy"><p class="eyebrow">Generated from ${escapeHtml(state.sourceFileName || 'Aurora setup guide.pdf')}</p><h3>${visualReview ? 'Interactive visual review' : state.backgroundStatus === 'REVIEW_REQUIRED' ? 'Composite preview awaiting independent review' : 'Ready-to-teach content, grounded in the source'}</h3><p class="muted">The source-bound model is rendered above the generated background plate. Scene hashes, camera data, provider provenance, and review status stay attached to the generation.</p><div class="generated-list"><span>${icon('check', 13)} Source-bound 3D model</span><span>${icon('check', 13)} ${state.backgroundMode === 'LOCKED_INTERACTIVE' ? 'Camera-locked interactive overlay' : 'Cinematic composite path'}</span><span>${icon('check', 13)} Independent review gate before publication</span></div></div></div>`;
   if (state.creatorStep === 'build') body = `<div class="focus-build"><div class="focus-build-head"><div><h3>Course modules</h3><p class="muted">Keep the path short and focused. Click one module to edit it.</p></div><button class="outline-btn" data-action="add-module">${icon('plus', 14)} Add module</button></div><div class="module-list compact">${state.modules.map((module, moduleIndex) => `<article class="module-row clickable ${state.selectedModule === moduleIndex ? 'selected' : ''}" tabindex="0" role="button" data-action="select-module" data-index="${moduleIndex}" aria-label="Edit module ${moduleIndex + 1}: ${escapeHtml(module.title)}"><div class="module-num">${String(moduleIndex + 1).padStart(2, '0')}</div><div><h3>${escapeHtml(module.title)}</h3><p>${escapeHtml(module.description)}</p></div><span class="tag ${module.completed ? 'lime' : 'gray'}">${module.completed ? 'Complete' : module.type}</span></article>`).join('')}</div>${moduleEditor}</div>`;
   if (state.creatorStep === 'publish') body = `<div class="focus-publish"><div class="publish-summary"><span class="course-icon">${icon('shield', 22)}</span><div><p class="eyebrow">Release summary</p><h3>Aurora infusion controller · Fundamentals</h3><p class="muted">${state.modules.length} modules · ${state.modules.reduce((total, module) => total + module.minutes, 0)} minutes · Clinical specialists</p></div></div><div class="publish-checks"><span>${icon('check', 13)} Source evidence connected</span><span>${icon('check', 13)} 3D model preview approved</span><span>${icon('check', 13)} Learner knowledge check ready</span></div>${state.published ? `<div class="focus-complete"><span class="complete-mark">${icon('check', 20)}</span><div><p class="eyebrow">Published</p><h3>Your course is ready for learners.</h3><p class="muted">The published release is now visible in Learner view.</p></div><button class="primary-btn" data-action="toggle-view">Preview learner view ${icon('arrow', 14)}</button></div>` : `<button class="primary-btn" data-action="publish">Approve & publish course ${icon('arrow', 14)}</button>`}</div>`;
@@ -345,22 +383,33 @@ function startConversion(fileNames: string[], kind: SourceKind, previewUrls: str
   state.backgroundGenerationId = '';
   state.backgroundJobId = '';
   state.backgroundProgress = 0;
-  state.backgroundPreviewUrl = '';
+  state.backgroundPreviewUrl = ''; state.backgroundVideo = null; state.backgroundHasMotion = false;
   saveState();
   render();
-  showToast(kind === 'photos' ? `${state.sourceFileName} stored privately — Service Bus job queued` : `${state.sourceFileName} uploaded — conversion started`);
+  showToast(kind === 'photos' ? (demoSource ? 'Loading prepared sample: conversion stages are simulated' : 'Photos selected locally: model generation has not started') : `${state.sourceFileName} selected: conversion started`);
+  if (kind === 'photos' && !demoSource) {
+    state.creatorStep = 'model';
+    state.sourceStage = 'model';
+    state.sourceProgress = 100;
+    state.pipelinePhase = 'IDLE';
+    state.pipelineJobId = '';
+    state.pipelineAttempt = 0;
+    saveState();
+    render();
+    return;
+  }
   conversionTimer = window.setInterval(() => {
     state.sourceProgress = Math.min(100, state.sourceProgress + 22);
     if (kind === 'photos' && state.sourceProgress >= 28 && state.sourceProgress < 82) state.pipelinePhase = 'RUNNING';
     if (state.sourceProgress >= 100) {
       window.clearInterval(conversionTimer);
       state.sourceStage = kind === 'photos' ? 'model' : 'content';
-      state.pipelinePhase = kind === 'photos' ? 'REVIEW_REQUIRED' : 'CONTENT_READY';
+      state.pipelinePhase = kind === 'photos' ? (demoSource ? 'REVIEW_REQUIRED' : 'IDLE') : 'CONTENT_READY';
       state.candidateTriangles = kind === 'photos' && demoSource ? 502001 : 0;
-      state.reviewRationale = kind === 'photos' ? (demoSource && nxstageDemoReview ? 'The sample model is an unmeasured visual reconstruction.' : 'Candidate is source-bound and measured; independent reviewer approval is required.') : '';
+      state.reviewRationale = kind === 'photos' ? (demoSource ? 'Prepared sample model: inspect it before approving scene preview.' : 'No model has been generated from these photos.') : '';
       saveState();
       render();
-      showToast(kind === 'photos' ? 'Candidate ready — review required before Babylon can load it' : 'Conversion complete — interactive model and lessons generated');
+      showToast(kind === 'photos' ? (demoSource ? 'Sample model ready: inspect it before approval' : 'Photos selected: awaiting model generation') : 'Conversion complete: existing demo model and lessons available');
       return;
     }
     saveState();
@@ -495,6 +544,8 @@ function addReviewSceneViews(canvas: HTMLCanvasElement, runtime: InteractiveMode
 }
 
 async function initDemoModel() {
+  modelPreviewReady = false;
+  backgroundPreviewReady = false;
   const canvas = app.querySelector<HTMLCanvasElement>('#demo-model-canvas, #demo-scene-canvas');
   if (!canvas) return;
   const generation = ++demoModelGeneration;
@@ -564,7 +615,7 @@ async function initDemoModel() {
       const hoveredTarget = modelState.hoveredInteractionTargetId ? runtimeForControls?.listInteractionTargets().find(target => target.targetId === modelState.hoveredInteractionTargetId) : undefined;
       const hoverHint = hoveredTarget?.interactionType === 'open' ? `drag to move, or click to ${hoveredTarget.openVerb.toLowerCase()} or ${hoveredTarget.closeVerb.toLowerCase()}.` : hoveredTarget?.interactionType === 'turn' ? 'drag to turn.' : 'press and release.';
       const keyboardFocus = modelState.focusedInteractionTargetId && (!modelState.hoveredInteractionTargetId || modelState.hoveredInteractionTargetId === modelState.focusedInteractionTargetId);
-      status.textContent = modelState.interactionMessage ?? (modelState.pressedInteractionTargetId ? `Holding ${modelState.pressedInteractionTargetName ?? modelState.pressedInteractionTargetId} · release to finish.` : keyboardFocus ? `Keyboard focus on ${modelState.focusedInteractionTargetName ?? modelState.focusedInteractionTargetId} · ${modelState.focusedInteractionType === 'turn' ? 'hold Shift and use the arrow keys to turn.' : modelState.focusedInteractionType === 'open' ? 'press Enter or Space to open or close; hold Shift and use the arrow keys to move gradually.' : 'press Enter or Space to activate.'}` : modelState.hoveredInteractionTargetId ? `Over ${modelState.hoveredInteractionTargetName ?? modelState.hoveredInteractionTargetId} · ${hoverHint}` : modelState.phase === 'READY' ? (composite ? 'Scene ready · source-bound video + Babylon model.' : 'Ready · drag to rotate, wheel to zoom, select a component, or press a tagged control.') : modelState.phase === 'LOADING' ? 'Loading approved 3D model…' : modelState.phase === 'REDUCED_COMPLEXITY' ? 'Model loaded · reduced-complexity path active.' : `${modelState.phase}: ${modelState.errorMessage ?? 'Model preview unavailable.'}`);
+      status.textContent = modelState.interactionMessage ?? (modelState.pressedInteractionTargetId ? `Holding ${modelState.pressedInteractionTargetName ?? modelState.pressedInteractionTargetId} · release to finish.` : keyboardFocus ? `Keyboard focus on ${modelState.focusedInteractionTargetName ?? modelState.focusedInteractionTargetId} · ${modelState.focusedInteractionType === 'turn' ? 'hold Shift and use the arrow keys to turn.' : modelState.focusedInteractionType === 'open' ? 'press Enter or Space to open or close; hold Shift and use the arrow keys to move gradually.' : 'press Enter or Space to activate.'}` : modelState.hoveredInteractionTargetId ? `Over ${modelState.hoveredInteractionTargetName ?? modelState.hoveredInteractionTargetId} · ${hoverHint}` : modelState.phase === 'READY' ? (composite ? (state.backgroundHasMotion ? 'Scene ready: generated motion video + interactive model.' : 'Scene ready: interactive model on a still backdrop.') : 'Ready · drag to rotate, wheel to zoom, select a component, or press a tagged control.') : modelState.phase === 'LOADING' ? 'Loading 3D model...' : modelState.phase === 'REDUCED_COMPLEXITY' ? 'Model loaded · reduced-complexity path active.' : `${modelState.phase}: ${modelState.errorMessage ?? 'Model preview unavailable.'}`);
     }, onInteractionTargetActivated: ({ targetId, targetName, componentId, interactionType, moving, transform }) => { if (generation === demoModelGeneration && status) { const warmerLevel = nxstageReviewModel && interactionType === 'press' ? updateNxstageWarmerPreview(targetId) : undefined; const target = runtimeForControls?.listInteractionTargets().find((item) => item.targetId === targetId); const position = target?.openVerb === 'Lift' ? (target.isOpen ? (target.isFullyOpen ? 'raised' : 'partially raised') : 'lowered') : target?.openVerb === 'Pull out' ? (target.isOpen ? (target.isFullyOpen ? 'pulled out' : 'partially pulled out') : 'pushed in') : (target?.isOpen ? (target.isFullyOpen ? 'open' : 'partially open') : 'closed'); const displayPosition = target?.openVerb === 'Set on' ? (target.isOpen ? 'in the on position (power not simulated)' : 'in the off position (power not simulated)') : position; const completed = `${targetName} ${interactionType === 'turn' ? `turned to ${transform?.rotationY?.toFixed(2) ?? 'a new position'}` : interactionType === 'open' ? `is ${displayPosition}` : 'pressed'} in local preview.${interactionType === 'turn' || interactionType === 'press' ? ' Device settings are not simulated.' : ''}${warmerLevel !== undefined ? ` Illustrative warmer bars: ${warmerLevel} of 9; power, temperature and heating are not simulated.` : ''}${composite ? ' Scoring requires an approved learner session.' : ''}`; const movingMessage = target?.openVerb === 'Set on' ? `${targetName} is moving toward the ${target.isOpen ? 'on' : 'off'} position (power not simulated).` : `${targetName} is moving to its ${position} position.`; pendingMotionFeedback = moving && interactionType === 'open' ? { componentId, moving: movingMessage, completed } : undefined; status.textContent = pendingMotionFeedback?.moving ?? completed; lastInteractionFeedback = status.textContent; } }, onInteractionBlocked: ({ message }) => { if (generation === demoModelGeneration && status) { pendingMotionFeedback = undefined; status.textContent = message; lastInteractionFeedback = message; } }, onInteractionMotionFinished: (componentId) => { if (generation === demoModelGeneration && status && pendingMotionFeedback?.componentId === componentId) { if (status.textContent === pendingMotionFeedback.moving) { status.textContent = pendingMotionFeedback.completed; lastInteractionFeedback = status.textContent; } pendingMotionFeedback = undefined; } } });
     if (generation !== demoModelGeneration) { runtime.dispose(); return; }
     demoModelRuntime = runtime;
@@ -576,9 +627,23 @@ async function initDemoModel() {
       panel.className = 'scene-named-controls';
       canvas.closest('.training-scene')?.insertAdjacentElement('afterend', panel);
     }
+    if (!composite && generation === demoModelGeneration) {
+      const phase = runtime.getState().phase;
+      modelPreviewReady = phase === 'READY' || phase === 'REDUCED_COMPLEXITY';
+      const approveButton = app.querySelector<HTMLButtonElement>('[data-action="approve-demo-candidate"]');
+      if (approveButton) approveButton.disabled = !modelPreviewReady;
+    }
     if (!composite || state.sceneInteractive) addNamedModelControls(canvas, runtime);
     if (composite && state.sceneInteractive && nxstageReviewModel && sceneBinding) addReviewSceneViews(canvas, runtime, sceneBinding.modelManifest);
-    if (composite && state.videoPlaying) void video?.play().catch(() => undefined);
+    if (composite && generation === demoModelGeneration && state.backgroundPreviewUrl) {
+      backgroundPreviewReady = true;
+      const approveButton = app.querySelector<HTMLButtonElement>('[data-action="approve-background"]');
+      if (approveButton) approveButton.disabled = false;
+      void video?.play().then(() => {
+        const button = app.querySelector<HTMLButtonElement>('[data-action="toggle-background-playback"]');
+        if (button) button.textContent = 'Pause background';
+      }).catch(() => undefined);
+    } else if (composite && state.videoPlaying) void video?.play().catch(() => undefined);
   } catch (error) {
     if (generation === demoModelGeneration && status) status.textContent = `3D preview unavailable · ${error instanceof Error ? error.message : 'runtime error'}`;
   }
@@ -601,7 +666,7 @@ function showToast(message: string) { document.querySelector('.toast')?.remove()
 
 function configuredOpenMontageApiBase(): string {
   const configured = (globalThis as typeof globalThis & { __OPENMONTAGE_API_BASE_URL__?: string }).__OPENMONTAGE_API_BASE_URL__?.trim();
-  return configured || new URLSearchParams(window.location.search).get('openmontageApi')?.trim() || '';
+  return configured || new URLSearchParams(window.location.search).get('openmontageApi')?.trim() || window.location.origin;
 }
 
 function generationProgress(status: OpenMontageGenerationStatus): number {
@@ -613,7 +678,7 @@ function generationProgress(status: OpenMontageGenerationStatus): number {
 }
 
 async function pollBackgroundGeneration(apiBaseUrl: string, generationId: string, token: number): Promise<void> {
-  for (let attempt = 0; attempt < 180; attempt += 1) {
+  for (let attempt = 0; attempt < 600; attempt += 1) {
     if (token !== backgroundRequestToken || state.backgroundGenerationId !== generationId || state.backgroundStatus !== 'GENERATING') return;
     const status = await loadOpenMontageGeneration(apiBaseUrl, generationId);
     if (token !== backgroundRequestToken) return;
@@ -622,16 +687,20 @@ async function pollBackgroundGeneration(apiBaseUrl: string, generationId: string
     if (status.state === 'SUCCEEDED') {
       state.backgroundStatus = 'REVIEW_REQUIRED';
       state.backgroundProgress = 100;
-      state.backgroundPreviewUrl = openMontageGenerationPreviewUrl(apiBaseUrl, generationId);
+      state.backgroundVideo = status.previewVideo ?? null;
+      state.backgroundHasMotion = status.previewMotion === true;
+      state.videoPlaying = true;
+      state.backgroundPreviewUrl = await loadOpenMontagePreview(apiBaseUrl, generationId);
       state.narrationUrl = status.narration?.audioUrl ?? '';
       saveState();
       render();
-      showToast('Provider draft ready — review the clean plate, model overlay, and composite');
+      showToast('Generated background ready — review the clean plate, model overlay, and composite');
       return;
     }
     if (status.state === 'FAILED' || status.state === 'DEAD_LETTERED') {
       state.backgroundStatus = 'IDLE';
       state.backgroundProgress = 0;
+      backgroundError = azureHostedDemo ? 'Azure video generation failed. Try the prepared sample or retry generation.' : 'Free video generation is unavailable or its GPU quota is exhausted. No paid request was made. Try the prepared motion sample.';
       saveState();
       render();
       showToast(`Background generation failed · ${status.outcome?.warnings?.[0]?.message ?? status.state}`);
@@ -652,17 +721,6 @@ async function pollBackgroundGeneration(apiBaseUrl: string, generationId: string
 
 async function startBackgroundGeneration(prompt: string, token: number): Promise<void> {
   const apiBaseUrl = configuredOpenMontageApiBase();
-  if (!apiBaseUrl) {
-    await new Promise((resolve) => window.setTimeout(resolve, 450));
-    if (token !== backgroundRequestToken || state.backgroundPrompt !== prompt || state.backgroundStatus !== 'GENERATING') return;
-    state.backgroundStatus = 'REVIEW_REQUIRED';
-    state.backgroundProgress = 100;
-    state.backgroundPreviewUrl = state.demoSource && state.backgroundMode === 'LOCKED_INTERACTIVE' ? '/demo-assets/nxstage-office-background-photo-openmontage.mp4' : state.demoSource && state.backgroundMode === 'CINEMATIC' ? '/demo-assets/nxstage-hallway-to-room-composite.mp4' : '';
-    saveState();
-    render();
-    showToast('Background draft ready — review the composite before approval');
-    return;
-  }
   try {
     const { scene } = await loadTrainingScene();
     const generation = await createOpenMontageGeneration(apiBaseUrl, { sceneManifest: scene, prompt, mode: state.backgroundMode, narrationText: state.narrationText.trim(), idempotencyKey: `demo-${Date.now()}-${Math.random().toString(36).slice(2)}` });
@@ -677,6 +735,7 @@ async function startBackgroundGeneration(prompt: string, token: number): Promise
     if (token !== backgroundRequestToken) return;
     state.backgroundStatus = 'IDLE';
     state.backgroundProgress = 0;
+    backgroundError = error instanceof Error && error.message === 'VIDEO_PROVIDER_NOT_CONFIGURED' ? 'The video provider is not configured on this demo server. No video was generated.' : 'Video generation failed. Retry the request; no sample video was substituted.';
     saveState();
     render();
     showToast(`Background generation unavailable · ${error instanceof Error ? error.message : 'provider request failed'}`);
@@ -720,12 +779,12 @@ function bindActions() {
       } else startConversion(['Aurora setup guide.pdf'], 'pdf');
     }
     if (action === 'approve-demo-candidate') {
-      if (!state.demoSource || state.pipelinePhase !== 'REVIEW_REQUIRED') { showToast('Only a review-required candidate can be approved'); return; }
+      if (!modelPreviewReady || !state.demoSource || state.candidateTriangles <= 0 || state.sourceProgress < 100 || state.pipelinePhase !== 'REVIEW_REQUIRED') { showToast('Only a review-required candidate can be approved'); return; }
       state.pipelinePhase = 'APPROVED';
-      state.reviewRationale = nxstageDemoReview ? 'Visual review opened; this reconstruction remains unmeasured.' : 'Demo reviewer approved the measured candidate for scene preview.';
+      state.reviewRationale = nxstageDemoReview ? 'Model inspected and approved for demo scene preview; this reconstruction remains unmeasured.' : 'Demo reviewer approved the measured candidate for scene preview.';
       saveState();
       render();
-      showToast('Candidate approved — the Babylon model is now available');
+      showToast('Model approved for scene preview. Continue to training content.');
     }
     if (action === 'go-creator-step') {
       const nextStep = element.dataset.step as CreatorStep;
@@ -791,24 +850,46 @@ function bindActions() {
         if (status) status.textContent = 'Playback was blocked. Press Play walkthrough again.';
       });
     }
+    if (action === 'toggle-background-playback') {
+      const video = app.querySelector<HTMLVideoElement>('#training-video');
+      if (!video) return;
+      if (video.paused) void video.play().then(() => { element.textContent = 'Pause background'; });
+      else { video.pause(); element.textContent = 'Play background'; }
+    }
+    if (action === 'use-motion-sample') {
+      backgroundError = '';
+      state.backgroundStatus = 'GENERATING';
+      state.backgroundApproved = false;
+      state.backgroundGenerationId = 'demo-motion-sample';
+      state.backgroundPreviewUrl = ''; state.backgroundVideo = null; state.backgroundHasMotion = false;
+      const token = ++backgroundRequestToken;
+      saveState(); render();
+      void pollBackgroundGeneration(window.location.origin, 'demo-motion-sample', token).catch(() => {
+        if (token !== backgroundRequestToken) return;
+        state.backgroundStatus = 'IDLE';
+        backgroundError = 'The prepared motion sample is unavailable. Generate a new video instead.';
+        saveState(); render();
+      });
+    }
     if (action === 'generate-background') {
       const prompt = app.querySelector<HTMLTextAreaElement>('#background-prompt')?.value.trim() ?? '';
       if (!prompt) { showToast('Describe the background before generating'); return; }
+      backgroundError = '';
       state.backgroundPrompt = prompt;
       state.backgroundStatus = 'GENERATING';
       state.backgroundApproved = false;
       state.backgroundGenerationId = '';
       state.backgroundJobId = '';
       state.backgroundProgress = configuredOpenMontageApiBase() ? 8 : 20;
-      state.backgroundPreviewUrl = '';
+      state.backgroundPreviewUrl = ''; state.backgroundVideo = null; state.backgroundHasMotion = false;
       state.narrationUrl = '';
       const token = ++backgroundRequestToken;
       saveState();
       render();
       void startBackgroundGeneration(prompt, token);
     }
-    if (action === 'cancel-background') { backgroundRequestToken += 1; state.backgroundStatus = 'IDLE'; state.backgroundApproved = false; state.backgroundGenerationId = ''; state.backgroundJobId = ''; state.backgroundProgress = 0; state.backgroundPreviewUrl = ''; state.narrationUrl = ''; saveState(); render(); showToast('Background generation cancelled'); }
-    if (action === 'approve-background') { if (state.backgroundStatus !== 'REVIEW_REQUIRED') { showToast('Generate a draft before approving it'); return; } if (configuredOpenMontageApiBase() && !state.narrationUrl) { showToast('Review the generated narration before approving the background'); return; } state.backgroundApproved = true; saveState(); render(); showToast('Background and narration approved for authoring — publication remains subject to course review'); }
+    if (action === 'cancel-background') { backgroundRequestToken += 1; state.backgroundStatus = 'IDLE'; state.backgroundApproved = false; state.backgroundGenerationId = ''; state.backgroundJobId = ''; state.backgroundProgress = 0; state.backgroundPreviewUrl = ''; state.backgroundVideo = null; state.backgroundHasMotion = false; state.narrationUrl = ''; saveState(); render(); showToast('Stopped waiting. The submitted provider render may still finish.'); }
+    if (action === 'approve-background') { if (!backgroundPreviewReady) { showToast('Wait for the generated video to load before approving'); return; } if (state.backgroundStatus !== 'REVIEW_REQUIRED') { showToast('Generate a draft before approving it'); return; } if (configuredOpenMontageApiBase() !== window.location.origin && !state.narrationUrl) { showToast('Review the generated narration before approving the background'); return; } state.backgroundApproved = true; saveState(); render(); showToast('Background approved for scene preview — publication remains subject to course review'); }
     if (action === 'toggle-review-explore') {
       const scene = element.closest('.training-scene');
       const canvas = scene?.querySelector<HTMLCanvasElement>('#demo-scene-canvas');
@@ -879,8 +960,15 @@ function bindActions() {
   app.querySelector<HTMLInputElement>('#source-file')?.addEventListener('change', (event) => { const files = Array.from((event.target as HTMLInputElement).files ?? []); if (!files.length) return; if (state.sourceKind === 'photos' && files.length < 3) { showToast('Choose at least 3 overlapping photos for reconstruction'); return; } const previews = state.sourceKind === 'photos' ? files.map((file) => URL.createObjectURL(file)) : []; startConversion(files.map((file) => file.name), state.sourceKind, previews, false); if (state.sourceKind === 'photos') persistPhotoPreview(files[0]); });
   app.querySelector<HTMLTextAreaElement>('#background-prompt')?.addEventListener('input', (event) => { state.backgroundPrompt = (event.target as HTMLTextAreaElement).value; saveState(); });
   app.querySelector<HTMLTextAreaElement>('#narration-text')?.addEventListener('input', (event) => { state.narrationText = (event.target as HTMLTextAreaElement).value; saveState(); });
-  app.querySelector<HTMLSelectElement>('#background-mode')?.addEventListener('change', (event) => { backgroundRequestToken += 1; state.backgroundMode = (event.target as HTMLSelectElement).value === 'CINEMATIC' ? 'CINEMATIC' : 'LOCKED_INTERACTIVE'; state.backgroundStatus = 'IDLE'; state.backgroundApproved = false; state.backgroundGenerationId = ''; state.backgroundJobId = ''; state.backgroundProgress = 0; state.backgroundPreviewUrl = ''; saveState(); render(); });
+  app.querySelector<HTMLSelectElement>('#background-mode')?.addEventListener('change', (event) => { backgroundRequestToken += 1; state.backgroundMode = (event.target as HTMLSelectElement).value === 'CINEMATIC' ? 'CINEMATIC' : 'LOCKED_INTERACTIVE'; state.backgroundStatus = 'IDLE'; state.backgroundApproved = false; state.backgroundGenerationId = ''; state.backgroundJobId = ''; state.backgroundProgress = 0; state.backgroundPreviewUrl = ''; state.backgroundVideo = null; state.backgroundHasMotion = false; saveState(); render(); });
   app.querySelectorAll<HTMLElement>('[data-action][role="button"]').forEach((element) => element.addEventListener('keydown', (event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); element.click(); } }));
 }
 
-render();
+async function startDemo() {
+  if (azureHostedDemo && state.backgroundGenerationId && state.backgroundStatus === 'REVIEW_REQUIRED') {
+    try { state.backgroundPreviewUrl = await loadOpenMontagePreview(window.location.origin, state.backgroundGenerationId); }
+    catch { state.backgroundPreviewUrl = ''; state.backgroundStatus = 'IDLE'; backgroundError = 'Sign in to restore the generated preview, or use the prepared sample.'; }
+  }
+  render();
+}
+void startDemo();

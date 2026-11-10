@@ -566,3 +566,5 @@ h3 { font-size: 14px; letter-spacing: -.02em; margin-bottom: 5px; }
   .focus-complete .primary-btn { width: 100%; }
 }
 .visual-review-notice { margin: 0; padding: 12px 20px; background: #fff4d9; color: #463617; font-size: 14px; }
+
+.training-scene.generated-background .training-scene-video { opacity: 1; }

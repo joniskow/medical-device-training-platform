@@ -1,0 +1,12 @@
+import { cp, copyFile, mkdir, writeFile } from 'node:fs/promises';
+import { resolve } from 'node:path';
+import { createRequire } from 'node:module';
+const { build } = createRequire(new URL('../apps/web/package.json', import.meta.url))('esbuild');
+const directory = resolve('output/azure-demo');
+await mkdir(directory, { recursive: true });
+await cp('apps/web/dist', resolve(directory, 'web'), { recursive: true });
+await build({ entryPoints: ['services/demo/server.mjs'], outfile: resolve(directory, 'server.mjs'), bundle: true, platform: 'node', format: 'esm', target: 'node24', nodePaths: [resolve('apps/api/node_modules'), resolve('packages/storage/node_modules')], banner: { js: "import { createRequire as __createRequire } from 'node:module'; const require = __createRequire(import.meta.url);" } });
+await build({ entryPoints: ['apps/web/src/demo-signin.ts'], outfile: resolve(directory, 'web/demo-signin.js'), bundle: true, platform: 'browser', format: 'esm', target: 'es2022' });
+await copyFile('fixtures/demo-motion/background.mp4', resolve(directory, 'sample.mp4'));
+await writeFile(resolve(directory, 'Dockerfile'), 'FROM node:24-trixie-slim\nRUN apt-get update && apt-get install -y --no-install-recommends ffmpeg ca-certificates && rm -rf /var/lib/apt/lists/*\nWORKDIR /app\nCOPY server.mjs sample.mp4 ./\nCOPY web/ ./web/\nUSER node\nENV PORT=8080 STATIC_ROOT=/app/web\nEXPOSE 8080\nCMD ["node","server.mjs"]\n');
+console.log('Prepared Azure-only demo image context. No credentials included.');

@@ -3,6 +3,8 @@ import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import { Pool } from "pg";
+import { createDemoBackgroundGeneration } from './demo-background-generation.mjs';
+import { createFreeDemoVideoProvider } from './free-demo-video-provider.mjs';
 
 const root = resolve(import.meta.dirname, "..");
 const organizationId = "org_fixture";
@@ -172,6 +174,19 @@ export async function startDemoServer({ port = Number(process.env.DEMO_PORT ?? 8
     mediaAssetService: createMediaAssetService(runtimePool, storage, true),
     mediaReviewService: createMediaReviewService(runtimePool, storage),
     allowedOrigins: port > 0 ? [`http://127.0.0.1:${port}`] : []
+  });
+  const motionSamplePath = resolve(root, 'output/free-generated-background.mp4');
+  const backgroundGeneration = createDemoBackgroundGeneration({
+    staticRoot: resolve(root, 'apps/web/dist'),
+    provider: createFreeDemoVideoProvider(),
+    ...(existsSync(motionSamplePath) ? { sampleVideo: { bytes: readFileSync(motionSamplePath), profile: JSON.parse(readFileSync(resolve(root, 'apps/web/dist/model/nxstage-review-scene.json'), 'utf8')).video } } : {})
+  });
+  const [applicationRequest] = server.listeners('request');
+  server.removeListener('request', applicationRequest);
+  server.on('request', (request, response) => {
+    void backgroundGeneration(request, response).then(handled => {
+      if (!handled) applicationRequest(request, response);
+    }).catch(() => { response.writeHead(500); response.end(); });
   });
   await runtime.start();
   await new Promise((resolveListen, reject) => { server.once("error", reject); server.listen(port, "127.0.0.1", resolveListen); });
