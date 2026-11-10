@@ -1,4 +1,4 @@
 pycolmap==4.0.1
 numpy==2.2.6
-Pillow==11.1.0
+Pillow==13.0.0
 scipy==1.15.3

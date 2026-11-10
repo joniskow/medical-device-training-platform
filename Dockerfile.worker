@@ -44,7 +44,7 @@ RUN apt-get update \
       blender \
       libgomp1 libgl1 libglib2.0-0 libsm6 libxext6 libxrender1 \
  && python3 -m venv /opt/pdf \
- && /opt/pdf/bin/pip install --no-cache-dir pypdf==5.9.0 \
+ && /opt/pdf/bin/pip install --no-cache-dir pypdf==6.21.4 \
  && python3 -m venv /opt/reconstruction-runtime \
  && /opt/reconstruction-runtime/bin/pip install --no-cache-dir -r /tmp/reconstruction-requirements.txt \
  && rm -rf /var/lib/apt/lists/*

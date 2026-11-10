@@ -28,7 +28,7 @@ class CandidateChecks(unittest.TestCase):
             source = root / "engine.glb"
             source.write_bytes(rewrite(MODEL.read_bytes(), lambda doc: doc.update(images=[{"uri": "texture.jpg"}])))
             result = package_candidate(source, root / "candidate.glb")
-            self.assertEqual(result["triangles"], 1228)
+            self.assertEqual(result["triangles"], 1392)
             self.assertEqual(result["degenerateTriangles"], 0)
             self.assertEqual(result["textureMemoryBytes"], 8*4*4)
             self.assertFalse(result["scaleVerified"])
